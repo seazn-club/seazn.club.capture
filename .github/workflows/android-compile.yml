@@ -47,14 +47,14 @@ jobs:
       - run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-37.0' > /dev/null
       # Reads the pnpm version from package.json `packageManager` (as check.yml).
       - uses: pnpm/action-setup@v4
-      # `registry-url` and `scope` write the @onryde registry and its `${NODE_AUTH_TOKEN}` credential to a
+      # `registry-url` and `scope` write the @seazn-club registry and its `${NODE_AUTH_TOKEN}` credential to a
       # user-level .npmrc: pnpm ignores a credential in the project's (.npmrc says why).
       - uses: actions/setup-node@v5
         with:
           node-version-file: .nvmrc
           cache: pnpm
           registry-url: https://npm.pkg.github.com
-          scope: '@onryde'
+          scope: '@seazn-club'
       - run: pnpm install --frozen-lockfile
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

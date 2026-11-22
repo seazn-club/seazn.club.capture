@@ -3,7 +3,7 @@ import type { MatchContext } from '@/domain/scoring/matchContext';
 
 /**
  * The scoring wire, parsed once, here (AGENTS §4; plan S2-1 Task 3): the web's v1 envelope as the bootstrap endpoint
- * (onryde/seazn.club#1102) and the scouted event routes answer it, `{ok:true, data, requestId}` or
+ * (seazn-club/seazn.club#1102) and the scouted event routes answer it, `{ok:true, data, requestId}` or
  * `{ok:false, error:{code, message, ...extras}, requestId}`. A wire shape stops in this file: the rest of the app sees
  * the camelCase types below. Each parser answers `null` for a body that is not its shape, never a half-read one: a
  * ledger with a hole or a match with a made-up side is worse than none.

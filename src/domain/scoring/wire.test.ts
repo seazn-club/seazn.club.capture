@@ -12,7 +12,7 @@ import {
 } from '@/domain/scoring/wire';
 
 /**
- * The shapes are the web's v1 envelope as the endpoint and the scouted routes answer them (web onryde/seazn.club#1102,
+ * The shapes are the web's v1 envelope as the endpoint and the scouted routes answer them (web seazn-club/seazn.club#1102,
  * `edc1076dba`): `{ok:true, data, requestId}` and `{ok:false, error:{code, message, ...extras}, requestId}`. Every id
  * and name is made up.
  */

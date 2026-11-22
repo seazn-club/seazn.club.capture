@@ -19,7 +19,7 @@
 set -eu
 
 if [[ -z "${NODE_AUTH_TOKEN:-}" ]]; then
-  echo "NODE_AUTH_TOKEN is not set: add it as an EAS secret that can read @onryde/seazn-engine on GitHub Packages (docs/release.md, Once 8)." >&2
+  echo "NODE_AUTH_TOKEN is not set: add it as an EAS secret that can read @seazn-club/seazn-engine on GitHub Packages (docs/release.md, Once 8)." >&2
   exit 1
 fi
 credential='//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}'

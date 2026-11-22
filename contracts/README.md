@@ -1,7 +1,7 @@
 # Contracts
 
 The web's capture contracts, vendored and pinned (plan D spec §3.1, owner ruling R7). The source of truth is the
-web repo `onryde/seazn.club`, folder `docs/contracts/`. This folder is a byte copy of the phone's contracts in that
+web repo `seazn-club/seazn.club`, folder `docs/contracts/`. This folder is a byte copy of the phone's contracts in that
 folder (`capture-*` and `fixtures/capture-*`) at one commit, and nothing here is edited by hand. The web keeps other
 services' contracts there too (`relay-job.v1`, the compositor's); they are not the phone's and stay behind (owner,
 2026-10-26, amending §3.1).

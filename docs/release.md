@@ -23,7 +23,7 @@ Steps marked _owner_ need the owner's accounts.
    Organization settings → Access tokens: make a robot user with the
    Developer role and a token for it. Add the token to GitHub as the
    repository secret `EXPO_TOKEN` (`gh secret set EXPO_TOKEN --repo
-onryde/seazn.club.capture`).
+seazn-club/seazn.club.capture`).
 2. **Upload key** (_owner_). Done: the upload key is EAS's default Android
    build credentials, `ycrj1dLXkY` (owner, 2026-10-28: "first one"), made by
    the September development builds. It is the only keystore on EAS: a
@@ -86,12 +86,12 @@ onryde/seazn.club.capture`).
    explains. Its app bundle is uploaded by hand, as above.
 8. **Engine token** (_owner_, before the next release; plan S2-1 Task 1).
    Create the EAS secret `NODE_AUTH_TOKEN`, a token that can read
-   `@onryde/seazn-engine` on GitHub Packages. The pre-install hook does the
+   `@seazn-club/seazn-engine` on GitHub Packages. The pre-install hook does the
    rest, and stops the build, saying why, if the secret is missing. Verified:
    an OAuth token from `gh` with `write:packages` (which includes reading)
    installs it. Assumed from GitHub's docs, not tried: a classic personal
    access token with `read:packages`, from an account that can read the
-   `onryde` package. A fine-grained token is not expected to work: GitHub's
+   `seazn-club` package. A fine-grained token is not expected to work: GitHub's
    docs list the npm registry among those that take classic tokens only.
 
 ## Each release

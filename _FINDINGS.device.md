@@ -920,10 +920,16 @@ the status (`503`, `not-json`, `401-not-refusal`) or `no-answer:` and the client
 `no answer: <class>` with a space and would have been masked (`StartTest`, `HttpTest`; the allow-list's `error` reason
 says so).
 
-**Not the phone's:** the Seazn-hosted start answering after 8 s. INFERRED: the server waits on the relay or the camera
-input before it answers (the relay booted 23:10:50Z to 23:11:12Z, the peer session's rows). Passed to the Seazn-hosted
-session. Raising the phone's timeout was not chosen: it sits under the core's 10 s give-ups on purpose, and the beat
-already recovers the start.
+**Not the phone's alone:** the Seazn-hosted start answering after 8 s. Measured by the Seazn-hosted session from its
+server rows (2026-11-23): the POST arrived 23:10:22.78Z (about 2.1 s after the phone sent it: network and TLS), and the
+server answered only after provisioning, at 23:10:31.25Z: two Cloudflare `create_live_input` calls in series (1.83 s,
+then 0.96 s for the programme input) and the Fly machine create (5.0 s), about 8.5 s on the server and 10.6 s from the
+phone's send. Not the relay booting, which follows the answer (an earlier inference here, wrong). Over 30 days on
+staging, YouTube operator starts averaged 5.0 s on the server (max 6.5 s) and organiser starts reached 12.4 s, so 8 s
+with the network was already marginal; the second input pushes it over. The web's side is queued (its Phase 4: create
+the inputs and the machine at once, or answer 202 before provisioning). The phone's timeout (`Http.TIMEOUT_MS`, 8 s, one
+client for every request, under the core's 10 s give-ups) is unchanged here: whether to raise the start's or read a
+timeout as pending until the next beat is the owner's call, open.
 
 **No fix, two more lines in the same record:**
 

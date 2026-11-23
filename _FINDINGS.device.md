@@ -861,3 +861,46 @@ since the operator reading it holds the phone.
 **Open, for the device:** the 426 panel. To see it on this build, staging's `COURT_MIN_APP_VERSION` must be above this
 build's commit count (its build number, `appVersion` `1.0.0-<count>`; AGENTS §11), and a court code claimed again; the
 stopped line after the court phone's own Stop and after the desk's, and the hold starting the latched match.
+
+---
+
+### N47 — A 2 s GOP sat on Cloudflare's floor, and its jitter set off `ERR_GOP_OUT_OF_RANGE`
+
+**Seen:** staging, 2026-11-23, a Seazn-hosted stream of about 9 min over SRT (camera input
+`36083d622acb214b4e13556847c61161`, session `9fc5acc1-8d6a-4910-84c7-99d1b252b246`, 22:25:24Z to 22:34:39Z).
+Cloudflare's live-input alerts reported `live_input.errored` with `ERR_GOP_OUT_OF_RANGE` twice, at 22:27:26Z and
+22:30:18Z (the Seazn-hosted session's webhook rows). The stream played on; nothing a viewer saw.
+
+**Measured, three ways:**
+
+- Cloudflare's ingest analytics (`liveInputEventsAdaptiveGroups`, sampled, the phone's own GOPs before any re-encode):
+  243 stored segments, `gopDuration` min 1986 ms, avg 1999.7 ms, max 2012 ms. `liveInputEventsAdaptive` (sampled) holds
+  `INPUT_GOP_OUT_OF_RANGE` at 22:27:26Z.
+- The recording's 240p rendition (Cloudflare's transcode), every keyframe: 276 gaps, 225 of them under 2.000 s, from
+  1.986 to 2.012 s, one 2.098 s outlier near 284 s.
+- The same rendition, every frame (16 620 decoded): every GOP is exactly 60 frames; three frame gaps over 50 ms, the
+  longest 100 ms.
+
+**Cause:** the encoder (`gopDurationInS = 2f` at 30 fps, `StreamerAdapter.kt`) makes a GOP of 60 frames, and the
+frames' timestamps jitter by a few milliseconds, so a GOP lands either side of 2000 ms. Cloudflare's requirement
+(Start Stream Live, re-read 2026-11-23) is a keyframe interval "between 2 and 10 seconds"; 2 s is the floor, and about
+half the GOPs were under it. INFERRED: the alert fires on some of those, not all (two alerts for ~225 short GOPs; the
+rule is not documented), so the trigger is the floor, not a long or variable GOP. Cloudflare's troubleshooting page
+suggests starting at 4 s.
+
+**Fix:** `gopDurationInS = 3f` (owner, 2026-11-23: "Ok 3s"). 3 s is a second from the floor whatever the jitter, inside
+2–10 s, and costs the relay about 1 s more wait for a keyframe at a start or a reconnect (the reconnect note under
+Cloudflare's input recommendations above, which named 2 s). 4 s, Cloudflare's suggested start, was not chosen: it
+doubles that wait for no gain the floor needs.
+
+**Rejected:** a peer session's first recommendation, a fixed 2 s GOP "with 1–2 s recommended", was from memory and was
+withdrawn; the phone was already at a fixed 2 s.
+
+**Verified on the device** (NE2211, build 1322, staging, 2026-11-23, session `622904ac-7e5d-4beb-8cd6-9154b1f79b02`,
+camera input `97a92a152f07602a891edccb4709527f`, about 6 min, 23:10:35Z to 23:16:23Z): Cloudflare's ingest analytics
+held 71 sampled GOPs at min 2995 ms, avg 2998.5 ms, max 3001 ms, with no `INPUT_GOP_OUT_OF_RANGE`; the Seazn-hosted
+session's webhook rows for the stream (four `ingest_status` rows) held no `live_input.errored`. The sampled events also
+held two `INPUT_DISCONNECTED` at 23:11:08Z and 23:11:15Z with no webhook alert and no gap in the relay's view (live at
+23:11:12.8Z, 30 fps throughout). INFERRED, the peer session's read: the relay's first SRT pulls of the camera input while
+it booted (23:10:50Z to 23:11:12Z), not the phone's publish. Not measured on the phone: its record of that run was not
+read.

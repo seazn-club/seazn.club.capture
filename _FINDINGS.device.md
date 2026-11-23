@@ -901,6 +901,6 @@ camera input `97a92a152f07602a891edccb4709527f`, about 6 min, 23:10:35Z to 23:16
 held 71 sampled GOPs at min 2995 ms, avg 2998.5 ms, max 3001 ms, with no `INPUT_GOP_OUT_OF_RANGE`; the Seazn-hosted
 session's webhook rows for the stream (four `ingest_status` rows) held no `live_input.errored`. The sampled events also
 held two `INPUT_DISCONNECTED` at 23:11:08Z and 23:11:15Z with no webhook alert and no gap in the relay's view (live at
-23:11:12.8Z, 30 fps throughout). INFERRED, the peer session's read: the relay's first SRT pulls of the camera input while
-it booted (23:10:50Z to 23:11:12Z), not the phone's publish. Not measured on the phone: its record of that run was not
-read.
+23:11:12.8Z, 30 fps throughout). Not the phone's publish: its record of the run (R-310M) holds one `connecting`/`connected` pair (SRT, attempt
+1, 23:10:33.5Z), `live` at 23:10:34.5Z and no reconnect until `broadcast-ended` at 23:16:22.3Z. INFERRED, the peer
+session's read: the relay's first SRT pulls of the camera input while it booted (23:10:50Z to 23:11:12Z).

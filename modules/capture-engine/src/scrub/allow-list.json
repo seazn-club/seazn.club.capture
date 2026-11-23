@@ -75,7 +75,7 @@
     "count": "both: a count; native: srt-send-dropped, the packets dropped since its last line; bitrate-held, the due raises F-P5-7's gate held since its last line or the last raise (R-990P); bitrate, on a raise only, those held since the last bitrate-held line, which no held line will say (review of #23)",
     "delivery": "native: Delivery wire",
     "endReason": "both: EndReason wire, or the server's reason word",
-    "error": "plan C: a throwable's class name only, never its message (CD30); or pair-step-late's camera-busy word; or camera-probe's refusal, Camera2's reason as a word (N45)",
+    "error": "plan C: a throwable's class name only, never its message (CD30); or pair-step-late's camera-busy word; or camera-probe's refusal, Camera2's reason as a word (N45); or start-answered's failure, a status word (503, not-json, 401-not-refusal) or no-answer: and a class name (N47)",
     "exit": "plan C: ApplicationExitInfo reason wire (CD22)",
     "failure": "native: ConnectFailure wire (connect-failed: unresolved, refused, timeout, other, unheld, camera), or StartFailure wire (start-failed)",
     "field": "native: the name of a field the server sent that could not be read, never its value (waiting-unreadable, final review I-2b)",

@@ -71,6 +71,22 @@ class StartTest {
     assertEquals(1, rig.sent<Command.PostStart>().size)
   }
 
+  // N47's run (R-310M, staging, 2026-11-23): a start that timed out at 8 s read only `answer=Failed`, with no way to
+  // tell a timeout from a 503. The line now carries the failure's detail as `error`, a plain word the scrub keeps.
+  @Test fun `a failed start records its detail, and an answer that is not a failure records none`() {
+    val rig = ready()
+    rig.starts = { StartAnswer.Failed("no-answer:SocketTimeoutException") }
+    rig.send(Input.Start)
+    val failed = rig.records("start-answered").single()
+    assertEquals(listOf<Any?>("Failed", "no-answer:SocketTimeoutException"), listOf(failed.field("answer"), failed.field("error")))
+    assertTrue(SessionRecord.PLAIN_WORD.matches("no-answer:SocketTimeoutException"), "the scrub keeps it, not masks it")
+
+    val other = ready()
+    other.starts = { StartAnswer.Replaced }
+    other.send(Input.Start)
+    assertTrue(other.records("start-answered").single().fields.none { it.first == "error" })
+  }
+
   // Court stream Task 13 (NE2211, staging): after the 3 s hold the screen still read Go live until POST start answered,
   // up to 8 s, so the operator could not tell it took. The snapshot's pairing now says starting while it is in flight.
 

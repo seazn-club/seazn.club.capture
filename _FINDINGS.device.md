@@ -904,3 +904,33 @@ held two `INPUT_DISCONNECTED` at 23:11:08Z and 23:11:15Z with no webhook alert a
 23:11:12.8Z, 30 fps throughout). Not the phone's publish: its record of the run (R-310M) holds one `connecting`/`connected` pair (SRT, attempt
 1, 23:10:33.5Z), `live` at 23:10:34.5Z and no reconnect until `broadcast-ended` at 23:16:22.3Z. INFERRED, the peer
 session's read: the relay's first SRT pulls of the camera input while it booted (23:10:50Z to 23:11:12Z).
+
+---
+
+### N48 — A start that took over 8 s read Failed, and the record could not say why
+
+**Seen:** N47's verification run (NE2211, build 1322, staging, session `622904ac…`, record R-310M). The operator's Go
+live hold was asked at 23:10:20.649Z and read `start-answered answer=Failed` at 23:10:28.660Z, 8.01 s later: the start
+POST's own timeout (`Http.TIMEOUT_MS`, 8 s). The server started the broadcast anyway: the next beat (23:10:32.5Z) said
+`Open`, and the phone armed and went live from it (`cause=operator`), as designed. The record said only `Failed`, so a
+timeout and a 503 read the same.
+
+**Fixed (phone):** `start-answered` now carries a failed answer's detail under `error`, a plain word the scrub keeps:
+the status (`503`, `not-json`, `401-not-refusal`) or `no-answer:` and the client's exception class name, which was
+`no answer: <class>` with a space and would have been masked (`StartTest`, `HttpTest`; the allow-list's `error` reason
+says so).
+
+**Not the phone's:** the Seazn-hosted start answering after 8 s. INFERRED: the server waits on the relay or the camera
+input before it answers (the relay booted 23:10:50Z to 23:11:12Z, the peer session's rows). Passed to the Seazn-hosted
+session. Raising the phone's timeout was not chosen: it sits under the core's 10 s give-ups on purpose, and the beat
+already recovers the start.
+
+**No fix, two more lines in the same record:**
+
+- One beat answered 503 at 23:11:14Z, while the relay booted; the next, at 23:11:22Z, was 200. A beat's 5xx is no
+  evidence (`NoEvidence`) and one is counted and passed over, as designed.
+- The bitrate regulator cut 3000k to 1210k for backlog between 23:13:51Z and 23:14:44Z (lost 224, 164 and 69 packets,
+  send buffer 1.2–1.7 s) and climbed again from 23:15:41Z. Not the 3 s GOP: Cloudflare's per-minute upload time, as a
+  share of the GOP's duration, peaked at 1.25 in this run and at 1.37 in N47's 2 s run, so both runs' uplinks fell
+  behind at times; the largest GOP was 1401 KB (3 s at about 3.7 Mb/s). INFERRED: the phone was on Wi-Fi (adb reached it on
+  the LAN); the record names no network.

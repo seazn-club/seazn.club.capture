@@ -380,7 +380,9 @@ internal object Verdicts {
       return Step(phase, listOf(line("start-answered", "answer" to input.answer::class.simpleName, "late" to true)))
     }
     val answered = phase.withPairing(pairing.copy(starts = pairing.starts.copy(inFlightId = null)))
-    val noted = line("start-answered", "answer" to input.answer::class.simpleName)
+    // N47: a failure's detail is a plain word, a status or no-answer: and a class name, never a value (StartAnswer.Failed).
+    val failure = (input.answer as? StartAnswer.Failed)?.let { listOf("error" to it.detail) }.orEmpty()
+    val noted = line("start-answered", "answer" to input.answer::class.simpleName, *failure.toTypedArray())
     if (answered !is Phase.Paired) return Step(answered, listOf(noted))
     val p = answered.pairing
     val named = (input.answer as? StartAnswer.Started)?.sid ?: (input.answer as? StartAnswer.AlreadyLive)?.sid

@@ -928,8 +928,18 @@ phone's send. Not the relay booting, which follows the answer (an earlier infere
 staging, YouTube operator starts averaged 5.0 s on the server (max 6.5 s) and organiser starts reached 12.4 s, so 8 s
 with the network was already marginal; the second input pushes it over. The web's side is queued (its Phase 4: create
 the inputs and the machine at once, or answer 202 before provisioning). The phone's timeout (`Http.TIMEOUT_MS`, 8 s, one
-client for every request, under the core's 10 s give-ups) is unchanged here: whether to raise the start's or read a
-timeout as pending until the next beat is the owner's call, open.
+client for every request, under the core's 10 s give-ups) is unchanged.
+
+**Fixed (phone), the owner's ruling (2026-11-23, "Pending until beat"):** a start that gets no answer (a timeout, a
+reset, a host not resolved: `no-answer:`) is not a failure. It stays pending in the pairing's `StartAsks`, the snapshot
+keeps `pairing.starting`, a second hold is ignored as one in flight is, and `waiting` beats do not end it; a beat that
+arms the phone does, with the beat's cause. Only when no beat has armed it 20 s after `start-asked`
+(`StartAsks.START_CONFIRM_MS`) is it the start failure it was (`START_FAILED`, `START_ERROR`). The record keeps
+`start-answered answer=Failed error=no-answer:…` and adds `start-pending`, then `start-unconfirmed` at the deadline. An
+answer that is a failure (a 503, a 404, a 429, a body no rule reads) still fails at once: the server answered, so it
+did not start. Leaving the pairing drops the pending with it (`StartPendingTest`). While it is pending the beats confirm it: one goes
+at once with the no-answer, then every 5 s (`BeatCadence.RETRY_MS`, the poll floor) until it clears, so a 60 s poll
+cannot leave the 20 s without a beat.
 
 **No fix, two more lines in the same record:**
 

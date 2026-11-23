@@ -399,6 +399,18 @@ describe('useUnpair', () => {
       expect(kinds(view)).toEqual(['pair', 'start', 'unpair']);
     });
 
+    // N48 (owner, 2026-11-23, "Pending until beat"): a start with no answer stays starting until a beat arms it or 20 s
+    // from its ask, read on native's next tick, so the clearing still waits for it.
+    it('still waits for a start pending a beat until native’s 20 s deadline and its tick, then unpairs', () => {
+      const { view, outcomes } = starting();
+      act(() => vi.advanceTimersByTime(20_500));
+      expect(outcomes).toEqual([]);
+      act(() => view.engine.setStartAnswer('failed'));
+      expect(kinds(view)).toEqual(['pair', 'start', 'unpair']);
+      expect(outcomes).toEqual(['idle']);
+      expect(events(view)).not.toContain('unpair.gave-up');
+    });
+
     // Fix round 2 m3: native answers a start at the latest at its bridge backstop (`BridgeCore.ANSWER_BACKSTOP_MS`, 16 s),
     // so an answer that late is still waited for.
     it('still waits for a start answered at native’s 16 s backstop, then unpairs', () => {

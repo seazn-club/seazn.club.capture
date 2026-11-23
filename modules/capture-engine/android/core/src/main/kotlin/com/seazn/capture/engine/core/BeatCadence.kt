@@ -33,9 +33,16 @@ object BeatCadence {
 
   fun clamp(pollSeconds: Int?): Int = (pollSeconds ?: DEFAULT_POLL_S).coerceIn(MIN_POLL_S, MAX_POLL_S)
 
-  fun intervalMs(pollSeconds: Int, held: Boolean): Long {
+  /**
+   * [confirming]: the hold's start got no answer and is pending a beat (N48; owner, 2026-11-23, "Pending until beat").
+   * The beats confirm it within `StartAsks.START_CONFIRM_MS`, so until it clears they go at [RETRY_MS], the poll floor,
+   * never the server's 60 s. It overrides the retry backoff ([retryMs]) for that window of at most 20 s: accepted,
+   * because the 10 s beat timeout bounds it to about 2 to 4 beats (N48).
+   */
+  fun intervalMs(pollSeconds: Int, held: Boolean, confirming: Boolean = false): Long {
     val pollMs = clamp(pollSeconds) * 1_000L
-    return if (held) minOf(pollMs, HELD_MAX_MS) else pollMs
+    val cadence = if (held) minOf(pollMs, HELD_MAX_MS) else pollMs
+    return if (confirming) minOf(cadence, RETRY_MS) else cadence
   }
 
   fun retryAfterMs(retryAfterS: Int): Long = clamp(retryAfterS) * 1_000L

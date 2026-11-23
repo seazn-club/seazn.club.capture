@@ -225,10 +225,17 @@ class HttpTest {
   }
 
   @Test
-  fun `C0b a start that timed out frees the hold - the operator's next hold posts again`() {
+  fun `C0b a start that timed out waits for a beat, then frees the hold 20 s after its ask - the next hold posts again`() {
     val rig = readyRig()
     rig.starts = { id -> HttpAnswers.start(id, HttpOutcome.failed(SocketTimeoutException("timeout"))).answer }
+    val askedAt = rig.mono
     rig.send(Input.Start)
+    // N48 (owner, 2026-11-23, "Pending until beat"): no answer is not a failure, and the hold stays taken.
+    assertEquals(null, assertIs<Phase.Paired>(rig.phase).pairing.refusal)
+    rig.send(Input.Start)
+    assertEquals(1, rig.sent<Command.PostStart>().size)
+    rig.at(askedAt + StartAsks.START_CONFIRM_MS)
+    rig.send(Input.Tick)
     assertEquals(Refusal.START_FAILED, assertIs<Phase.Paired>(rig.phase).pairing.refusal)
     rig.send(Input.Start)
     assertEquals(2, rig.sent<Command.PostStart>().size)

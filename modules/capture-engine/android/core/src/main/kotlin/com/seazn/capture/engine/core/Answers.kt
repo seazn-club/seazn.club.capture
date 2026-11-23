@@ -114,6 +114,17 @@ sealed interface StartAnswer {
    */
   data class Refused(val refusal: Refusal, val message: String? = null) : StartAnswer
 
-  /** No answer, 404, 422, 429, 5xx, or a body no rule can read. [detail] is a status or a reason, never a value. */
-  data class Failed(val detail: String) : StartAnswer
+  /**
+   * No answer, 404, 422, 429, 5xx, or a body no rule can read. [detail] is a status or a reason, never a value; no
+   * answer at all is [NO_ANSWER] and the client's word, which [noAnswer] reads (N48: pending, not failed).
+   */
+  data class Failed(val detail: String) : StartAnswer {
+    val noAnswer: Boolean
+      get() = detail.startsWith(NO_ANSWER)
+
+    companion object {
+      /** The detail's prefix when the request got no answer: a timeout, a reset, a host not resolved. */
+      const val NO_ANSWER = "no-answer:"
+    }
+  }
 }

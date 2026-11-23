@@ -450,7 +450,8 @@ internal object Timers {
       is Phase.Connecting -> connecting(phase, now)
       is Phase.OnAir -> onAir(phase, now)
       is Phase.Arming -> Starts.tick(phase, now)
-      is Phase.Idle, is Phase.Pairing, is Phase.Paired, is Phase.Armed, is Phase.Ended -> Step(phase)
+      is Phase.Paired -> Verdicts.unconfirmed(phase, now)
+      is Phase.Idle, is Phase.Pairing, is Phase.Armed, is Phase.Ended -> Step(phase)
     }
 
   private fun connecting(connecting: Phase.Connecting, now: Now): Step {
@@ -682,7 +683,7 @@ internal object Heartbeats {
     val phase = step.phase
     val pairing = phase.beating ?: return step
     val held = phase.heldSid
-    val interval = BeatCadence.intervalMs(pairing.waiting.pollSeconds, held = held != null)
+    val interval = BeatCadence.intervalMs(pairing.waiting.pollSeconds, held = held != null, confirming = pairing.starts.pending)
     val (heartbeat, id) = Heartbeat.due(pairing.heartbeat, now.monoMs, now.wallMs, interval)
     val commands = step.commands.toMutableList()
     val timedOut = heartbeat.failures > pairing.heartbeat.failures

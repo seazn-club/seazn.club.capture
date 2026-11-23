@@ -705,10 +705,12 @@ thermal member. Only transport trouble degrades a session.
   marker, so a process death before JS hears it still reads
   `unpaired.reason: forgotten` at the next start. JS reconciles from the
   snapshot. Any other phase removes the action; a tap that lands late is
-  ignored and recorded. While the operator's own Go live is in flight the
-  phone is still paired, so the action still shows, and a tap there is
-  ignored and recorded (`intent-ignored {intent: forget, phase: paired}`; M1
-  of the Batch 4 review, the controller's ruling, 2026-10-12). Native's
+  ignored and recorded. While the operator's own Go live is in flight, or
+  unanswered and waiting up to 20 s from the ask for a beat to confirm it
+  (N48; owner, 2026-11-23: "Pending until beat"), the phone is still paired,
+  so the action still shows, and a tap there is ignored and recorded
+  (`intent-ignored {intent: forget, phase: paired}`; M1 of the Batch 4
+  review, the controller's ruling, 2026-10-12). Native's
   `unpair` (Home's Forget, a court's Leave) has the same guard. A court's
   pairing carries no Forget, on the notification or on Home's Continue card
   (O12; owner, 2026-11-15 and 2026-11-16): Exit (⋯, which asks first) is the

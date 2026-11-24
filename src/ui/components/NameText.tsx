@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import type { NativeSyntheticEvent, TextLayoutEventData, TextProps } from 'react-native';
+import type { TextLayoutEvent, TextProps } from 'react-native';
 import { breaksInsideWord, isOneWord, splitInTwo } from '@/ui/components/nameFit';
 import { Text } from '@/ui/components/Text';
 import type { TypeRole } from '@/ui/theme/type';
@@ -70,7 +70,7 @@ function FittedName({ lines, floor, children, ...rest }: FittedNameProps) {
   const [brokeIn, setBrokeIn] = useState<string | null>(null);
   const splits = lines !== undefined && lines >= 2;
   const laidOut = useCallback(
-    (event: NativeSyntheticEvent<TextLayoutEventData>) => {
+    (event: TextLayoutEvent) => {
       if (splits && breaksInsideWord(linesOf(event))) setBrokeIn(children);
     },
     [children, splits],
@@ -89,5 +89,4 @@ function FittedName({ lines, floor, children, ...rest }: FittedNameProps) {
   );
 }
 
-const linesOf = (event: NativeSyntheticEvent<TextLayoutEventData>) =>
-  event.nativeEvent.lines.map((line) => line.text);
+const linesOf = (event: TextLayoutEvent) => event.nativeEvent.lines.map((line) => line.text);

@@ -4,27 +4,20 @@
  * TypeScript plugin by itself and resolves no `.ts` import from it.
  *
  * StreamPack 3.2.1 and its graph carry Kotlin metadata 2.4.0, which a Kotlin compiler reads only from
- * 2.3.0 on (one metadata version ahead of its own). Expo 57's `android.kotlinVersion`
- * (expo-build-properties) sets Expo's own `kotlinVersion` and never the compiler: the root build.gradle
- * names the Kotlin Gradle plugin with no version, so React Native 0.86's Gradle plugin brings its own
- * 2.1.20. [pinKotlinGradlePlugin] gives that classpath the version app.json asks for, so the one knob
- * reaches the compiler. Remove it when Expo or React Native ship Kotlin 2.3 or newer.
+ * 2.3.0 on (one metadata version ahead of its own). Through Expo 57 the root build.gradle named the Kotlin
+ * Gradle plugin with no version, so React Native's Gradle plugin brought its own (2.1.20), and this plugin
+ * wrote app.json's `android.kotlinVersion` into the classpath. Expo 58's template versions that classpath
+ * from the `android.kotlinVersion` Gradle property itself, which expo-build-properties writes, so app.json's
+ * one knob reaches the compiler with no edit. [checkKotlinGradlePlugin] now only checks that the template
+ * still does, and that the version reads metadata 2.4: a build that missed either would fail far from here,
+ * on StreamPack's metadata.
  */
 
-import {
-  type ConfigPlugin,
-  withGradleProperties,
-  withProjectBuildGradle,
-} from 'expo/config-plugins';
+import { type ConfigPlugin, withProjectBuildGradle } from 'expo/config-plugins';
 
-export type GradleProperty =
-  | { type: 'property'; key: string; value: string }
-  | { type: 'comment'; value: string }
-  | { type: 'empty' };
-
-/** Any classpath line for the Kotlin Gradle plugin, with or without a version. */
-const KOTLIN_GRADLE_PLUGIN =
-  /classpath\('org\.jetbrains\.kotlin:kotlin-gradle-plugin(?::[^']*)?'\)/g;
+/** Expo 58's two template lines that take the Kotlin Gradle plugin's version from the property. */
+const FROM_PROPERTY = "def kotlinVersion = findProperty('android.kotlinVersion')";
+const VERSIONED_FROM_PROPERTY = '"org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion"';
 
 /** The oldest compiler that reads metadata 2.4.0: one metadata version ahead of its own. */
 const READS_METADATA_2_4 = (version: string): boolean => {
@@ -35,29 +28,24 @@ const READS_METADATA_2_4 = (version: string): boolean => {
 };
 
 /**
- * The root build.gradle with its one Kotlin Gradle plugin classpath at [version]. A template that names
- * the plugin other than once has changed under us, and is refused rather than left at React Native's
- * Kotlin: that build would fail far from here, on StreamPack's metadata.
+ * The root build.gradle, unchanged, once it is known to version the Kotlin Gradle plugin from
+ * `android.kotlinVersion` and [version] is known to read metadata 2.4. A template that does not is refused
+ * rather than left at React Native's Kotlin.
  */
-export function pinKotlinGradlePlugin(buildGradle: string, version: string): string {
+export function checkKotlinGradlePlugin(buildGradle: string, version: string): string {
   if (!READS_METADATA_2_4(version)) {
     throw new Error(
       `capture-engine: android.kotlinVersion ${JSON.stringify(version)} must be Kotlin 2.3.0 or newer, which reads StreamPack 3.2.1's metadata 2.4 (C7u)`,
     );
   }
-  const found = buildGradle.match(KOTLIN_GRADLE_PLUGIN)?.length ?? 0;
-  if (found !== 1) {
+  if (!buildGradle.includes(FROM_PROPERTY) || !buildGradle.includes(VERSIONED_FROM_PROPERTY)) {
     throw new Error(
-      `capture-engine: the root build.gradle names the Kotlin Gradle plugin ${found} times, expected once: the Expo template changed (C7u)`,
+      'capture-engine: the root build.gradle no longer versions the Kotlin Gradle plugin from android.kotlinVersion: the Expo template changed (C7u)',
     );
   }
-  return buildGradle.replace(
-    KOTLIN_GRADLE_PLUGIN,
-    `classpath('org.jetbrains.kotlin:kotlin-gradle-plugin:${version}')`,
-  );
+  return buildGradle;
 }
 
-/** expo-build-properties' `android.kotlinVersion` and `android.compileSdkVersion`: app.json holds each once. */
 export function buildPropertiesOf(plugins: readonly unknown[] | undefined): {
   kotlinVersion: string;
   compileSdk: number;
@@ -84,32 +72,16 @@ export function buildPropertiesOf(plugins: readonly unknown[] | undefined): {
   return { kotlinVersion, compileSdk };
 }
 
-const SUPPRESS_KEY = 'android.suppressUnsupportedCompileSdk';
-
 /**
- * AGP 8.12 was tested up to compile SDK 36 and warns at 37, naming this property and the value it takes
- * (`37.0`, its own spelling). One entry, whatever ran before.
- */
-export function withSuppressedCompileSdk(
-  items: GradleProperty[],
-  compileSdk: number,
-): GradleProperty[] {
-  const others = items.filter((item) => !(item.type === 'property' && item.key === SUPPRESS_KEY));
-  return [...others, { type: 'property', key: SUPPRESS_KEY, value: `${compileSdk}.0` }];
-}
-
-/**
- * The capture engine's prebuild (C7u): the Kotlin compiler app.json's expo-build-properties names, and
- * AGP's own suppression for the compile SDK it names. app.json runs this after expo-build-properties.
+ * The capture engine's prebuild (C7u): a check that the Kotlin compiler is the one app.json's
+ * expo-build-properties names. app.json runs this after expo-build-properties. Through Expo 57 it also set
+ * `android.suppressUnsupportedCompileSdk=37.0`, since AGP 8.12 was tested up to compile SDK 36; AGP 9.2.1
+ * (Expo 58) configures compile SDK 37 with no warning, so the property went with that SDK.
  */
 const withCaptureEngine: ConfigPlugin = (config) => {
-  const { kotlinVersion, compileSdk } = buildPropertiesOf(config.plugins);
-  const pinned = withProjectBuildGradle(config, (mod) => {
-    mod.modResults.contents = pinKotlinGradlePlugin(mod.modResults.contents, kotlinVersion);
-    return mod;
-  });
-  return withGradleProperties(pinned, (mod) => {
-    mod.modResults = withSuppressedCompileSdk(mod.modResults as GradleProperty[], compileSdk);
+  const { kotlinVersion } = buildPropertiesOf(config.plugins);
+  return withProjectBuildGradle(config, (mod) => {
+    mod.modResults.contents = checkKotlinGradlePlugin(mod.modResults.contents, kotlinVersion);
     return mod;
   });
 };

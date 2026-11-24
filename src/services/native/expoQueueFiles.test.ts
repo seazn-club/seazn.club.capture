@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
- * A stand-in for expo-file-system 57.0.7's `File`, `Directory` and `Paths`, written from its installed declarations
- * (build/File.d.ts, Directory.d.ts): a path-keyed map. What it cannot say is what the platform does (an atomic rename,
+ * A stand-in for expo-file-system 58.0.14's `File`, `Directory` and `Paths`, written from its installed declarations
+ * (build/internal/NativeFileSystem.types.d.ts): a path-keyed map. What it cannot say is what the platform does (an atomic rename,
  * a write that survives a kill): those are device-only claims, settled on a phone.
  */
 const disk = vi.hoisted(() => ({
@@ -41,7 +41,10 @@ vi.mock('expo-file-system', () => {
       if (text === undefined) throw new Error('no such file');
       return text;
     }
-    write(text: string): void {
+    // 58.0.14: `write` is asynchronous (internal/NativeFileSystem.types.d.ts, `write(...): Promise<void>`; it was
+    // synchronous through 57). The text lands on a later task, so a write nobody awaits is still pending.
+    async write(text: string): Promise<void> {
+      await new Promise((resolve) => setTimeout(resolve, 0));
       step(`write ${this.name}`);
       disk.files.set(this.uri, text);
     }
@@ -145,6 +148,16 @@ describe('the queue folder over expo-file-system', () => {
     await files.remove('a.json');
     await files.remove('a.json');
     expect(disk.files.size).toBe(0);
+  });
+
+  // SDK 58: `File.write` returns a promise. The store moves the temp file over the queue right after a write
+  // (`tapQueueStore`), so a write that resolves before its text is on disk would move an empty or missing file.
+  it('resolves a write only once its text is on disk', async () => {
+    const files = createExpoQueueFiles('scoring');
+    await files.write('a.json.tmp', 'new');
+    expect(disk.files.get(`${FOLDER}/a.json.tmp`)).toBe('new');
+    await files.move('a.json.tmp', 'a.json');
+    expect(disk.files.get(`${FOLDER}/a.json`)).toBe('new');
   });
 
   it('lets a failure through, so the store can say so: a write the disk refuses rejects', async () => {

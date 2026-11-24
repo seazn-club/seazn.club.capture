@@ -309,16 +309,17 @@ class DeliveryWatchTest {
   }
 
   @Test
-  fun `F-P5-13 a master that 204s 6 s after the last advance shows stalled, with no lag`() {
+  fun `F-P5-13 a master that 204s STALLED_AFTER_MS after the last advance shows stalled, with no lag`() {
     val harness = Harness(DeliveryWatch(master))
-    harness.run(0, 16_000) { t, url ->
+    harness.run(0, 20_000) { t, url ->
       when {
         t > 10_000 && url == polled -> FetchResult.NoContent
         url == polled -> FetchResult.Body(masterText())
         else -> FetchResult.Body(mediaText(100 + t / 2_000))
       }
     }
-    assertEquals(Delivery.STALLED, harness.watch.delivery, "6 s = 3 × 2 s since the last advance at 10 s")
+    // S5: 9 s = 3 × 3 s since the last advance at 10 s; the first poll past it is at 20 s.
+    assertEquals(Delivery.STALLED, harness.watch.delivery, "9 s = 3 × 3 s since the last advance at 10 s")
     assertNull(harness.watch.deliveredLagMs)
   }
 
@@ -354,7 +355,8 @@ class DeliveryWatchTest {
   @Test
   fun `re-review 7 a rebaseline after the first advance still shows stalled at STALLED_AFTER_MS`() {
     val lastAdvance = 10_000L // the advancing run below moves the head every configured segment up to here
-    val stalledAt = lastAdvance + DeliveryWatch.STALLED_AFTER_MS
+    // The first poll at or past STALLED_AFTER_MS after the last advance (S5: 9 s is not on the 2 s poll grid).
+    val stalledAt = (lastAdvance + DeliveryWatch.STALLED_AFTER_MS + DeliveryWatch.POLL_MS - 1) / DeliveryWatch.POLL_MS * DeliveryWatch.POLL_MS
     assertTrue(stalledAt - lastAdvance < DeliveryWatch.NOT_DELIVERED_MS)
     val previousHead = 100 + lastAdvance / DeliveryWatch.CONFIGURED_SEGMENT_MS
     val rebaselines = listOf<Pair<String, (Long, String) -> FetchResult>>(
@@ -383,11 +385,14 @@ class DeliveryWatchTest {
   }
 
   @Test
-  fun `F-P5-4 stalled shows at exactly three configured segments without an advance`() {
+  fun `F-P5-4 stalled shows at the first poll past three configured segments without an advance`() {
+    // S5: three 3 s segments, 9 s, between the polls at 18 s and 20 s.
     val harness = Harness(DeliveryWatch(master))
     harness.run(0, 10_000, answer = respond { t -> mediaText(100 + t / 2_000, target = 8) })
-    harness.run(10_500, 16_000, answer = respond { mediaText(105, target = 8) })
-    assertEquals(Delivery.STALLED, harness.watch.delivery, "6 s = 3 × 2 s since the last advance at 10 s")
+    harness.run(10_500, 18_000, answer = respond { mediaText(105, target = 8) })
+    assertEquals(Delivery.OK, harness.watch.delivery, "8 s since the last advance at 10 s, under 9 s")
+    harness.run(18_500, 20_000, answer = respond { mediaText(105, target = 8) })
+    assertEquals(Delivery.STALLED, harness.watch.delivery, "10 s since the last advance at 10 s: past 9 s = 3 × 3 s")
   }
 
   @Test
@@ -463,15 +468,15 @@ class DeliveryWatchTest {
 
   @Test
   fun `a playlist that slid past the last head seen is progress, never a crash`() {
-    // Answered at 0 s, failing until 18 s, then at 20 s it lists 108 to 110: every segment listed is new, and
-    // 101 to 107 came and went unlisted.
+    // Answered at 0 s, failing until 22 s, then at 24 s it lists 106 to 108: every segment listed is new, and
+    // 101 to 105 came and went unlisted, credited at the configured 3 s (S5).
     val harness = Harness(DeliveryWatch(master))
-    harness.run(0, 0, answer = respond { mediaText(100) })
-    harness.run(500, 18_000) { _, _ -> FetchResult.Failed("timeout") }
-    harness.run(18_500, 20_000, answer = respond { mediaText(110) })
+    harness.run(0, 0, answer = respond { gopText(100, 3) })
+    harness.run(500, 22_000) { _, _ -> FetchResult.Failed("timeout") }
+    harness.run(22_500, 24_000, answer = respond { gopText(108, 3) })
     assertEquals(Delivery.OK, harness.watch.delivery)
     assertEquals(0L, harness.watch.sinceAdvanceMs)
-    assertEquals(20_000L, harness.watch.mediaMs, "ten 2 s segments since 100: seven unlisted, three listed")
+    assertEquals(24_000L, harness.watch.mediaMs, "eight 3 s segments since 100: five unlisted, three listed")
     assertEquals(0L, harness.watch.deliveredLagMs)
   }
 
@@ -523,31 +528,31 @@ class DeliveryWatchTest {
 
   @Test
   fun `F-P5-13 a fetch outage longer than the listed window is not lag`() {
-    // Healthy throughout; every fetch from 20.5 s to 79.5 s is a 503. At 80 s the playlist lists 138 to 140,
-    // so 111 to 137 were never listed at a poll. They are credited at the configured 2 s.
+    // Healthy throughout, a 3 s segment every 3 s; every fetch from 20.5 s to 79.5 s is a 503. At 80 s the playlist
+    // lists 124 to 126, so 107 to 123 were never listed at a poll. They are credited at the configured 3 s (S5).
     val harness = Harness(DeliveryWatch(master))
-    val healthy = respond { t -> mediaText(100 + t / 2_000) }
+    val healthy = respond { t -> gopText(100 + t / 3_000, 3) }
     harness.run(0, 20_000, answer = healthy)
     harness.run(20_500, 79_500) { _, _ -> FetchResult.HttpError(503) }
     harness.run(80_000, 120_000, answer = healthy)
     assertNull(harness.verdict)
     assertEquals(Delivery.OK, harness.watch.delivery)
-    assertEquals(120_000L, harness.watch.mediaMs, "heads 100 to 160: 60 segments of 2 s, 27 never listed at a poll")
+    assertEquals(120_000L, harness.watch.mediaMs, "heads 100 to 140: 40 segments of 3 s, 17 never listed at a poll")
     assertEquals(0L, harness.watch.deliveredLagMs)
   }
 
   @Test
   fun `F-P5-13 a drip hidden behind a fetch outage is lagging once fetches return`() {
-    // One 2 s segment every 15 s, and every fetch fails from 0.5 s to 59.5 s. At 60 s the playlist lists 102 to
-    // 104, so 101 went unlisted: 4 segments, 8 s, delivered in 60 s published. Lag growth: 60 − 8 = 52 s.
+    // One 3 s segment every 15 s, and every fetch fails from 0.5 s to 59.5 s. At 60 s the playlist lists 102 to
+    // 104, so 101 went unlisted: 4 segments, 12 s, delivered in 60 s published. Lag growth: 60 − 12 = 48 s.
     val harness = Harness(DeliveryWatch(master))
-    harness.run(0, 0, answer = respond { mediaText(100) })
+    harness.run(0, 0, answer = respond { gopText(100, 3) })
     harness.run(500, 59_500) { _, _ -> FetchResult.Failed("timeout") }
-    harness.run(60_000, 60_000, answer = respond { t -> mediaText(100 + t / 15_000) })
+    harness.run(60_000, 60_000, answer = respond { t -> gopText(100 + t / 15_000, 3) })
     val (at, verdict) = harness.verdict!!
     assertEquals(60_000L, at)
     assertEquals(NotDeliveredCause.LAGGING, verdict.cause)
-    assertEquals(52_000L, verdict.lagGrowthMs)
+    assertEquals(48_000L, verdict.lagGrowthMs)
   }
 
   @Test
@@ -800,5 +805,69 @@ class DeliveryWatchTest {
     val harness = Harness(DeliveryWatch(master))
     harness.run(0, 300_000, answer = respond { t -> mediaText(100 + t * 7 / 20_000) })
     assertNull(harness.verdict)
+  }
+
+  /** A media playlist of [seconds]-second segments, [head] − 2 to [head], as Cloudflare cuts them at the encoder's GOP. */
+  private fun gopText(head: Long, seconds: Int): String {
+    val first = head - 2
+    val segments = (first..head).joinToString("") { "#EXTINF:$seconds.000,\nseg$it.ts\n" }
+    return "#EXTM3U\n#EXT-X-TARGETDURATION:$seconds\n#EXT-X-MEDIA-SEQUENCE:$first\n$segments"
+  }
+
+  @Test
+  fun `S5 the configured segment is the encoder's GOP - 3 s since N47 - so stalled waits 9 s and not-delivered stays 20 s`() {
+    assertEquals(Encode.GOP_MS, DeliveryWatch.CONFIGURED_SEGMENT_MS)
+    assertEquals(3_000L, DeliveryWatch.CONFIGURED_SEGMENT_MS)
+    assertEquals(9_000L, DeliveryWatch.STALLED_AFTER_MS)
+    assertEquals(20_000L, DeliveryWatch.NOT_DELIVERED_MS, "its own number, not ten segments")
+  }
+
+  /**
+   * S5 (N47): with a 3 s GOP Cloudflare's segments are 3 s, or 6 s when it aligns to two GOPs, and a segment reaches the
+   * playlist a little after it ends. Here each is listed 100 ms or 2.1 s after its end, alternately, so in real time on
+   * average: polled every 2 s, two advances are seen 8 s apart, and the 6 s threshold read a healthy stream as stalled
+   * at the look in between. Never stalled from the first advance on, 3 s or 6 s.
+   */
+  @Test
+  fun `S5 a healthy stream of 3 s or 6 s segments listed with 2 s of jitter never reads stalled`() {
+    for (seconds in listOf(3, 6)) {
+      val segmentMs = seconds * 1_000L
+      val listedAt = { k: Long -> segmentMs * k + if (k % 2 == 1L) 2_100 else 100 }
+      val head = { t: Long -> 100 + generateSequence(1L) { it + 1 }.takeWhile { listedAt(it) <= t }.count() }
+      val harness = Harness(DeliveryWatch(master))
+      val seen = mutableListOf<Delivery>()
+      var t = 0L
+      while (t <= 120_000) {
+        harness.run(t, t, answer = respond { at -> gopText(head(at).toLong(), seconds) })
+        seen += harness.watch.delivery
+        t += 500
+      }
+      val fromFirstOk = seen.dropWhile { it != Delivery.OK }
+      assertTrue(fromFirstOk.isNotEmpty(), "$seconds s: never delivered")
+      assertFalse(Delivery.STALLED in fromFirstOk, "$seconds s segments read stalled at ${seen.indexOf(Delivery.STALLED) * 500} ms")
+      assertNull(harness.verdict, "$seconds s")
+    }
+  }
+
+  /** Review of 98c12ffa (a): the switch's grace ends once the playlist moves in the new session; a stall after is judged. */
+  @Test
+  fun `the switch grace ends at the new session's first advance, so a stall after it is not-delivered 20 s on`() {
+    val harness = Harness(DeliveryWatch(master).switched(0))
+    harness.run(0, 6_000, answer = respond { t -> mediaText(100 + t / 2_000) })
+    assertTrue(harness.watch.advancedInSession)
+    harness.run(6_500, 40_000, answer = respond { mediaText(103) })
+    val (at, verdict) = harness.verdict ?: error("no verdict inside the grace after an advance")
+    assertEquals(NotDeliveredCause.STALLED, verdict.cause)
+    assertTrue(at < DeliveryWatch.SWITCH_GRACE_MS, "verdict at $at")
+    assertEquals(26_000L, at, "20 s of publishing after the last advance, at 6 s")
+  }
+
+  /** Review of 98c12ffa (d): a look inside the grace shows no lag, as a look with no evidence shows none. */
+  @Test
+  fun `a look inside the switch grace shows no delivered lag`() {
+    val harness = Harness(DeliveryWatch(master).switched(0))
+    harness.run(0, 4_000, answer = respond { mediaText(100) })
+    assertTrue(harness.watch.lags.isNotEmpty(), "the looks were taken")
+    assertNull(harness.watch.deliveredLagMs)
   }
 }

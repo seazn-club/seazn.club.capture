@@ -13,6 +13,13 @@ object Encode {
   const val FLOOR_BPS = 500_000
   const val START_BPS = 1_500_000
 
+  /**
+   * N47: the encoder's keyframe interval, 3 s (owner, 2026-11-23: "Ok 3s"), a second clear of Cloudflare's 2 s floor.
+   * The adapter configures the encoder with it, and the delivery watch's segment is it ([DeliveryWatch.CONFIGURED_SEGMENT_MS]),
+   * so the two cannot drift apart again (S5).
+   */
+  const val GOP_MS = 3_000L
+
   /** AAC at 128k, set at arm and never regulated. */
   const val AUDIO_BPS = 128_000
 

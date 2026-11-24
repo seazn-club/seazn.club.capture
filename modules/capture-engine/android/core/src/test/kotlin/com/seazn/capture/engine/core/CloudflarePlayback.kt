@@ -31,10 +31,13 @@ object CloudflarePlayback {
       listed
   }
 
-  /** A rendition's media playlist: three 2 s segments ending at [head], no `EXT-X-ENDLIST` (none came after the stop either). */
-  fun rendition(head: Long): String {
+  /**
+   * A rendition's media playlist: three [seconds]-second segments ending at [head], no `EXT-X-ENDLIST` (none came after
+   * the stop either). Stg's were 2 s, under the 2 s GOP; the 3 s GOP (N47) makes them 3 s, DEVICE-UNVERIFIED.
+   */
+  fun rendition(head: Long, seconds: Int = 2): String {
     val first = head - 2
-    val segments = (first..head).joinToString("") { "#EXTINF:2.000,\n${token("s")}_$it.m4s\n" }
+    val segments = (first..head).joinToString("") { "#EXTINF:$seconds.000,\n${token("s")}_$it.m4s\n" }
     return "#EXTM3U\n#EXT-X-VERSION:6\n#EXT-X-TARGETDURATION:3\n#EXT-X-MEDIA-SEQUENCE:$first\n$segments"
   }
 

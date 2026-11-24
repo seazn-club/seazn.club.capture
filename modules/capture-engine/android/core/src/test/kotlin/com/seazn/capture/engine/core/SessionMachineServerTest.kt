@@ -84,7 +84,9 @@ class SessionMachineServerTest {
           Configs.PLAYBACK_URL -> if (case.nothingLive) FetchResult.NoContent else FetchResult.Body(CloudflarePlayback.master(rig.mono.toInt()))
           manifest + CloudflarePlayback.RENDITIONS.first() -> {
             val moved = case.advanceAt?.let { at -> sinceLive()?.let { (it - at).coerceAtLeast(0) } } ?: 0
-            FetchResult.Body(CloudflarePlayback.rendition(97 + moved / DeliveryWatch.CONFIGURED_SEGMENT_MS))
+            // S5: a segment every configured segment, as long as one, so delivery keeps time with publishing.
+            val seconds = (DeliveryWatch.CONFIGURED_SEGMENT_MS / 1_000).toInt()
+            FetchResult.Body(CloudflarePlayback.rendition(97 + moved / DeliveryWatch.CONFIGURED_SEGMENT_MS, seconds))
           }
           else -> FetchResult.HttpError(404)
         }

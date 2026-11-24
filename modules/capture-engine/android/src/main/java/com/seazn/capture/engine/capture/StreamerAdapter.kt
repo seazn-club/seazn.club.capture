@@ -431,7 +431,8 @@ class StreamerAdapter(
       resolution = Size(Encode.WIDTH, Encode.HEIGHT),
       fps = 30,
       // N47: 3 s, not 2 s. Cloudflare requires 2–10 s and a 60-frame GOP's timing jitter (1986–2012 ms) crossed the floor.
-      gopDurationInS = 3f,
+      // S5: one constant, which the delivery watch's segment is too.
+      gopDurationInS = Encode.GOP_MS / 1_000f,
       customize = { _ -> EncoderKeys.VIDEO.forEach { (key, value) -> setInteger(key, value) } },
     )
 

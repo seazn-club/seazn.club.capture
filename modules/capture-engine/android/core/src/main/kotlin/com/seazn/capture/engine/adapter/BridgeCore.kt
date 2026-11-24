@@ -274,6 +274,9 @@ class BridgeCore(
   /** P3: the notification's language, the pairing's until `setLanguage` replaces it; null with no pairing. Any thread. */
   fun language(): String? = language
 
+  /** N49: the attempt a switch of the default network is stamped with, as the platform sees it. Any thread. */
+  fun attemptInHand(): Int = engine.phase.attemptInHand
+
   /**
    * From any thread (A11): the platform's facts; null leaves a fact as it was. Sent only when a check
    * changes. Sound is the mic's availability, never its level (spec §4): any finite [audioPeak] is an

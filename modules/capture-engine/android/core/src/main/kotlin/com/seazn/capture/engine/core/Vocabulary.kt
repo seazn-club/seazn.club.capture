@@ -123,3 +123,18 @@ data class DeviceSample(
   val drainPctPerHour: Double?,
   val shed: ShedStep?,
 )
+
+/** N49: what the machine made of a switch of the default network, the `network-switched` line's `result`. */
+enum class NetworkSwitch(override val wire: String) : Wire {
+  /** On air, on the attempt in hand, with no outage: the attempt was replaced at once. */
+  REPLACED("replaced"),
+
+  /** An outage or its hold is in progress: its own reconnect is the replace, so no second one starts. */
+  IN_OUTAGE("in-outage"),
+
+  /** Seen on an attempt the machine has since replaced, on the new network. */
+  STALE("stale"),
+
+  /** Nothing is publishing, so no socket is on the old network: only recorded. */
+  NOT_ON_AIR("not-on-air"),
+}

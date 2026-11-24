@@ -78,6 +78,14 @@ sealed interface Input {
    */
   data class Network(val validated: Boolean) : Input
 
+  /**
+   * N49: the default network became another validated network, which [DefaultNetwork] decides. A socket already open
+   * stays on the network it was opened on until that network dies, so on air the machine replaces it at once
+   * ([Transports.networkSwitched]). [attemptId] is the attempt in hand when the platform saw it: one older than the
+   * machine's when it lands was replaced in between, on the new network, and is stale.
+   */
+  data class NetworkSwitched(val attemptId: Int) : Input
+
   /** Another app opened a camera while ours is held (F-P5-9). */
   data object CameraContended : Input
 

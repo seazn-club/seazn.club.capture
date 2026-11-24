@@ -72,6 +72,7 @@ object SessionMachine {
       is Input.Frames -> Transports.frames(phase, input, now)
       is Input.Link -> Transports.link(phase, input, now)
       is Input.Network -> network(phase, input.validated, now)
+      is Input.NetworkSwitched -> Transports.networkSwitched(phase, input.attemptId, now)
       Input.CameraContended -> Devices.contended(phase)
       Input.CameraReleased -> Devices.released(phase)
       is Input.CameraReopened -> Devices.reopened(phase, input.ok, now)
@@ -348,6 +349,36 @@ internal object Transports {
     val next = session.copy(fallback = decision.policy, regulation = BitrateRegulator.afterDrop(session.regulation, now.monoMs))
     val waiting = ConnectStep.Waiting(now.monoMs + SessionMachine.RETRY_MS)
     return Step(Phase.Connecting(next, decision.policy.current, waiting, outage), commands)
+  }
+
+  /**
+   * N49: the default network became another validated one ([DefaultNetwork]). The attempt's socket stays on the old
+   * network until that network dies, which on 2026-11-24 took the delivery watch's stall verdict, 22 s, to find. On air,
+   * on the attempt in hand and with no outage, the attempt is replaced at once, through [replace] as a new ingest
+   * session is, on the transport in hand, RTMPS after a fallback included; the new socket opens on the new default.
+   *
+   * It opens an outage, so the hold bounds the reconnect as it bounds a drop's. Its cause is [ReconnectCause.UPLINK_LOST]:
+   * the snapshot's word for an uplink being replaced, which JS already reads; the `network-switched` line before the
+   * `connecting` one names the switch. It is no failure: the fallback policy never hears it. The delivery watch is left
+   * as a drop leaves it: only a not-delivered verdict starts its session again.
+   *
+   * Anything else is only recorded, a switch being rare and the record the one place that can say why a stall followed:
+   * an outage in progress (its own reconnect is the replace, so no second one starts), an attempt the machine has since
+   * replaced (on the new network), and every phase that publishes nothing.
+   */
+  fun networkSwitched(phase: Phase, attemptId: Int, now: Now): Step {
+    val result =
+      when {
+        phase !is Phase.OnAir -> if ((phase as? Phase.Connecting)?.outage != null) NetworkSwitch.IN_OUTAGE else NetworkSwitch.NOT_ON_AIR
+        phase.attemptId != attemptId -> NetworkSwitch.STALE
+        phase.outage != null -> NetworkSwitch.IN_OUTAGE
+        else -> NetworkSwitch.REPLACED
+      }
+    val line = record("network-switched", "result" to result, "attempt" to attemptId, "phase" to phase.name)
+    if (phase !is Phase.OnAir || result != NetworkSwitch.REPLACED) return Step(phase, listOf(line))
+    val outage = outageFor(phase.session, phase.transport, now, ReconnectCause.UPLINK_LOST)
+    val step = replace(phase, phase.session, outage, now) { Command.StartNewSession(phase.attemptId, it) }
+    return step.copy(commands = listOf(line) + step.commands)
   }
 
   /** An outage only exists for a session that has been live: before that, there is nothing to hold. */

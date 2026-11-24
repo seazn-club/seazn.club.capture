@@ -104,7 +104,7 @@ object EngineHost {
     } catch (e: Exception) {
       core.log("warn", "watch-failed", mapOf("action" to "exit-read", "error" to e.javaClass.simpleName))
     }
-    startWatchers(app, cameras, capture, device, report, toCore)
+    startWatchers(app, cameras, capture, device, report, toCore) { core.attemptInHand() }
     return Parts(core, capture, keeper)
   }
 
@@ -125,10 +125,18 @@ object EngineHost {
    * opens only on the engine's word, which needs this build to have returned. The four live for the
    * process: the contended set and the network must be true before the first pairing.
    */
-  private fun startWatchers(app: Context, cameras: CameraAvailability, capture: StreamerAdapter, device: DeviceSampler, report: (Input) -> Unit, toCore: (RecordEntry) -> Unit) {
+  private fun startWatchers(
+    app: Context,
+    cameras: CameraAvailability,
+    capture: StreamerAdapter,
+    device: DeviceSampler,
+    report: (Input) -> Unit,
+    toCore: (RecordEntry) -> Unit,
+    attemptInHand: () -> Int,
+  ) {
     CameraWatch(app, cameras, report, toCore, capture::cameraMayBeFree).start()
     MicWatch(app, capture::audioSessionId, MicSilenceWatch(), report, toCore).start()
-    NetworkWatch(app, report, toCore).start()
+    NetworkWatch(app, report, toCore, attemptInHand).start()
     device.start()
   }
 

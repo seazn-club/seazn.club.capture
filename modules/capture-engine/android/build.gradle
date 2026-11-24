@@ -6,13 +6,37 @@ plugins {
 group = 'com.seazn.capture.engine'
 version = '0.1.0'
 
+// N49: the ABIs the app builds (`-PreactNativeArchitectures=arm64-v8a` locally), as expo-modules-core 57.0.20 reads them.
+def reactNativeArchitectures() {
+  def value = project.getProperties().get("reactNativeArchitectures")
+  return value ? value.split(",") : ["armeabi-v7a", "x86", "x86_64", "arm64-v8a"]
+}
+
 android {
   namespace "com.seazn.capture.engine"
+  // N49: the NDK React Native's Gradle plugin names for the app, as expo-modules-core does.
+  if (rootProject.hasProperty("ndkVersion")) {
+    ndkVersion rootProject.ext.ndkVersion
+  }
   defaultConfig {
     versionCode 1
     versionName "0.1.0"
     // Final review M6: what an app that minifies must keep for this module's reflection (AudioSessionIds).
     consumerProguardFiles 'consumer-rules.pro'
+    // N49: the JNI shim that binds our SRT socket to its network (src/main/cpp). C only, so no STL is packaged;
+    // 16 KB pages as expo-modules-core builds its own.
+    externalNativeBuild {
+      cmake {
+        arguments "-DANDROID_STL=none", "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"
+        abiFilters(*reactNativeArchitectures())
+      }
+    }
+  }
+  externalNativeBuild {
+    cmake {
+      path "src/main/cpp/CMakeLists.txt"
+      version "3.22.1"
+    }
   }
   // CD2: the pure core and adapters compile into this library, so no settings.gradle edit and no
   // composite build. Their own Gradle build (core/) still runs every JVM test in CI.

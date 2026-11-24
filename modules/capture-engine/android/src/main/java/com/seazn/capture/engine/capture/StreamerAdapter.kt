@@ -299,7 +299,7 @@ class StreamerAdapter(
         is SrtTarget -> {
           rtmps.end()
           val plan = SrtOptions.plan(target, connect.maxBwBytesPerSecond) ?: return false
-          sink.next(plan, connect.attemptId)
+          sink.next(plan, connect.attemptId, connect.network) // N49: bound to the network the attempt was asked on
           held.startStream(SrtMediaDescriptor(plan.host, plan.port, serviceInfo = SERVICE))
         }
         is RtmpsTarget -> {

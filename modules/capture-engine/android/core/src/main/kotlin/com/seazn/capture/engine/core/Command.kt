@@ -5,12 +5,17 @@ package com.seazn.capture.engine.core
  * [Input]; none of them decides anything.
  */
 sealed interface Command {
-  /** Open an ingest session. [maxBwBytesPerSecond] is `SRTO_MAXBW` for SRT, null for RTMPS (F-P5-11). */
+  /**
+   * Open an ingest session. [maxBwBytesPerSecond] is `SRTO_MAXBW` for SRT, null for RTMPS (F-P5-11). [network] is the
+   * handle of the default network the attempt was asked on ([Session.attemptNetwork], N49), which the glue binds an SRT
+   * socket to; null when none was known, and the socket connects unbound.
+   */
   data class Connect(
     val attemptId: Int,
     val target: IngestTarget,
     val startBitrateBps: Int,
     val maxBwBytesPerSecond: Long?,
+    val network: Long? = null,
   ) : Command
 
   data class Disconnect(val attemptId: Int) : Command

@@ -272,7 +272,7 @@ internal object Transports {
     val id = session.nextAttemptId
     // N49: the attempt is asked on the default network the machine holds, and keeps it until the next is asked.
     val asked = session.copy(nextAttemptId = id + 1, attemptNetwork = session.defaultNetwork)
-    return graced(asked, now) to Command.Connect(id, target, bps, maxBw)
+    return graced(asked, now) to Command.Connect(id, target, bps, maxBw, asked.attemptNetwork)
   }
 
   /**

@@ -534,4 +534,21 @@ class NetworkSwitchTest {
     assertEquals(cellular, rig.session.attemptNetwork)
     assertNull(rig.session.delivery.verdictNotBeforeMs)
   }
+
+  /**
+   * N49, binding: the glue binds each SRT socket to the network its attempt was asked on, so every connect carries
+   * that network's handle ([Command.Connect.network]): the first, a switch's replacement, and a drop's retry alike. An
+   * attempt asked while no network is known carries none, and the glue connects it unbound.
+   */
+  @Test
+  fun `binding - each connect carries the network it was asked on, and none when none is known`() {
+    val rig = liveOnCellular()
+    rig.on(wifi)
+    rig.resumedOn(2)
+    rig.lost()
+    rig.send(Input.Dropped(2, DropReason.ENDPOINT_CLOSED, null))
+    rig.advance(2_000)
+    assertEquals(listOf(cellular, wifi, null), rig.connects().map { it.network }, "4G, then the switch's Wi-Fi, then a retry with no network")
+    assertEquals(listOf(1, 2, 3), rig.connects().map { it.attemptId })
+  }
 }

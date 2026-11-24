@@ -1041,7 +1041,8 @@ the relay retried every few seconds and read 0 B (the seaznstream session's evid
 the old socket's packets, its shutdown included, are INFERRED to leave over the new network from a new address, which
 Cloudflare ignores. srtdroid 1.10.1 exposes no file descriptor and no `srt_bind_acquire` wrapper (its libsrt 1.5.7
 exports the C symbol only), and its libsrt carries the "SRTO_BINDTODEVICE is not supported on that platform" branch.
-`bindProcessToNetwork` would pin every socket of the process, the beats' and JS's HTTP included. Recorded for later.
+`bindProcessToNetwork` would pin every socket of the process, the beats' and JS's HTTP included. Recorded for later;
+built since, under **Binding** below.
 
 **Device-only, not yet seen:** that Android tells a default switch as the new network's `onCapabilitiesChanged` with
 no `onLost` of the old one (INFERRED from the missing `network` line), and that the new socket opens on the new
@@ -1113,3 +1114,27 @@ records and the code, not seen on a phone.
   for a poor link is no step of the ladder (`count` stays).
 - **What proves a path is publishing from the attempt's first frame**, not the connect (`FallbackPolicy.proved`).
 - `Transports.link` gives the regulator's commands to `regulatedCommands`.
+
+**Binding (2026-11-24).** Each SRT socket is bound to the network its attempt was asked on, before its connect, so
+after a switch the old socket's packets, its shutdown included, are meant to leave over 4G while 4G lingers, and the new
+socket is pinned to Wi-Fi. DEVICE-UNVERIFIED.
+
+- **The network.** `Command.Connect.network` carries `Session.attemptNetwork`, the handle `NetworkWatch` reports
+  (`Network.getNetworkHandle()`). The NDK's `android_setsocknetwork` takes that handle as it is, so no `android.net.Network`
+  object is needed and core holds no platform type.
+- **The call.** srtdroid 1.10.1 has no fd getter and no `srt_bind_acquire` wrapper, and libsrt 1.5.7 exports the C
+  symbol. A JNI shim of our own (`src/main/cpp/srt_bind.c`, `libseazn_srt_bind.so`, C only, no new dependency) finds
+  `srt_bind_acquire` with `dlsym` in the libsrtdroid.so srtdroid already loaded (`RTLD_NOLOAD`). It makes a UDP socket
+  of the ingest address's family, binds it to the network, binds it to a wildcard address, and hands it to libsrt, after
+  every socket option and before the connect. The SRT socket's id is read by reflection (`CoroutineSrtSocket.socket`,
+  then `SrtSocket.srtsocket`, kept for an app that minifies).
+- **Never fatal.** Every outcome is one `srt-bind` line (new kind): `bound`, `no-network`, `unavailable` (the shim, the
+  socket id, libsrtdroid or the symbol, with `op` and a class name) or `failed` (`op` socket, network, bind or acquire,
+  with `errno-<n>` or libsrt's `srt-<n>`). Anything short of `bound` connects unbound, as before. A failed acquire leaves
+  its UDP socket open, since libsrt may have closed it already, and binding then stops for the process
+  (`op: disabled`), so at most one is left.
+- **The switch.** `BIND_SRT_TO_NETWORK` (`srt/connect/SrtBind.kt`) ships on; off, nothing is bound or said.
+- **Close order.** A replace runs `disconnect(previous)`, which stops and closes the old endpoint and its socket, before
+  the new `connect` (`CaptureRun.reconnect`), so the old socket's shutdown goes out before the new socket opens, on the
+  old socket's own network. That the shutdown reaches Cloudflare, and that Cloudflare then lets the new connection take
+  the input at once, is INFERRED and device-only, as is everything the shim does.

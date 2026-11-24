@@ -960,6 +960,36 @@ class GlueRulesTest {
   }
 
   /**
+   * N49, binding: `SrtBind`'s rule runs in core's tests (`SrtBindTest`); this pins its wiring, the inert seam otherwise.
+   * The adapter hands the sink the network the attempt was asked on, the sink binds after every option and before the
+   * connect, on the address it connects to, through the JNI shim; the shim's C name is the binder's, its library is the
+   * one the binder loads and the module builds, and the fields read by name are kept for an app that minifies.
+   */
+  @Test
+  fun `N49 the SRT sink binds each socket to its attempt's network before the connect, through the JNI shim`() {
+    assertTrue("sink.next(plan, connect.attemptId, connect.network)" in code(glue("StreamerAdapter.kt")), "the adapter passes the attempt's network")
+    val sink = code(glue("SeaznSrtSink.kt"))
+    assertTrue("private val binding = SrtBind(SrtNetworkBinder, line)" in sink, "the sink binds through the shim, into the record")
+    val open = body(sink, "override suspend fun openImpl(")
+    val options = open.indexOf("for ((option, value) in plan.before)")
+    val bind = open.indexOf("binding.bind(id, network, target) { socketId(opened) }")
+    val connect = open.indexOf("connection.connect(Port(opened), id, target)")
+    assertTrue(options in 0 until bind && bind < connect, "options, then the bind, then the connect: $open")
+    assertTrue("val (plan, id, network) = pending" in open, "the network is the one set with this attempt's plan")
+    assertTrue(Regex("""getDeclaredField\("socket"\)[\s\S]*getDeclaredField\("srtsocket"\)""").containsMatchIn(sink), "srtdroid 1.10.1's socket id, read by name")
+    val binder = code(glue("SrtNetworkBinder.kt"))
+    assertTrue("System.loadLibrary(\"seazn_srt_bind\")" in binder, "the binder loads the shim")
+    assertTrue("@JvmStatic private external fun nativeBind(srtSocket: Int, network: Long, ipv6: Boolean): Int" in binder)
+    val shim = File(src, "main/cpp/srt_bind.c").readText()
+    assertTrue("Java_com_seazn_capture_engine_srt_SrtNetworkBinder_nativeBind(JNIEnv *env, jclass type, jint srt_socket, jlong network, jboolean ipv6)" in shim, "the C name is the binder's")
+    assertTrue("add_library(seazn_srt_bind SHARED srt_bind.c)" in File(src, "main/cpp/CMakeLists.txt").readText(), "the library the binder loads")
+    assertTrue(Regex("""externalNativeBuild \{\s*cmake \{\s*path "src/main/cpp/CMakeLists.txt"""").containsMatchIn(File(src.parentFile, "build.gradle").readText()), "the module builds it")
+    val rules = File(src.parentFile, "consumer-rules.pro").readText()
+    assertTrue(Regex("""-keepclassmembers class io\.github\.thibaultbee\.srtdroid\.ktx\.CoroutineSrtSocket \{\s*private final io\.github\.thibaultbee\.srtdroid\.core\.models\.SrtSocket socket;\s*\}""").containsMatchIn(rules), "the ktx field kept")
+    assertTrue(Regex("""-keepclasseswithmembernames class com\.seazn\.capture\.engine\.srt\.SrtNetworkBinder \{\s*native <methods>;\s*\}""").containsMatchIn(rules), "the native method kept")
+  }
+
+  /**
    * Security: `cred` is read in `Bodies` and nowhere else, onto the ingest host only (amendment, _Who reads
    * what_; the host is `Hosts.INGEST`, live.cloudflare.com, for both transports in both environments, owner
    * ruling A, 2026-10-05), and `SrtOptions.plan`'s own host check rests on Bodies being the only producer of a

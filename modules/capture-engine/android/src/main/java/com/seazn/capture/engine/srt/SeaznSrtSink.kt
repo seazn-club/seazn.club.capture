@@ -25,12 +25,14 @@ import com.seazn.capture.engine.core.Input
 import com.seazn.capture.engine.core.LinkCounters
 import com.seazn.capture.engine.core.RecordEntry
 import com.seazn.capture.engine.net.HostLookup
+import com.seazn.capture.engine.srt.connect.SrtBind
 import com.seazn.capture.engine.srt.connect.SrtConnection
 import com.seazn.capture.engine.srt.connect.SrtSocketPort
 import io.github.thibaultbee.srtdroid.core.enums.Boundary
 import io.github.thibaultbee.srtdroid.core.enums.SockOpt
 import io.github.thibaultbee.srtdroid.core.enums.Transtype
 import io.github.thibaultbee.srtdroid.core.models.MsgCtrl
+import io.github.thibaultbee.srtdroid.core.models.SrtSocket
 import io.github.thibaultbee.srtdroid.ktx.CoroutineSrtSocket
 import io.github.thibaultbee.streampack.core.configuration.mediadescriptor.MediaDescriptor
 import io.github.thibaultbee.streampack.core.elements.endpoints.ClosedException
@@ -52,7 +54,8 @@ import kotlinx.coroutines.withContext
  * tests run (C6 I-2). It sends with srtdroid's non-blocking `trySend`, as StreamPack 3.2.1's SrtSink does
  * (StreamPack#302): a full send buffer drops the packet, counted and recorded, and never stalls the
  * encoder. It logs nothing: a failure leaves as an [Input] through [AttemptSignals], whose `toString`
- * masks the platform's text (m7), and the record masks the secrets in it (CD6).
+ * masks the platform's text (m7), and the record masks the secrets in it (CD6). N49: before its connect, the socket is
+ * bound to the network its attempt was asked on ([SrtBind], through the JNI shim [SrtNetworkBinder]), best effort.
  */
 class SeaznSrtSink(
   private val dispatcher: CoroutineDispatcher,
@@ -64,17 +67,21 @@ class SeaznSrtSink(
 
   private val connection = SrtConnection(signals, report, line, SystemClock::elapsedRealtime)
   private val lookup = HostLookup()
+  private val binding = SrtBind(SrtNetworkBinder, line)
   override val isOpenFlow = connection.isOpen
 
   @Volatile private var socket: CoroutineSrtSocket? = null
 
-  @Volatile private var pending: Pair<SrtPlan, Int>? = null
+  @Volatile private var pending: Next? = null
 
   @Volatile private var attemptId: Int? = null
 
-  /** Set by the streamer adapter before `startStream`; the descriptor it passes carries host and port only. */
-  fun next(plan: SrtPlan, attemptId: Int) {
-    pending = plan to attemptId
+  /**
+   * Set by the streamer adapter before `startStream`; the descriptor it passes carries host and port only. [network] is
+   * the handle of the network the attempt was asked on (`Command.Connect.network`, N49), null when none was known.
+   */
+  fun next(plan: SrtPlan, attemptId: Int, network: Long?) {
+    pending = Next(plan, attemptId, network)
   }
 
   /** INPUTBW and MAXBW come from the plan, never from the encoder's bitrate (F-P5-11). */
@@ -82,12 +89,15 @@ class SeaznSrtSink(
 
   override suspend fun openImpl(mediaDescriptor: MediaDescriptor) =
     withContext(dispatcher) {
-      val (plan, id) = pending ?: throw IllegalStateException("no SRT plan for this connect")
+      val (plan, id, network) = pending ?: throw IllegalStateException("no SRT plan for this connect")
       val address = lookup.resolve(plan.host) // F-P5-1: UnknownHostException → UNRESOLVED; inside the start's bound (C6 I-1)
       val opened = CoroutineSrtSocket(dispatcher) // 1.10.1: CoroutineSrtSocket(CoroutineDispatcher), which sets SNDSYN false
       opened.setSockFlag(SockOpt.PAYLOADSIZE, PAYLOAD_SIZE)
       for ((option, value) in plan.before) opened.setSockFlag(sockOpt(option), flagValue(option, value)) // 1.10.1: setSockFlag(SockOpt, Any)
-      connection.connect(Port(opened), id, InetSocketAddress(address, plan.port)) {
+      // N49: after every option (libsrt applies the UDP ones as it takes the socket at bind), before the connect.
+      val target = InetSocketAddress(address, plan.port)
+      binding.bind(id, network, target) { socketId(opened) }
+      connection.connect(Port(opened), id, target) {
         opened.setSockFlag(SockOpt.MAXBW, plan.maxBwBytesPerSecond) // F-P5-11: after connect, in bytes per second
         socket = opened
         attemptId = id
@@ -137,6 +147,18 @@ class SeaznSrtSink(
       stats.msSndBuf.takeIf { it >= 0 },
       (stats.mbpsBandwidth * 1_000_000).toLong(),
     )
+  }
+
+  private data class Next(val plan: SrtPlan, val attemptId: Int, val network: Long?)
+
+  /**
+   * N49: libsrt's SRTSOCKET for [opened]. srtdroid 1.10.1 has no getter (javap): CoroutineSrtSocket keeps its SrtSocket
+   * in the private `socket` (kept by consumer-rules.pro), which keeps the id in the private `srtsocket` (kept by srtdroid's own rules). A throw
+   * here is [SrtBind]'s `unavailable`, never the connect's.
+   */
+  private fun socketId(opened: CoroutineSrtSocket): Int {
+    val inner = CoroutineSrtSocket::class.java.getDeclaredField("socket").apply { isAccessible = true }.get(opened)
+    return SrtSocket::class.java.getDeclaredField("srtsocket").apply { isAccessible = true }.getInt(inner)
   }
 
   /** srtdroid has no `TRANSTYPE_LIVE` (javap, 1.9.5, 1.10.0 and 1.10.1): it is `TRANSTYPE` set to `Transtype.LIVE`. */

@@ -263,6 +263,43 @@ class CaptureRunAttemptTest : CaptureRunTestKit() {
       }
     }
 
+  /**
+   * An unpair inside the abandon window releases the capture; a re-pair builds a new one. The abandoned start's late end
+   * then closes nothing: the release closed its endpoint, and the streamer held now is another opening's.
+   */
+  @Test
+  fun `S9 an abandoned start's late end after an unpair, or after a re-pair, closes nothing`() =
+    runTest {
+      for (repair in listOf(false, true)) {
+        val pool = Executors.newFixedThreadPool(2)
+        val freed = CountDownLatch(1)
+        try {
+          val s = blockedStarts(pool, freed)
+          s.run.execute(connect(1))
+          pumpReal(forMs = 200)
+          advanceTimeBy(SessionMachine.CONNECT_TIMEOUT_MS)
+          runCurrent()
+          s.run.close()
+          advanceUntilIdle() // the abandoned start's thread is held; nothing else is in flight
+          assertTrue("release done" in s.parts.log, "repair=$repair: the unpair is not held by the abandoned start: ${s.parts.log}")
+          if (repair) {
+            s.run.open(request)
+            advanceUntilIdle()
+            assertTrue(s.parts.held, "repair=$repair: the re-pair built a capture")
+          }
+          s.parts.log.clear()
+          freed.countDown()
+          pumpReal(forMs = 300)
+          advanceUntilIdle()
+          assertEquals(emptyList(), s.parts.log, "repair=$repair: the late end touches nothing")
+          assertEquals(repair, s.parts.held, "repair=$repair: the capture held is as the operator left it")
+        } finally {
+          freed.countDown()
+          pool.shutdownNow()
+        }
+      }
+    }
+
   // --- The broadcast's end, and the commands passed through ---
 
   @Test

@@ -1187,15 +1187,19 @@ lookup normally finds the platform's cache warm; a resolver that stalls on the s
 residual. That lookup runs on StreamPack's IO thread inside `withContext`, which waits for its block even once
 cancelled, so the start, awaited in the queue, held it past the bound.
 
-**Fixed (phone):** the start runs as a job of its own, not the queue's child, and the bound ends the wait for it
-(`CaptureRun.connect`). At the bound the attempt fails `TIMEOUT` as before; a start that ends within `ABANDON_MS`
-(500 ms) of its cancel is closed at once, as before; one that does not is abandoned, and the queue goes on, so a Stop,
-an unpair or the next attempt is not held. Its endpoint is closed once it ends, and only while no newer attempt holds
-the endpoint (C6 CRITICAL). Tests (`CaptureRunAttemptTest`, "S9 …"): a start holding a real thread for up to 30 s
-fails `TIMEOUT` at 14 s and a Stop queued behind it is done before the machine's 15 s; an abandoned start that ends
-after the next attempt connected closes nothing. Each guard was mutated once and a test failed.
+**Fixed (phone), for a Stop only:** the start runs as a job of its own, not the queue's child, and the bound ends the
+wait for it (`CaptureRun.connect`). At the bound the attempt fails `TIMEOUT` as before; a start that ends within
+`ABANDON_MS` (500 ms) of its cancel is closed at once, as before; one that does not is abandoned, and the queue goes on.
+That frees a Stop, which needs no endpoint close, and the machine hears the failure at the bound. Its endpoint is closed
+once it ends, only while no newer attempt holds the endpoint (C6 CRITICAL) and within the same opening: after an unpair
+or a re-pair's new build its late end touches nothing. Tests (`CaptureRunAttemptTest`, "S9 …"): a start holding a real
+thread for up to 30 s fails `TIMEOUT` at 14 s and a Stop queued behind it is done before the machine's 15 s; an
+abandoned start that ends after the next attempt connected, or after an unpair or a re-pair, closes nothing. Each guard
+was mutated once and a test failed.
 
-**Left, device-only:** while an abandoned start holds `RtmpEndpoint`'s `Mutex`, anything that touches that endpoint
-(its close at a release, the next RTMPS open) still waits for it inside StreamPack; the queue no longer does, and a
-Stop that needs no endpoint close is done at once. Not reproduced: it needs a resolver that answers the warm lookup and
-stalls on komuxer's own.
+**Not fixed: an unpair, and the next RTMPS attempt.** An unpair's release runs on the queue (`closed()` →
+`parts.release()` → `stopStream()`/`close()`, `StreamerAdapter`), and `RtmpEndpoint.close` takes the same `Mutex` the
+abandoned open holds, so the unpair, and everything queued behind it, still waits until the resolver returns. The core
+tests do not show it: the fake's release takes no lock. The next RTMPS attempt is not held by the queue, but its own
+open waits on that `Mutex`, and fails `TIMEOUT` at its own 14 s bound if the resolver has not returned. Device-only and
+not reproduced: it needs a resolver that answers the warm lookup and stalls on komuxer's own.

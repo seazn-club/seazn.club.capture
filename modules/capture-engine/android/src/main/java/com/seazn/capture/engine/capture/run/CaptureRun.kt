@@ -73,6 +73,9 @@ class CaptureRun(
   @Volatile private var stoppedThrough = 0
 
   private var micNoted = false
+
+  /** S9 (N50): releases so far; an abandoned start's late close acts only within the opening it was made in. */
+  private var releases = 0
   private var closeWatch: Job? = null
 
   /** I-2: the opening's watch of StreamPack's camera opens, and of its losses (F-S4-1), from the build to the release. */
@@ -466,6 +469,7 @@ class CaptureRun(
   }
 
   private suspend fun closed() {
+    releases += 1
     request = null
     attempt?.let(::asked)
     closeWatch?.cancel() // cleanup: the mark, not the cancel, decides the drop
@@ -576,7 +580,6 @@ class CaptureRun(
       try {
         withTimeoutOrNull(START_BOUND_MS) { start.await() }
       } catch (e: CancellationException) {
-        start.cancel()
         signals.startEnded(id, StartEnd.RETURNED)?.let(calls.report)
         throw e
       } catch (e: Exception) {
@@ -627,16 +630,21 @@ class CaptureRun(
    * reads). The cancelled start may have left the endpoint half open: it is closed as a stop asked for.
    *
    * S9 (N50): a start that ends within [ABANDON_MS] of its cancel is closed now, as before. One that does not
-   * holds a thread no cancel reaches, and StreamPack's endpoint, whose close waits for the open in flight: it
-   * is abandoned, and the queue goes on, so a Stop, an unpair or the next attempt never waits behind it. Its
-   * endpoint is closed once it ends, and only while no newer attempt holds the endpoint (C6 CRITICAL).
+   * holds a thread no cancel reaches, and StreamPack's endpoint `Mutex`: it is abandoned and the queue goes on.
+   * That frees a Stop, which needs no endpoint close. It does not free an unpair: the release closes the
+   * endpoint, and that close waits on the same `Mutex`, so the queue, and everything behind the unpair, waits
+   * until the abandoned call returns. The next RTMPS attempt is not held by the queue, but its own open waits on
+   * the `Mutex`, within its own bound. The abandoned start's endpoint is closed once it ends, only while no newer
+   * attempt holds the endpoint (C6 CRITICAL) and within the same opening: after a release, or a re-pair's new
+   * build, its late end touches nothing.
    */
   private suspend fun timedOut(id: Int, start: Job) {
     signals.connectFailed(id, TimeoutException("start timed out after $START_BOUND_MS ms"))?.let(calls.report)
     start.cancel()
     if (withTimeoutOrNull(ABANDON_MS) { start.join() } != null) return stopHeld(id)
     letGo(id)
-    start.invokeOnCompletion { serial.submit { if (attempt == null) parts.stop() } }
+    val opening = releases
+    start.invokeOnCompletion { serial.submit { if (attempt == null && releases == opening) parts.stop() } }
   }
 
   /**

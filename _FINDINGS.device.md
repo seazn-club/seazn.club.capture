@@ -1119,20 +1119,24 @@ records and the code, not seen on a phone.
 after a switch the old socket's packets, its shutdown included, are meant to leave over 4G while 4G lingers, and the new
 socket is pinned to Wi-Fi. DEVICE-UNVERIFIED.
 
-- **The network.** `Command.Connect.network` carries `Session.attemptNetwork`, the handle `NetworkWatch` reports
+- **The network.** `Command.Connect.network` (no default: every Connect states it) carries `Session.attemptNetwork`, the handle `NetworkWatch` reports
   (`Network.getNetworkHandle()`). The NDK's `android_setsocknetwork` takes that handle as it is, so no `android.net.Network`
   object is needed and core holds no platform type.
 - **The call.** srtdroid 1.10.1 has no fd getter and no `srt_bind_acquire` wrapper, and libsrt 1.5.7 exports the C
   symbol. A JNI shim of our own (`src/main/cpp/srt_bind.c`, `libseazn_srt_bind.so`, C only, no new dependency) finds
-  `srt_bind_acquire` with `dlsym` in the libsrtdroid.so srtdroid already loaded (`RTLD_NOLOAD`). It makes a UDP socket
+  `srt_bind_acquire` with `dlsym` in the libsrtdroid.so srtdroid already loaded (`RTLD_NOLOAD`), once for the process
+  (`pthread_once`). It makes a UDP socket
   of the ingest address's family, binds it to the network, binds it to a wildcard address, and hands it to libsrt, after
   every socket option and before the connect. The SRT socket's id is read by reflection (`CoroutineSrtSocket.socket`,
   then `SrtSocket.srtsocket`, kept for an app that minifies).
 - **Never fatal.** Every outcome is one `srt-bind` line (new kind): `bound`, `no-network`, `unavailable` (the shim, the
   socket id, libsrtdroid or the symbol, with `op` and a class name) or `failed` (`op` socket, network, bind or acquire,
-  with `errno-<n>` or libsrt's `srt-<n>`). Anything short of `bound` connects unbound, as before. A failed acquire leaves
-  its UDP socket open, since libsrt may have closed it already, and binding then stops for the process
-  (`op: disabled`), so at most one is left.
+  with `errno-<n>` or libsrt's `srt-<n>`). Anything short of `bound` connects unbound, as before.
+- **A failed acquire** (review of 002dec1e): libsrt's state for that SRT socket is unknown, so the sink closes it and
+  connects a fresh one, made with the same options (`fresh`), unbound; the line adds `action: fresh-socket`, and the
+  close's class as `rootError` if it threw. The UDP socket is left open, since libsrt may have closed it already, and
+  binding then stops for the process, every sink included (`AcquireStop.PROCESS`, `op: disabled`), so at most one is
+  left.
 - **The switch.** `BIND_SRT_TO_NETWORK` (`srt/connect/SrtBind.kt`) ships on; off, nothing is bound or said.
 - **Close order.** A replace runs `disconnect(previous)`, which stops and closes the old endpoint and its socket, before
   the new `connect` (`CaptureRun.reconnect`), so the old socket's shutdown goes out before the new socket opens, on the

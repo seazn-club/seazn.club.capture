@@ -13,6 +13,7 @@
 #include <errno.h>
 #include <jni.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -21,6 +22,23 @@ enum { STEP_LIBRARY = 1, STEP_SYMBOL = 2, STEP_SOCKET = 3, STEP_NETWORK = 4, STE
 
 typedef int (*srt_bind_acquire_fn)(int srt_socket, int udp_socket);
 typedef int (*srt_getlasterror_fn)(int *errno_loc);
+
+/*
+ * Found once for the process (pthread_once), never per attempt. RTLD_NOLOAD: only the copy srtdroid loaded, never a
+ * second libsrt with its own sockets; never dlclosed, since srtdroid holds it for the process. srtdroid has loaded it
+ * before any socket of ours exists, so a NULL here is final.
+ */
+static pthread_once_t found_once = PTHREAD_ONCE_INIT;
+static void *srt_library = NULL;
+static srt_bind_acquire_fn srt_acquire = NULL;
+static srt_getlasterror_fn srt_last_error = NULL;
+
+static void find_srt(void) {
+  srt_library = dlopen("libsrtdroid.so", RTLD_NOW | RTLD_NOLOAD);
+  if (srt_library == NULL) return;
+  srt_acquire = (srt_bind_acquire_fn)dlsym(srt_library, "srt_bind_acquire");
+  srt_last_error = (srt_getlasterror_fn)dlsym(srt_library, "srt_getlasterror");
+}
 
 static jint answer(int step, int detail) { return (jint)((step << 16) | (detail & 0xFFFF)); }
 
@@ -42,12 +60,9 @@ static socklen_t wildcard(struct sockaddr_storage *any, jboolean ipv6) {
 JNIEXPORT jint JNICALL Java_com_seazn_capture_engine_srt_SrtNetworkBinder_nativeBind(JNIEnv *env, jclass type, jint srt_socket, jlong network, jboolean ipv6) {
   (void)env;
   (void)type;
-  /* RTLD_NOLOAD: only the copy srtdroid loaded, never a second libsrt with its own sockets. Never dlclosed: srtdroid holds it for the process. */
-  void *srt = dlopen("libsrtdroid.so", RTLD_NOW | RTLD_NOLOAD);
-  if (srt == NULL) return answer(STEP_LIBRARY, 0);
-  srt_bind_acquire_fn acquire = (srt_bind_acquire_fn)dlsym(srt, "srt_bind_acquire");
-  srt_getlasterror_fn last_error = (srt_getlasterror_fn)dlsym(srt, "srt_getlasterror");
-  if (acquire == NULL) return answer(STEP_SYMBOL, 0);
+  pthread_once(&found_once, find_srt);
+  if (srt_library == NULL) return answer(STEP_LIBRARY, 0);
+  if (srt_acquire == NULL) return answer(STEP_SYMBOL, 0);
 
   int fd = socket(ipv6 ? AF_INET6 : AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP);
   if (fd < 0) return answer(STEP_SOCKET, errno);
@@ -65,9 +80,9 @@ JNIEXPORT jint JNICALL Java_com_seazn_capture_engine_srt_SrtNetworkBinder_native
   }
   /*
    * From here libsrt owns the descriptor: its multiplexer closes it with the SRT socket. On a failed acquire libsrt may
-   * already have closed it, and another thread may hold the number again, so it is left open (SrtBind then stops binding
-   * for the process: at most one is left).
+   * already have closed it, and another thread may hold the number again, so it is left open (SrtBind then closes that
+   * SRT socket, connects a fresh one unbound, and stops binding for the process: at most one is left).
    */
-  if (acquire(srt_socket, fd) != 0) return answer(STEP_ACQUIRE, last_error == NULL ? 0 : last_error(NULL));
+  if (srt_acquire(srt_socket, fd) != 0) return answer(STEP_ACQUIRE, srt_last_error == NULL ? 0 : srt_last_error(NULL));
   return 0;
 }

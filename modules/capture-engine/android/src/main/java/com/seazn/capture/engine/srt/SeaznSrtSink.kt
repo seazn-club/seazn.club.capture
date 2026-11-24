@@ -91,12 +91,10 @@ class SeaznSrtSink(
     withContext(dispatcher) {
       val (plan, id, network) = pending ?: throw IllegalStateException("no SRT plan for this connect")
       val address = lookup.resolve(plan.host) // F-P5-1: UnknownHostException → UNRESOLVED; inside the start's bound (C6 I-1)
-      val opened = CoroutineSrtSocket(dispatcher) // 1.10.1: CoroutineSrtSocket(CoroutineDispatcher), which sets SNDSYN false
-      opened.setSockFlag(SockOpt.PAYLOADSIZE, PAYLOAD_SIZE)
-      for ((option, value) in plan.before) opened.setSockFlag(sockOpt(option), flagValue(option, value)) // 1.10.1: setSockFlag(SockOpt, Any)
-      // N49: after every option (libsrt applies the UDP ones as it takes the socket at bind), before the connect.
       val target = InetSocketAddress(address, plan.port)
-      binding.bind(id, network, target) { socketId(opened) }
+      // N49: bound after every option (libsrt applies the UDP ones as it takes the socket at bind), before the connect; a
+      // failed acquire closes that socket and connects a fresh one, unbound.
+      val opened = binding.open(id, network, target, { fresh(plan) }, ::socketId) { it.close() }
       connection.connect(Port(opened), id, target) {
         opened.setSockFlag(SockOpt.MAXBW, plan.maxBwBytesPerSecond) // F-P5-11: after connect, in bytes per second
         socket = opened
@@ -147,6 +145,14 @@ class SeaznSrtSink(
       stats.msSndBuf.takeIf { it >= 0 },
       (stats.mbpsBandwidth * 1_000_000).toLong(),
     )
+  }
+
+  /** A new socket with every option of [plan] set: the one an attempt connects, or its unbound replacement (N49). */
+  private fun fresh(plan: SrtPlan): CoroutineSrtSocket {
+    val opened = CoroutineSrtSocket(dispatcher) // 1.10.1: CoroutineSrtSocket(CoroutineDispatcher), which sets SNDSYN false
+    opened.setSockFlag(SockOpt.PAYLOADSIZE, PAYLOAD_SIZE)
+    for ((option, value) in plan.before) opened.setSockFlag(sockOpt(option), flagValue(option, value)) // 1.10.1: setSockFlag(SockOpt, Any)
+    return opened
   }
 
   private data class Next(val plan: SrtPlan, val attemptId: Int, val network: Long?)

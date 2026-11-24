@@ -29,7 +29,7 @@ import kotlin.test.assertTrue
  * even once a newer attempt has begun. Latches order the two threads, the same on every run.
  */
 class CaptureRunThreadsTest {
-  private fun connect(id: Int) = Command.Connect(id, Configs.srt, startBitrateBps = 3_000_000, maxBwBytesPerSecond = 1_000_000)
+  private fun connect(id: Int) = Command.Connect(id, Configs.srt, startBitrateBps = 3_000_000, maxBwBytesPerSecond = 1_000_000, network = null)
 
   /**
    * Attempt 1 publishes; the far end closes it and the watch holds, past the close, while [stop] runs on

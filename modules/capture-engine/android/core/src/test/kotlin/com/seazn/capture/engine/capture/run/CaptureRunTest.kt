@@ -54,7 +54,7 @@ class CaptureRunTest {
   private val maxCamerasInUse = 5
   private val cameraDisconnected = 2
 
-  private fun connect(id: Int) = Command.Connect(id, Configs.srt, startBitrateBps = 3_000_000, maxBwBytesPerSecond = 1_000_000)
+  private fun connect(id: Int) = Command.Connect(id, Configs.srt, startBitrateBps = 3_000_000, maxBwBytesPerSecond = 1_000_000, network = null)
 
   private class Scene(val parts: FakeParts, val told: Told, val cameras: CameraAvailability, val run: CaptureRun)
 

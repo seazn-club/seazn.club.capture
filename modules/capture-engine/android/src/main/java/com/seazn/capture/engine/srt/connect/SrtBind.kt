@@ -24,35 +24,72 @@ interface SrtBinderPort {
 }
 
 /**
+ * Whether a failed `srt_bind_acquire` has stopped binding. [PROCESS] is the one every sink's [SrtBind] shares, so one
+ * failure stops binding for the process; a test passes its own.
+ */
+class AcquireStop {
+  @Volatile var stopped = false
+
+  companion object {
+    val PROCESS = AcquireStop()
+  }
+}
+
+/**
  * N49: binds our SRT socket to the network its attempt was asked on (`Command.Connect.network`), so its packets, its
  * shutdown included, leave over that network from that network's address after the default moves: the old socket's
  * close then goes out over 4G while 4G lingers, and the new socket is pinned to Wi-Fi. Best effort and never fatal:
- * every outcome is one `srt-bind` line, and anything short of `bound` leaves the socket to connect unbound, as before.
+ * every outcome is one `srt-bind` line, and anything short of `bound` connects unbound, as before.
  * - `bound`.
  * - `no-network`: the attempt was asked while no default network was known.
  * - `unavailable`, with `op`: `shim` (ours did not load, or threw, with its class in `error`), `socket-id` (srtdroid's
  *   socket id could not be read, likewise), `library` (libsrtdroid is not loaded) or `symbol` (no `srt_bind_acquire`).
  * - `failed`, with `op` (`socket`, `network`, `bind`, `acquire`, or `unknown` for an answer the shim never gives) and
  *   `error` (`errno-<n>`, `srt-<n>` for libsrt's code, or `code-<n>`, the whole answer, for `unknown`).
- * - `unavailable` with `op` `disabled`: an `acquire` failed earlier in this process. The shim cannot tell whether libsrt
- *   closed the UDP socket it was handed, so it leaves it open rather than risk closing another file's descriptor, and
- *   binding stops for good: at most one socket is left behind.
+ * - `failed` at `acquire` also carries `action: fresh-socket`: libsrt's state for that SRT socket is unknown, so it is
+ *   closed (a close that throws adds its class as `rootError`) and a fresh socket, made as the first was, connects
+ *   unbound. The shim cannot tell whether libsrt closed the UDP socket it was handed, so it leaves it open rather than
+ *   risk closing another file's descriptor, and binding stops for the process ([AcquireStop.PROCESS]): at most one
+ *   UDP socket is left behind. Every later attempt says `unavailable` with `op` `disabled`.
  * Off ([on] false), it reads nothing and says nothing.
  */
-class SrtBind(private val binder: SrtBinderPort, private val line: (RecordEntry) -> Unit, private val on: Boolean = BIND_SRT_TO_NETWORK) {
-  @Volatile private var disabled = false
-
-  /** Binds attempt [attemptId]'s socket, whose id [socketId] reads, to [network], with a UDP socket of [target]'s family. */
-  fun bind(attemptId: Int, network: Long?, target: InetSocketAddress, socketId: () -> Int) {
-    if (!on) return
-    if (disabled) return line(RecordEntry("srt-bind", listOf("attempt" to attemptId, "result" to "unavailable", "op" to "disabled")))
-    if (network == null) return line(RecordEntry("srt-bind", listOf("attempt" to attemptId, "result" to "no-network")))
-    val id = guarded(attemptId, "socket-id", socketId) ?: return
-    val answer = guarded(attemptId, "shim") { binder.bind(id, network, target.address is Inet6Address) } ?: return
-    if (answer ushr 16 == ACQUIRE) disabled = true
-    line(RecordEntry("srt-bind", listOf("attempt" to attemptId) + said(answer)))
+class SrtBind(
+  private val binder: SrtBinderPort,
+  private val line: (RecordEntry) -> Unit,
+  private val on: Boolean = BIND_SRT_TO_NETWORK,
+  private val stop: AcquireStop = AcquireStop.PROCESS,
+) {
+  /**
+   * The socket attempt [attemptId] connects: one [fresh] makes, bound to [network] with a UDP socket of [target]'s
+   * family ([socketId] reads its id), or, after a failed acquire, a second [fresh] one, unbound, the first [close]d.
+   */
+  fun <S> open(attemptId: Int, network: Long?, target: InetSocketAddress, fresh: () -> S, socketId: (S) -> Int, close: (S) -> Unit): S {
+    val opened = fresh()
+    val answer = bind(attemptId, network, target) { socketId(opened) } ?: return opened
+    if (answer ushr 16 != ACQUIRE) {
+      line(RecordEntry("srt-bind", listOf("attempt" to attemptId) + said(answer)))
+      return opened
+    }
+    stop.stopped = true
+    val closing =
+      try {
+        close(opened)
+        null
+      } catch (e: Exception) {
+        e
+      }
+    line(RecordEntry("srt-bind", listOf("attempt" to attemptId) + said(answer) + listOfNotNull("action" to "fresh-socket", closing?.let { "rootError" to it.javaClass.simpleName })))
+    return fresh()
   }
 
+  /** The shim's answer, or null once the attempt is said (off, stopped, no network, or a throw). */
+  private fun bind(attemptId: Int, network: Long?, target: InetSocketAddress, socketId: () -> Int): Int? {
+    if (!on) return null
+    if (stop.stopped) return null.also { line(RecordEntry("srt-bind", listOf("attempt" to attemptId, "result" to "unavailable", "op" to "disabled"))) }
+    if (network == null) return null.also { line(RecordEntry("srt-bind", listOf("attempt" to attemptId, "result" to "no-network"))) }
+    val id = guarded(attemptId, "socket-id", socketId) ?: return null
+    return guarded(attemptId, "shim") { binder.bind(id, network, target.address is Inet6Address) }
+  }
   /** [call]'s answer, or null once its throw is said as `unavailable` at [op]. An Error other than a link's is no answer to say. */
   private fun guarded(attemptId: Int, op: String, call: () -> Int): Int? {
     val failure =

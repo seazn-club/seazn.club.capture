@@ -146,7 +146,7 @@ class HostLookupTest {
     advanceUntilIdle()
   }
 
-  private fun rtmps(id: Int) = Command.Connect(id, Configs.rtmps, startBitrateBps = 3_000_000, maxBwBytesPerSecond = null)
+  private fun rtmps(id: Int) = Command.Connect(id, Configs.rtmps, startBitrateBps = 3_000_000, maxBwBytesPerSecond = null, network = null)
 
   @Test
   fun `C6 re-review an RTMPS lookup that never returns lets the start's bound fire, never reaches komuxer, and a close queued behind it goes through`() {

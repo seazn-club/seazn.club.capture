@@ -48,7 +48,7 @@ class SrtConnectionTest {
   /** srtdroid's own text for a socket that broke once connected (javap: `executeEpoll`). */
   private val broken = "Connection was broken"
 
-  private fun connect(id: Int) = Command.Connect(id, Configs.srt, startBitrateBps = 3_000_000, maxBwBytesPerSecond = 1_000_000)
+  private fun connect(id: Int) = Command.Connect(id, Configs.srt, startBitrateBps = 3_000_000, maxBwBytesPerSecond = 1_000_000, network = null)
 
   /** srtdroid 1.10.1's socket, as far as the order goes. Its context is a real Job, so a listener on an ended socket runs at once. */
   private class FakeSocket(private val failure: Exception? = null, private val endsOnConnect: Exception? = null) : SrtSocketPort {

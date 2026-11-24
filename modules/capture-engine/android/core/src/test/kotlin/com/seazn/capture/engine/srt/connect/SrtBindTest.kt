@@ -5,6 +5,8 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /**
@@ -28,7 +30,20 @@ class SrtBindTest {
 
   private val lines = mutableListOf<RecordEntry>()
 
-  private fun binding(binder: SrtBinderPort, on: Boolean = true) = SrtBind(binder, { lines += it }, on)
+  /** A fresh stop each: the process's own ([AcquireStop.PROCESS]) is the sink's, and one test's below. */
+  private fun binding(binder: SrtBinderPort, on: Boolean = true, stop: AcquireStop = AcquireStop()) = SrtBind(binder, { lines += it }, on, stop)
+
+  /** A stand-in for srtdroid's socket: each made in order, and whether it was closed. */
+  private class Sock(val made: Int) {
+    var closed = false
+  }
+
+  private val made = mutableListOf<Sock>()
+
+  private fun fresh(): Sock = Sock(made.size).also { made += it }
+
+  /** [SrtBind.open] with [socketId] as every socket's id: the socket it hands back is the one connected. */
+  private fun SrtBind.bind(attemptId: Int, network: Long?, target: InetSocketAddress, socketId: () -> Int): Sock = open(attemptId, network, target, ::fresh, { socketId() }) { it.closed = true }
 
   private fun fields(): List<List<Pair<String, Any?>>> = lines.onEach { assertEquals("srt-bind", it.kind) }.map { it.fields }
 
@@ -119,18 +134,70 @@ class SrtBindTest {
     val binder = FakeBinder { (6 shl 16) or 5001 }
     val bind = binding(binder)
     bind.bind(4, wifi, v4) { 9 }
+    made.clear()
     binder.answer = { 0 }
     bind.bind(5, wifi, v4) { 10 }
     bind.bind(6, null, v4) { 11 }
     assertEquals(listOf(Triple(9, wifi, false)), binder.calls, "the shim is called once")
     assertEquals(
       listOf(
-        listOf("attempt" to 4, "result" to "failed", "op" to "acquire", "error" to "srt-5001"),
+        listOf("attempt" to 4, "result" to "failed", "op" to "acquire", "error" to "srt-5001", "action" to "fresh-socket"),
         listOf("attempt" to 5, "result" to "unavailable", "op" to "disabled"),
         listOf("attempt" to 6, "result" to "unavailable", "op" to "disabled"),
       ),
       fields(),
     )
+    assertEquals(listOf(false, false), made.map { it.closed }, "a disabled binding opens one socket an attempt and keeps it")
+  }
+
+  /**
+   * Review of 002dec1e (b): after a failed acquire libsrt's state for that SRT socket is unknown, so it is closed and a
+   * fresh socket, made as the first was, connects unbound.
+   */
+  @Test
+  fun `a failed acquire closes that socket, and the connect goes to a fresh one, unbound`() {
+    val binder = FakeBinder { (6 shl 16) or 5001 }
+    val connected = binding(binder).bind(4, wifi, v4) { 9 }
+    assertEquals(2, made.size, "a second socket made")
+    assertTrue(made[0].closed, "the bound-and-failed socket is closed")
+    assertSame(made[1], connected, "the connect goes to the fresh one")
+    assertFalse(made[1].closed)
+    assertEquals(1, binder.calls.size, "the fresh one is not bound")
+    assertEquals(listOf(listOf("attempt" to 4, "result" to "failed", "op" to "acquire", "error" to "srt-5001", "action" to "fresh-socket")), fields())
+  }
+
+  @Test
+  fun `a failed acquire whose socket's close throws still connects a fresh one, and says the close's class`() {
+    val binder = FakeBinder { (6 shl 16) or 5001 }
+    val connected = binding(binder).open(4, wifi, v4, ::fresh, { 9 }) { throw IllegalStateException("closed twice") }
+    assertSame(made[1], connected)
+    assertEquals(
+      listOf(listOf("attempt" to 4, "result" to "failed", "op" to "acquire", "error" to "srt-5001", "action" to "fresh-socket", "rootError" to "IllegalStateException")),
+      fields(),
+    )
+  }
+
+  @Test
+  fun `every other outcome connects the socket it opened, never closed`() {
+    val answers = listOf(0, 1 shl 16, 2 shl 16, (3 shl 16) or 24, (4 shl 16) or 64, (5 shl 16) or 98, (9 shl 16) or 3)
+    val kept =
+      answers.map { code ->
+        made.clear()
+        val connected = binding(FakeBinder { code }).bind(4, wifi, v4) { 9 }
+        made.size == 1 && connected === made[0] && !made[0].closed
+      }
+    assertEquals(answers.map { true }, kept, "row each")
+  }
+
+  /** As the KDoc says: one failed acquire stops binding for the process, every sink's [SrtBind] with it. */
+  @Test
+  fun `the stop is the process's by default, shared by every binding`() {
+    val first = SrtBind(FakeBinder { (6 shl 16) or 5001 }, { lines += it })
+    val second = SrtBind(FakeBinder(), { lines += it })
+    first.bind(4, wifi, v4) { 9 }
+    second.bind(5, wifi, v4) { 10 }
+    assertEquals(listOf("failed", "unavailable"), fields().map { it[1].second })
+    assertEquals("disabled", fields()[1][2].second)
   }
 
   @Test
@@ -153,7 +220,7 @@ class SrtBindTest {
         ((3 shl 16) or 24) to listOf("result" to "failed", "op" to "socket", "error" to "errno-24"),
         ((4 shl 16) or 64) to listOf("result" to "failed", "op" to "network", "error" to "errno-64"),
         ((5 shl 16) or 98) to listOf("result" to "failed", "op" to "bind", "error" to "errno-98"),
-        ((6 shl 16) or 5001) to listOf("result" to "failed", "op" to "acquire", "error" to "srt-5001"),
+        ((6 shl 16) or 5001) to listOf("result" to "failed", "op" to "acquire", "error" to "srt-5001", "action" to "fresh-socket"),
         ((9 shl 16) or 3) to listOf("result" to "failed", "op" to "unknown", "error" to "code-589827"),
         -1 to listOf("result" to "failed", "op" to "unknown", "error" to "code--1"),
       )

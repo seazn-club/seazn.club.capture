@@ -537,16 +537,24 @@ class BridgeCore(
   /**
    * Review C4a I-2: facts that throw never stop the snapshots. The last good facts stand in, the
    * snapshot is counted as not whole, and the failure is an `engine-error` line, at most one a minute
-   * ([ErrorLines]). An `Error` is not caught here: it reaches the task boundary (carry 15).
+   * ([ErrorLines]). An `Error` other than a `LinkageError` (S7) is not caught here: it reaches the task boundary (carry 15).
    */
   private fun read(): PlatformFacts =
     try {
       platform.facts().also { lastFacts = it }
     } catch (failure: Exception) {
-      factsFailures += 1
-      errors.line(clock.monotonicMs(), "facts: ${Failures.describe(failure)}")?.let(engine::log)
-      lastFacts
+      factFailed(failure)
+    } catch (failure: LinkageError) {
+      // S7: an OEM API missing from a facts read is no part of the capture stack, so it is never held against the
+      // process (Failures.permanent) and never ends a pairing: it is counted and said as any facts failure is.
+      factFailed(failure)
     }
+
+  private fun factFailed(failure: Throwable): PlatformFacts {
+    factsFailures += 1
+    errors.line(clock.monotonicMs(), "facts: ${Failures.describe(failure)}")?.let(engine::log)
+    return lastFacts
+  }
 
   /** The record's counters, the scheduler guard's (review 13, I3), and the engine's and the bridge's (review C4a I-2, m-8), for Diagnostics. */
   private fun wire(snapshot: Snapshot, facts: PlatformFacts): Map<String, Any?> =

@@ -36,7 +36,8 @@ data class StuckWatch(
 
   private fun stuck(sample: LinkSample, targetBps: Int, transport: Transport, srtLatencyMs: Int): Boolean {
     if (transport != Transport.SRT || targetBps > Encode.FLOOR_BPS) return false
-    val buffer = sample.sendBufferMs?.takeIf { it >= 0 } ?: return false
+    // A negative reading (the record has -336) is never 75% of the latency, so it ends the run like any drained one.
+    val buffer = sample.sendBufferMs ?: return false
     return buffer.toLong() * 100 >= srtLatencyMs.toLong() * STUCK_BUFFER_PERCENT
   }
 

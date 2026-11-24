@@ -68,6 +68,21 @@ class NeverLiveRetryTest {
   }
 
   @Test
+  fun `a broadcast that went live after two minutes of failures retries every 2 s once it drops`() {
+    val rig = failingFor(120_000)
+    check(rig.session.retries.slow > 0) { "the ladder moved before live" }
+    val waiting = (rig.phase as Phase.Connecting).step as ConnectStep.Waiting
+    rig.at(waiting.connectAtMs)
+    rig.send(Input.Tick)
+    rig.send(Input.Connected(rig.attempt!!))
+    rig.advance(1_000, videoPerStep = 15)
+    assertTrue(rig.session.liveSinceEpochMs != null, "live")
+    rig.send(Input.Dropped(rig.attempt!!, DropReason.ENDPOINT_CLOSED, null))
+    val retry = (rig.phase as Phase.Connecting).step as ConnectStep.Waiting
+    assertEquals(SessionMachine.RETRY_MS, retry.connectAtMs - rig.mono, "the hold bounds it now, not the ladder")
+  }
+
+  @Test
   fun `before live a drop of an attempt that connected backs off too, once the minute is out`() {
     val rig = MachineRig().armed()
     rig.ready()

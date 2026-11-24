@@ -485,12 +485,11 @@ internal object Transports {
       }
     }
     if (verdict !is StallVerdict.Rebuild) return Step(next, commands)
-    if (verdict.cause == StallCause.BELOW_FLOOR) {
-      // S1: past three in a row, a below-floor rebuild waits its turn, and the slow picture publishes meanwhile.
-      val floor = next.session.belowFloor
-      if (!floor.mayRebuild(now.monoMs)) return Step(next, commands)
-      next = next.copy(session = next.session.copy(belowFloor = floor.rebuilt(now.monoMs)))
-    }
+    // S1: a frames reading rebuilds only below the floor (the time rules are the tick's), and past three in a row it
+    // waits its turn, the slow picture publishing meanwhile.
+    val floor = next.session.belowFloor
+    if (!floor.mayRebuild(now.monoMs)) return Step(next, commands)
+    next = next.copy(session = next.session.copy(belowFloor = floor.rebuilt(now.monoMs)))
     val rebuilt = Timers.rebuild(next, verdict, now)
     return rebuilt.copy(commands = commands + rebuilt.commands)
   }

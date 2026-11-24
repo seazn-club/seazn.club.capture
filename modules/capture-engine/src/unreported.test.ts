@@ -4,8 +4,8 @@ import vectors from './wire/snapshot-vectors.json';
 
 describe('the snapshot before native has reported (PV27)', () => {
   // Native's own at-rest telemetry, `wire/snapshot-vectors.json`'s base: the C4a and C4b counters included.
-  it('reads at rest exactly as native writes telemetry at rest, all 25 keys', () => {
-    expect(Object.keys(vectors.telemetryBase)).toHaveLength(25);
+  it('reads at rest exactly as native writes telemetry at rest, all 26 keys', () => {
+    expect(Object.keys(vectors.telemetryBase)).toHaveLength(26);
     expect(IDLE_TELEMETRY).toEqual(vectors.telemetryBase);
   });
 

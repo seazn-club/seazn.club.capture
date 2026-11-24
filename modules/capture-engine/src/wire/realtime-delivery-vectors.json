@@ -1,0 +1,343 @@
+{
+  "about": "PROVISIONAL (design 2026-11-24, docs/specs/2026-11-24-realtime-nudge-phone-design.md): a beat answer's `realtime` (web spec 2026-11-24-realtime-push-nudges-design.md §2.1, branch feat/realtime-nudges) and T46's `delivery` (capture-beat.v1 at web edfff98171, branch feat/seazn-hosted), neither yet on web main nor vendored. Read by BodiesTest.kt (Bodies.realtime, Bodies.delivery, Bodies.beat). The vendor task swaps these rows for the vendored contract's fixtures and validates the answers with ajv. Every value is made up; no token here is a real JWT.",
+  "realtime": {
+    "valid": {
+      "url": "https://example-ref.supabase.co",
+      "apikey": "anon.example-key_0123456789",
+      "topic": "capture:6f1c2b7a-3d4e-4f50-8a9b-0c1d2e3f4a5b",
+      "token": "made-up.realtime-token.0001",
+      "expiresAt": 1790001800
+    },
+    "cases": [
+      { "why": "the valid grant", "patch": {}, "grant": true },
+      {
+        "why": "a trailing slash on the origin is read as the origin",
+        "patch": { "url": "https://example-ref.supabase.co/" },
+        "grant": true
+      },
+      {
+        "why": "a port on the origin",
+        "patch": { "url": "https://example-ref.supabase.co:8443" },
+        "grant": true
+      },
+      {
+        "why": "http is not https",
+        "patch": { "url": "http://example-ref.supabase.co" },
+        "grant": false
+      },
+      {
+        "why": "wss is not the server's https",
+        "patch": { "url": "wss://example-ref.supabase.co" },
+        "grant": false
+      },
+      {
+        "why": "a path is not an origin",
+        "patch": { "url": "https://example-ref.supabase.co/realtime/v1" },
+        "grant": false
+      },
+      {
+        "why": "a query is not an origin",
+        "patch": { "url": "https://example-ref.supabase.co?apikey=x" },
+        "grant": false
+      },
+      {
+        "why": "userinfo is not an origin",
+        "patch": { "url": "https://user@example-ref.supabase.co" },
+        "grant": false
+      },
+      { "why": "a url that is not a string", "patch": { "url": 42 }, "grant": false },
+      { "why": "no url", "drop": "url", "grant": false },
+      { "why": "an empty apikey", "patch": { "apikey": "" }, "grant": false },
+      {
+        "why": "an apikey that would need encoding in the URL",
+        "patch": { "apikey": "anon key&x=1" },
+        "grant": false
+      },
+      { "why": "no apikey", "drop": "apikey", "grant": false },
+      {
+        "why": "a topic of another family",
+        "patch": { "topic": "match-day:6f1c2b7a-3d4e-4f50-8a9b-0c1d2e3f4a5b" },
+        "grant": false
+      },
+      { "why": "a bare capture: topic", "patch": { "topic": "capture:" }, "grant": false },
+      {
+        "why": "a topic with a character outside the id's",
+        "patch": { "topic": "capture:6f1c 2b7a" },
+        "grant": false
+      },
+      { "why": "no topic", "drop": "topic", "grant": false },
+      { "why": "an empty token", "patch": { "token": "" }, "grant": false },
+      { "why": "a token that is not a string", "patch": { "token": 7 }, "grant": false },
+      { "why": "no token", "drop": "token", "grant": false },
+      {
+        "why": "an expiry that is a fraction",
+        "patch": { "expiresAt": 1790001800.5 },
+        "grant": false
+      },
+      {
+        "why": "an expiry that is a string",
+        "patch": { "expiresAt": "1790001800" },
+        "grant": false
+      },
+      { "why": "an expiry of 0", "patch": { "expiresAt": 0 }, "grant": false },
+      { "why": "no expiry", "drop": "expiresAt", "grant": false },
+      { "why": "null", "whole": null, "grant": false },
+      { "why": "an array", "whole": [], "grant": false },
+      { "why": "a string", "whole": "capture:x", "grant": false }
+    ]
+  },
+  "delivery": {
+    "cases": [
+      {
+        "why": "every member known",
+        "value": {
+          "relayOutput": "connected",
+          "programmePhase": "live",
+          "fps": 30,
+          "kbps": 2800,
+          "cameraIngest": "connected",
+          "programmeIngest": "connected"
+        },
+        "expected": {
+          "relayOutput": "connected",
+          "programmePhase": "live",
+          "fps": 30,
+          "kbps": 2800,
+          "cameraIngest": "connected",
+          "programmeIngest": "connected"
+        }
+      },
+      {
+        "why": "a passthrough session: the camera input only",
+        "value": { "cameraIngest": "disconnected" },
+        "expected": {
+          "relayOutput": null,
+          "programmePhase": null,
+          "fps": null,
+          "kbps": null,
+          "cameraIngest": "disconnected",
+          "programmeIngest": null
+        }
+      },
+      {
+        "why": "an unknown word is not known, and the rest still read",
+        "value": {
+          "relayOutput": "teleporting",
+          "programmePhase": "frozen",
+          "cameraIngest": "errored"
+        },
+        "expected": {
+          "relayOutput": null,
+          "programmePhase": "frozen",
+          "fps": null,
+          "kbps": null,
+          "cameraIngest": "errored",
+          "programmeIngest": null
+        }
+      },
+      {
+        "why": "a negative, a fractional or a string number is not known",
+        "value": { "fps": -1, "kbps": 2800.5, "relayOutput": "backoff" },
+        "expected": {
+          "relayOutput": "backoff",
+          "programmePhase": null,
+          "fps": null,
+          "kbps": null,
+          "cameraIngest": null,
+          "programmeIngest": null
+        }
+      },
+      {
+        "why": "a number past the schema's safe integer is not known",
+        "value": { "kbps": 9007199254740992, "programmePhase": "reconnecting" },
+        "expected": {
+          "relayOutput": null,
+          "programmePhase": "reconnecting",
+          "fps": null,
+          "kbps": null,
+          "cameraIngest": null,
+          "programmeIngest": null
+        }
+      },
+      {
+        "why": "zero is a reading",
+        "value": { "fps": 0, "kbps": 0 },
+        "expected": {
+          "relayOutput": null,
+          "programmePhase": null,
+          "fps": 0,
+          "kbps": 0,
+          "cameraIngest": null,
+          "programmeIngest": null
+        }
+      },
+      {
+        "why": "nothing known is no facts",
+        "value": { "relayOutput": "teleporting" },
+        "expected": null
+      },
+      { "why": "an empty object is no facts", "value": {}, "expected": null },
+      { "why": "null is no facts", "value": null, "expected": null },
+      { "why": "a string is no facts", "value": "connected", "expected": null }
+    ]
+  },
+  "answers": [
+    {
+      "why": "go-live with both: the grant and the facts read, and the answer is the go-live it was",
+      "status": 200,
+      "body": {
+        "state": "go-live",
+        "sid": "6f1c2b7a-3d4e-4f50-8a9b-0c1d2e3f4a5b",
+        "startedBy": "organiser",
+        "label": "Example Town v Sample CC",
+        "scheduledStart": null,
+        "autoAllowed": true,
+        "destinationName": "YouTube · Example Town CC",
+        "pollSeconds": 10,
+        "realtime": {
+          "url": "https://example-ref.supabase.co",
+          "apikey": "anon.example-key_0123456789",
+          "topic": "capture:6f1c2b7a-3d4e-4f50-8a9b-0c1d2e3f4a5b",
+          "token": "made-up.realtime-token.0001",
+          "expiresAt": 1790001800
+        },
+        "delivery": { "cameraIngest": "connected" }
+      },
+      "grant": true,
+      "delivery": true
+    },
+    {
+      "why": "live with both",
+      "status": 200,
+      "body": {
+        "state": "live",
+        "sid": "6f1c2b7a-3d4e-4f50-8a9b-0c1d2e3f4a5b",
+        "label": "Example Town v Sample CC",
+        "scheduledStart": null,
+        "autoAllowed": true,
+        "destinationName": "YouTube · Example Town CC",
+        "pollSeconds": 10,
+        "realtime": {
+          "url": "https://example-ref.supabase.co",
+          "apikey": "anon.example-key_0123456789",
+          "topic": "capture:6f1c2b7a-3d4e-4f50-8a9b-0c1d2e3f4a5b",
+          "token": "made-up.realtime-token.0002",
+          "expiresAt": 1790001805
+        },
+        "delivery": {
+          "relayOutput": "connected",
+          "programmePhase": "live",
+          "fps": 30,
+          "kbps": 2800
+        }
+      },
+      "grant": true,
+      "delivery": true
+    },
+    {
+      "why": "waiting carries a grant and never facts (T46: go-live and live only)",
+      "status": 200,
+      "body": {
+        "state": "waiting",
+        "label": "Example Town v Sample CC",
+        "scheduledStart": null,
+        "autoAllowed": true,
+        "destinationName": "YouTube · Example Town CC",
+        "pollSeconds": 60,
+        "realtime": {
+          "url": "https://example-ref.supabase.co",
+          "apikey": "anon.example-key_0123456789",
+          "topic": "capture:6f1c2b7a-3d4e-4f50-8a9b-0c1d2e3f4a5b",
+          "token": "made-up.realtime-token.0003",
+          "expiresAt": 1790001810
+        },
+        "delivery": { "cameraIngest": "connected" }
+      },
+      "grant": true,
+      "delivery": false
+    },
+    {
+      "why": "a garbled grant on live is no grant, and the answer, its waiting fields and its facts still read",
+      "status": 200,
+      "body": {
+        "state": "live",
+        "sid": "6f1c2b7a-3d4e-4f50-8a9b-0c1d2e3f4a5b",
+        "label": "Example Town v Sample CC",
+        "scheduledStart": null,
+        "autoAllowed": true,
+        "destinationName": "YouTube · Example Town CC",
+        "pollSeconds": 10,
+        "realtime": { "url": "http://example-ref.supabase.co", "token": "" },
+        "delivery": { "programmeIngest": "errored" }
+      },
+      "grant": false,
+      "delivery": true
+    },
+    {
+      "why": "garbled facts on live are no facts, and the answer still reads",
+      "status": 200,
+      "body": {
+        "state": "live",
+        "sid": "6f1c2b7a-3d4e-4f50-8a9b-0c1d2e3f4a5b",
+        "label": "Example Town v Sample CC",
+        "scheduledStart": null,
+        "autoAllowed": true,
+        "destinationName": "YouTube · Example Town CC",
+        "pollSeconds": 10,
+        "delivery": ["connected"]
+      },
+      "grant": false,
+      "delivery": false
+    },
+    {
+      "why": "replaced is not this pairing's: a grant there is not read",
+      "status": 200,
+      "body": {
+        "state": "replaced",
+        "realtime": {
+          "url": "https://example-ref.supabase.co",
+          "apikey": "anon.example-key_0123456789",
+          "topic": "capture:6f1c2b7a-3d4e-4f50-8a9b-0c1d2e3f4a5b",
+          "token": "made-up.realtime-token.0004",
+          "expiresAt": 1790001815
+        }
+      },
+      "grant": false,
+      "delivery": false
+    },
+    {
+      "why": "taken is not this pairing's either",
+      "status": 200,
+      "body": {
+        "state": "taken",
+        "realtime": {
+          "url": "https://example-ref.supabase.co",
+          "apikey": "anon.example-key_0123456789",
+          "topic": "capture:6f1c2b7a-3d4e-4f50-8a9b-0c1d2e3f4a5b",
+          "token": "made-up.realtime-token.0005",
+          "expiresAt": 1790001820
+        }
+      },
+      "grant": false,
+      "delivery": false
+    },
+    {
+      "why": "a 410's body is never a grant or facts: only a 2xx's land",
+      "status": 410,
+      "body": {
+        "code": "session_over",
+        "endReason": "stopped",
+        "realtime": {
+          "url": "https://example-ref.supabase.co",
+          "apikey": "anon.example-key_0123456789",
+          "topic": "capture:6f1c2b7a-3d4e-4f50-8a9b-0c1d2e3f4a5b",
+          "token": "made-up.realtime-token.0006",
+          "expiresAt": 1790001825
+        },
+        "delivery": { "cameraIngest": "connected" }
+      },
+      "grant": false,
+      "delivery": false
+    }
+  ]
+}

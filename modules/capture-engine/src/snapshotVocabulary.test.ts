@@ -8,7 +8,15 @@ import type {
   UnpairReason,
 } from '@/domain/session/Pairing';
 import type { EndReason } from '@/domain/session/SessionState';
-import type { HeartbeatStatus, SrtStats, Telemetry } from './CaptureEnginePort';
+import type {
+  HeartbeatStatus,
+  IngestState,
+  ProgrammePhase,
+  RelayOutput,
+  ServerFacts,
+  SrtStats,
+  Telemetry,
+} from './CaptureEnginePort';
 import vectors from './wire/snapshot-vectors.json';
 
 /**
@@ -35,6 +43,7 @@ const TELEMETRY: Readonly<Record<keyof Telemetry, true>> = {
   thermalHeadroom: true,
   captureTimestampMs: true,
   shed: true,
+  server: true,
   heartbeat: true,
   recordSinkFailures: true,
   recordReentrantDropped: true,
@@ -55,6 +64,33 @@ const HEARTBEAT: Readonly<Record<keyof HeartbeatStatus, true>> = {
   lastResult: true,
   consecutiveFailures: true,
   failures: true,
+};
+
+const SERVER: Readonly<Record<keyof ServerFacts, true>> = {
+  relayOutput: true,
+  programmePhase: true,
+  fps: true,
+  kbps: true,
+  cameraIngest: true,
+  programmeIngest: true,
+  ageS: true,
+};
+const RELAY: Readonly<Record<RelayOutput, true>> = {
+  connecting: true,
+  connected: true,
+  backoff: true,
+};
+const PROGRAMME: Readonly<Record<ProgrammePhase, true>> = {
+  waiting: true,
+  live: true,
+  frozen: true,
+  reconnecting: true,
+  final: true,
+};
+const INGEST: Readonly<Record<IngestState, true>> = {
+  connected: true,
+  disconnected: true,
+  errored: true,
 };
 
 const CAUSE: Readonly<Record<Cause, true>> = {
@@ -103,9 +139,10 @@ const sorted = (keys: readonly string[]) => [...keys].sort();
 
 describe("the port names exactly what native's snapshot sends", () => {
   it.each([
-    ['telemetry', TELEMETRY, vectors.telemetryKeys.telemetry, 25],
+    ['telemetry', TELEMETRY, vectors.telemetryKeys.telemetry, 26],
     ['srt', SRT, vectors.telemetryKeys.srt, 4],
     ['heartbeat', HEARTBEAT, vectors.telemetryKeys.heartbeat, 4],
+    ['server', SERVER, vectors.telemetryKeys.server, 7],
   ] as const)('%s keys', (_name, table, keys, count) => {
     expect(keys).toHaveLength(count);
     expect(sorted(Object.keys(table))).toEqual(sorted(keys));
@@ -119,6 +156,9 @@ describe("the port names exactly what native's snapshot sends", () => {
     ['unpairReason', UNPAIR, vectors.vocabulary.unpairReason, 6],
     ['endReason', END, vectors.vocabulary.endReason, 2],
     ['scoreUpdates', SCORE_UPDATES, vectors.vocabulary.scoreUpdates, 2],
+    ['relayOutput', RELAY, vectors.vocabulary.relayOutput, 3],
+    ['programmePhase', PROGRAMME, vectors.vocabulary.programmePhase, 5],
+    ['ingest', INGEST, vectors.vocabulary.ingest, 3],
   ] as const)('%s words', (_name, table, words, count) => {
     expect(words).toHaveLength(count);
     expect(sorted(Object.keys(table))).toEqual(sorted(words));

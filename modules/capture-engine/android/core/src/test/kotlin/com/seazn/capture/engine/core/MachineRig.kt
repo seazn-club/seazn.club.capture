@@ -119,14 +119,23 @@ class MachineRig(val request: PairRequest = Configs.pairRequest(), val descripto
   }
 
   /** Answers the beat in flight, ticking until one is; fails after two minutes with none. */
-  fun hear(state: String?, sid: String? = null, startedBy: String? = null, endReason: String? = null, status: Int = 200, pollSeconds: Int = 10): List<Command> {
+  fun hear(
+    state: String?,
+    sid: String? = null,
+    startedBy: String? = null,
+    endReason: String? = null,
+    status: Int = 200,
+    pollSeconds: Int = 10,
+    realtime: RealtimeGrant? = null,
+    delivery: ServerDelivery? = null,
+  ): List<Command> {
     val until = mono + 120_000
     while (phase.beating?.heartbeat?.inFlightId == null) {
       check(mono < until) { "no beat in flight in ${phase.name}" }
       advance(500)
     }
     val id = phase.beating!!.heartbeat.inFlightId!!
-    val reply = BeatReply(state, sid, startedBy, endReason, Configs.waiting(pollSeconds))
+    val reply = BeatReply(state, sid, startedBy, endReason, Configs.waiting(pollSeconds), realtime = realtime, delivery = delivery)
     return send(Input.HeartbeatAnswered(id, HeartbeatResponse.Answered(status, reply)))
   }
 

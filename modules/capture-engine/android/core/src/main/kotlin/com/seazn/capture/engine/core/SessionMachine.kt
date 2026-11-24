@@ -42,7 +42,7 @@ object SessionMachine {
    * N49 fix round 1: a session that ends writes its floor cuts no line has said yet ([FloorCuts.closed]).
    */
   fun reduce(phase: Phase, input: Input, now: Now): Step =
-    BeatLogs.closed(phase, NeverLiveRetries.closed(phase, FloorCuts.closed(phase, reduced(phase, input, now))))
+    Nudges.closed(phase, BeatLogs.closed(phase, NeverLiveRetries.closed(phase, FloorCuts.closed(phase, reduced(phase, input, now)))), now)
 
   private fun reduced(phase: Phase, input: Input, now: Now): Step {
     if (input == Input.Tick || input == Input.Stop) return apply(phase, input, now)
@@ -81,6 +81,8 @@ object SessionMachine {
       is Input.Device -> Devices.sampled(phase, input.sample)
       is Input.PlaylistFetched -> Deliveries.fetched(phase, input, now)
       is Input.HeartbeatAnswered -> Heartbeats.answered(phase, input, now)
+      is Input.Nudge -> Nudges.heard(phase, input, now)
+      is Input.NudgeLink -> Nudges.reported(phase, input, now)
       is Input.CodeAnswered -> Verdicts.code(phase, input, now)
       is Input.StartAnswered -> Verdicts.started(phase, input, now)
       is Input.PlatformFailed -> platformFailed(phase, input, now)
@@ -997,7 +999,9 @@ internal object Heartbeats {
     val deletes = if (delivered || codeDead) listOf(Command.DeleteStopped(pairing.name.code, pairing.name.slot), record("stopped-delivered", "status" to status)) else emptyList()
     // The refused set keeps the sid for the pairing's life (A17): a server that names it later is still ignored.
     val kept = (if (delivered || codeDead) refreshed.copy(stopped = null) else refreshed).copy(lastBeatLine = compared)
-    val decided = Verdicts.beat(phase.withPairing(kept), word, now)
-    return decided.copy(commands = noted + listOfNotNull(unreadable) + deletes + decided.commands)
+    // Design 2026-11-24 §2.2, §3: a 2xx's grant and T46's facts, before the word moves the phase.
+    val (heard, facts) = Nudges.answered(phase, kept, response?.reply?.takeIf { ok }, now)
+    val decided = Verdicts.beat(phase.withPairing(heard), word, now)
+    return decided.copy(commands = noted + listOfNotNull(unreadable) + deletes + facts + decided.commands)
   }
 }

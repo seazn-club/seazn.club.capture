@@ -16,6 +16,13 @@ data class BeatReply(
   val endReason: String?,
   val waiting: WaitingFields?,
   val waitingUnreadable: String? = null,
+  /**
+   * Design 2026-11-24 §2.1: the nudge channel's grant, read only from a 2xx that is not `replaced` or `taken`; null when
+   * absent or unreadable, which never refuses the answer. A credential: [RealtimeGrant] prints no token.
+   */
+  val realtime: RealtimeGrant? = null,
+  /** T46 (design §3): what the relay and Cloudflare last said, from a 2xx `go-live` or `live` only; null when none is known. */
+  val delivery: ServerDelivery? = null,
 )
 
 /**

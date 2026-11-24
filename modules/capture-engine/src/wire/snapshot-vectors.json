@@ -60,7 +60,10 @@
       "unavailable",
       "competition_frozen",
       "match_stopped"
-    ]
+    ],
+    "relayOutput": ["connecting", "connected", "backoff"],
+    "programmePhase": ["waiting", "live", "frozen", "reconnecting", "final"],
+    "ingest": ["connected", "disconnected", "errored"]
   },
   "telemetryKeys": {
     "telemetry": [
@@ -81,6 +84,7 @@
       "thermalHeadroom",
       "captureTimestampMs",
       "shed",
+      "server",
       "heartbeat",
       "recordSinkFailures",
       "recordReentrantDropped",
@@ -91,7 +95,16 @@
       "stickyFailure"
     ],
     "srt": ["sent", "retransmitted", "dropped", "rttMs"],
-    "heartbeat": ["lastSentAtEpochMs", "lastResult", "consecutiveFailures", "failures"]
+    "heartbeat": ["lastSentAtEpochMs", "lastResult", "consecutiveFailures", "failures"],
+    "server": [
+      "relayOutput",
+      "programmePhase",
+      "fps",
+      "kbps",
+      "cameraIngest",
+      "programmeIngest",
+      "ageS"
+    ]
   },
   "telemetryBase": {
     "bitrateKbps": null,
@@ -111,6 +124,7 @@
     "thermalHeadroom": null,
     "captureTimestampMs": null,
     "shed": null,
+    "server": null,
     "heartbeat": {
       "lastSentAtEpochMs": null,
       "lastResult": null,
@@ -604,6 +618,60 @@
         "reportedAtMs": 1790000011000,
         "survivesBackground": true,
         "telemetry": {}
+      }
+    },
+    {
+      "name": "live-server-facts",
+      "wire": {
+        "state": { "kind": "publishing", "transport": "srt", "sinceEpochMs": 1790000001000 },
+        "pairing": {},
+        "broadcast": {},
+        "ready": { "camera": true, "sound": true, "network": true, "held": true },
+        "refusal": null,
+        "lastEnd": null,
+        "unpaired": null,
+        "codeEndedPending": false,
+        "camera": "own",
+        "reportedAtMs": 1790000064900,
+        "survivesBackground": true,
+        "telemetry": {
+          "server": {
+            "relayOutput": "connected",
+            "programmePhase": "live",
+            "fps": 30,
+            "kbps": 2800,
+            "cameraIngest": "connected",
+            "programmeIngest": "connected",
+            "ageS": 4
+          }
+        }
+      }
+    },
+    {
+      "name": "live-server-facts-camera-only",
+      "wire": {
+        "state": { "kind": "publishing", "transport": "rtmps", "sinceEpochMs": 1790000001000 },
+        "pairing": {},
+        "broadcast": {},
+        "ready": { "camera": true, "sound": true, "network": true, "held": true },
+        "refusal": null,
+        "lastEnd": null,
+        "unpaired": null,
+        "codeEndedPending": false,
+        "camera": "own",
+        "reportedAtMs": 1790000061000,
+        "survivesBackground": true,
+        "telemetry": {
+          "server": {
+            "relayOutput": null,
+            "programmePhase": null,
+            "fps": null,
+            "kbps": null,
+            "cameraIngest": "disconnected",
+            "programmeIngest": null,
+            "ageS": 0
+          }
+        }
       }
     }
   ]

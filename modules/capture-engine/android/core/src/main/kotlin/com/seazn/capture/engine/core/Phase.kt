@@ -92,6 +92,16 @@ data class PairingState(
   val beatLog: BeatLog = BeatLog(),
   /** Final review I-2b: this pairing has had its `waiting-unreadable` line, whichever answer brought it. */
   val waitingUnreadableSaid: Boolean = false,
+  /** Design 2026-11-24 §2.2: the nudge channel's grant the socket holds ([Nudges.taken]); never projected, never printed. */
+  val realtime: RealtimeGrant? = null,
+  /** The socket failed or was refused since the grant was taken: the next beat's grant is taken whatever it has left. */
+  val realtimeSwapDue: Boolean = false,
+  /** When the last nudge brought a beat forward, on the monotonic clock ([Nudges.NUDGE_GAP_MS]). */
+  val nudgedAtMs: Long? = null,
+  /** The `nudges` lines written and held back ([NudgeLines]). */
+  val nudgeLines: NudgeLines = NudgeLines(),
+  /** T46 (design §3): the last delivery facts heard while a broadcast is held; null otherwise. */
+  val server: ServerFacts? = null,
 ) {
   val name: PairingName
     get() = request.name

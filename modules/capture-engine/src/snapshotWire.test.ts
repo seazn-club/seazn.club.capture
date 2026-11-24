@@ -309,6 +309,27 @@ const EXPECTED: Readonly<Record<string, Expected>> = {
     reportedAtMs: 1_790_000_010_000,
     survivesBackground: true,
   },
+  // T46 (design 2026-11-24 §3): the server's delivery facts ride telemetry; the rest of the snapshot is live as ever.
+  'live-server-facts': {
+    ...REST,
+    state: { kind: 'publishing', transport: 'srt', sinceEpochMs: 1_790_000_001_000 },
+    pairing: PAIRING,
+    broadcast: BROADCAST,
+    ready: READY,
+    camera: 'own',
+    reportedAtMs: 1_790_000_064_900,
+    survivesBackground: true,
+  },
+  'live-server-facts-camera-only': {
+    ...REST,
+    state: { kind: 'publishing', transport: 'rtmps', sinceEpochMs: 1_790_000_001_000 },
+    pairing: PAIRING,
+    broadcast: BROADCAST,
+    ready: READY,
+    camera: 'own',
+    reportedAtMs: 1_790_000_061_000,
+    survivesBackground: true,
+  },
   // E2 (2026-11-17): the server refused the court's automatic start; the phone says why while it stands.
   'paired-court-auto-refused': {
     ...REST,
@@ -324,8 +345,8 @@ const EXPECTED: Readonly<Record<string, Expected>> = {
 
 describe('carries 2-6: the snapshot wire, as native writes it (Task 12)', () => {
   // The file's count, so an emptied or truncated file cannot pass by sweeping nothing (PV12).
-  it('has an expectation for each of the 22 cases, and a case for every expectation', () => {
-    expect(vectors.cases).toHaveLength(22);
+  it('has an expectation for each of the 24 cases, and a case for every expectation', () => {
+    expect(vectors.cases).toHaveLength(24);
     expect(vectors.cases.map((c) => c.name).sort()).toEqual(Object.keys(EXPECTED).sort());
   });
 
@@ -339,9 +360,9 @@ describe('carries 2-6: the snapshot wire, as native writes it (Task 12)', () => 
     expect(telemetry).toEqual(wire.telemetry);
   });
 
-  it('carry 6 knows each of the 18 vocabularies native writes, every word and no other', () => {
+  it('carry 6 knows each of the 21 vocabularies native writes, every word and no other', () => {
     const keys = Object.keys(vectors.vocabulary).sort();
-    expect(keys).toHaveLength(18);
+    expect(keys).toHaveLength(21);
     expect(Object.keys(WIRE_VOCABULARY).sort()).toEqual(keys);
     for (const [key, words] of Object.entries(vectors.vocabulary)) {
       const known = WIRE_VOCABULARY[key as keyof typeof WIRE_VOCABULARY];
@@ -673,5 +694,66 @@ describe('carries 2-6: the snapshot wire, as native writes it (Task 12)', () => 
     ['telemetry missing a key', () => withTelemetry(({ dataUsedBytes: _gone, ...rest }) => rest)],
   ])('reads %s as malformed, never as a state', (_why, wire) => {
     expect(toEngineSnapshot(wire())).toBeNull();
+  });
+});
+
+/**
+ * T46 (design 2026-11-24 §3): `telemetry.server`, the relay's and Cloudflare's last word, read member by member. A
+ * garbled member is not known, a garbled whole is none, and neither refuses the snapshot. Expected values are written
+ * by hand from the vectors' `live-server-facts` case.
+ */
+describe('the server delivery facts (T46)', () => {
+  const FACTS = {
+    relayOutput: 'connected',
+    programmePhase: 'live',
+    fps: 30,
+    kbps: 2800,
+    cameraIngest: 'connected',
+    programmeIngest: 'connected',
+    ageS: 4,
+  };
+  const withServer = (server: unknown) => {
+    const wire = vectorWire('live-server-facts');
+    return { ...wire, telemetry: { ...(wire.telemetry as object), server } };
+  };
+  const read = (server: unknown) => toEngineSnapshot(withServer(server))?.telemetry.server;
+
+  it('reads every member as native wrote it', () => {
+    expect(read(FACTS)).toEqual(FACTS);
+  });
+
+  it('reads null as none, and a snapshot with no server key (a native build before T46) as none', () => {
+    expect(read(null)).toBeNull();
+    const wire = vectorWire('live-telemetry');
+    const { server: _gone, ...older } = wire.telemetry as Record<string, unknown>;
+    const snapshot = toEngineSnapshot({ ...wire, telemetry: older });
+    expect(snapshot).not.toBeNull();
+    expect(snapshot?.telemetry.server).toBeNull();
+  });
+
+  it.each([
+    ['an unknown relay word', { relayOutput: 'teleporting' }, 'relayOutput'],
+    ['an unknown programme word', { programmePhase: 'paused' }, 'programmePhase'],
+    ['an ingest word of the relay', { cameraIngest: 'backoff' }, 'cameraIngest'],
+    ['a programme ingest in text case', { programmeIngest: 'Connected' }, 'programmeIngest'],
+    ['fps in text', { fps: '30' }, 'fps'],
+    ['a negative kbps', { kbps: -1 }, 'kbps'],
+    ['a fractional fps', { fps: 29.97 }, 'fps'],
+    ['an infinite kbps', { kbps: Number.POSITIVE_INFINITY }, 'kbps'],
+  ] as const)('reads %s as that member not known, the rest as sent', (_why, patch, member) => {
+    expect(read({ ...FACTS, ...patch })).toEqual({ ...FACTS, [member]: null });
+  });
+
+  it.each([
+    ['a string', 'connected'],
+    ['an array', [FACTS]],
+    ['no age', { ...FACTS, ageS: undefined }],
+    ['an age in text', { ...FACTS, ageS: '4' }],
+    ['a negative age', { ...FACTS, ageS: -1 }],
+  ])('reads %s as no facts, and the snapshot still reads', (_why, server) => {
+    const snapshot = toEngineSnapshot(withServer(server));
+    expect(snapshot).not.toBeNull();
+    expect(snapshot?.state.kind).toBe('publishing');
+    expect(snapshot?.telemetry.server).toBeNull();
   });
 });

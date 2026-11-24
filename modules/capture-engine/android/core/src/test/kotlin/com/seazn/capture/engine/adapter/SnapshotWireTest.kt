@@ -206,6 +206,18 @@ class SnapshotWireTest {
         val snapshot = bare(SnapshotState.Paired, 1_790_000_011_000).copy(pairing = PairingView(name, true, waiting), ready = allReady, camera = CameraState.OWN)
         SnapshotWire.of(snapshot, PlatformFacts(survivesBackground = true), clean)
       },
+      // T46 (design 2026-11-24 §3): every fact known, heard 4.9 s before the snapshot: the age is whole seconds, cut down.
+      "live-server-facts" to {
+        val facts = ServerFacts(ServerDelivery("connected", "live", 30, 2_800, "connected", "connected"), heardAtEpochMs = 1_790_000_060_000)
+        val snapshot = bare(SnapshotState.Publishing(Transport.SRT, 1_790_000_001_000), 1_790_000_064_900).copy(pairing = pairing, broadcast = broadcast, ready = allReady, camera = CameraState.OWN, server = facts)
+        SnapshotWire.of(snapshot, PlatformFacts(survivesBackground = true), clean)
+      },
+      // A passthrough session's camera input only; heard after the snapshot's clock (a wall clock stepped back) reads 0.
+      "live-server-facts-camera-only" to {
+        val facts = ServerFacts(ServerDelivery(cameraIngest = "disconnected"), heardAtEpochMs = 1_790_000_062_000)
+        val snapshot = bare(SnapshotState.Publishing(Transport.RTMPS, 1_790_000_001_000), 1_790_000_061_000).copy(pairing = pairing, broadcast = broadcast, ready = allReady, camera = CameraState.OWN, server = facts)
+        SnapshotWire.of(snapshot, PlatformFacts(survivesBackground = true), clean)
+      },
       // Court stream Task 13 (P2): the operator's Go live in flight, waiting for POST start's answer.
       "paired-starting" to {
         val snapshot =
@@ -275,7 +287,7 @@ class SnapshotWireTest {
   @Test
   fun `carries 3, 5, 6 each native snapshot becomes the shared wire`() {
     val cases = cases()
-    assertEquals(22, cases.size, "the vector file's twenty-two cases")
+    assertEquals(24, cases.size, "the vector file's twenty-four cases")
     assertEquals(cases.map { it.first }.toSet(), builders.keys, "one builder per case")
     for ((name, expected) in cases) assertJsonEquals(expected, JSONObject(WireJson.encode(builders.getValue(name)())), name)
   }
@@ -495,6 +507,7 @@ class SnapshotWireTest {
         unpaired = Unpaired(UnpairReason.TAKEN, name),
         codeEndedPending = true,
         language = "fr",
+        server = ServerFacts(ServerDelivery("connected", "live", 30, 2_800, "errored", "disconnected"), heardAtEpochMs = 1_790_000_058_000),
       ),
       liveFacts,
       RecordCounters(2, 1, 4, 3, snapshotFailures = 7, commandFailures = 8, stickyFailure = true),
@@ -531,6 +544,8 @@ class SnapshotWireTest {
   private fun Sources.ready(change: ReadyView.() -> ReadyView) = snap { copy(ready = ready.change()) }
 
   private fun Sources.unpaired(change: Unpaired.() -> Unpaired) = snap { copy(unpaired = unpaired!!.change()) }
+
+  private fun Sources.server(change: ServerDelivery.() -> ServerDelivery) = snap { copy(server = server!!.copy(delivery = server.delivery.change())) }
 
   /** A change to each field that crosses the bridge. A state table, long by nature. */
   private val crosses: Map<String, (Sources) -> Sources> =
@@ -594,6 +609,13 @@ class SnapshotWireTest {
       "unpaired.name.slot" to { s -> s.unpaired { copy(name = name.copy(slot = 2)) } },
       "unpaired.name.tokenTag" to { s -> s.unpaired { copy(name = name.copy(tokenTag = "95e90931")) } },
       "codeEndedPending" to { s -> s.snap { copy(codeEndedPending = false) } },
+      "server.delivery.relayOutput" to { s -> s.server { copy(relayOutput = "backoff") } },
+      "server.delivery.programmePhase" to { s -> s.server { copy(programmePhase = "frozen") } },
+      "server.delivery.fps" to { s -> s.server { copy(fps = 25) } },
+      "server.delivery.kbps" to { s -> s.server { copy(kbps = 1_900) } },
+      "server.delivery.cameraIngest" to { s -> s.server { copy(cameraIngest = "connected") } },
+      "server.delivery.programmeIngest" to { s -> s.server { copy(programmeIngest = "connected") } },
+      "server.heardAtEpochMs" to { s -> s.snap { copy(server = server!!.copy(heardAtEpochMs = 1_790_000_050_000)) } },
       "facts.audioLevel" to { s -> s.copy(facts = s.facts.copy(audioLevel = 0.25)) },
       "facts.deliveryCheckedAtMs" to { s -> s.copy(facts = s.facts.copy(deliveryCheckedAtMs = null)) },
       "facts.captureTimestampMs" to { s -> s.copy(facts = s.facts.copy(captureTimestampMs = null)) },

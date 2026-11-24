@@ -102,6 +102,15 @@ sealed interface Command {
   /** The pairing is over: stop publishing and capture. The service goes with [Release]. */
   data class End(val reason: EndReason) : Command
 
+  /**
+   * Design 2026-11-24 §2.3: hold the pairing's nudge socket on [grant]'s channel: join it, or on a joined channel send
+   * the new token. Sent when the grant to hold changes ([Nudges.closed]); `toString` prints no token.
+   */
+  data class Nudges(val grant: RealtimeGrant) : Command
+
+  /** No grant to hold: close the nudge socket and do not reconnect. */
+  data object NudgesOff : Command
+
   /** A line for the session record. The engine routes it to [SessionRecord]; the platform never sees it. */
   data class Record(val entry: RecordEntry) : Command
 }

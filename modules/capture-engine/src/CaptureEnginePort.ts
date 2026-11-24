@@ -169,6 +169,22 @@ export type HeartbeatStatus = {
  * encoded rates are null), and for the delivered lag whenever `delivery` is
  * `unknown`. A reader shows a dash, not a 0.
  */
+/** T46's words (capture-beat.v1 at web edfff98171, PROVISIONAL until vendored). */
+export type RelayOutput = 'connecting' | 'connected' | 'backoff';
+export type ProgrammePhase = 'waiting' | 'live' | 'frozen' | 'reconnecting' | 'final';
+export type IngestState = 'connected' | 'disconnected' | 'errored';
+
+/** Each member null when not known; `ageS` is whole seconds since the answer that carried them, at `reportedAtMs`. */
+export type ServerFacts = {
+  readonly relayOutput: RelayOutput | null;
+  readonly programmePhase: ProgrammePhase | null;
+  readonly fps: number | null;
+  readonly kbps: number | null;
+  readonly cameraIngest: IngestState | null;
+  readonly programmeIngest: IngestState | null;
+  readonly ageS: number;
+};
+
 export type Telemetry = {
   /** Measured egress: what actually left the phone. Null off air. */
   readonly bitrateKbps: number | null;
@@ -204,6 +220,11 @@ export type Telemetry = {
   readonly captureTimestampMs: number | null;
   /** How far down the degradation ladder the device is (AGENTS §8). A device condition, not a state. */
   readonly shed: ShedStep | null;
+  /**
+   * T46 (design 2026-11-24 §3): what the relay and Cloudflare last said about the held broadcast, or null with none
+   * held or nothing known. Diagnostics only: the phone's own `delivery` stays the truth of what viewers get.
+   */
+  readonly server: ServerFacts | null;
   readonly heartbeat: HeartbeatStatus;
   /** Record lines the native sink refused, and lines dropped by its re-entrancy guard (Diagnostics). */
   readonly recordSinkFailures: number;

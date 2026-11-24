@@ -3,6 +3,7 @@ package com.seazn.capture.engine.adapter
 import com.seazn.capture.engine.core.BroadcastView
 import com.seazn.capture.engine.core.PairingView
 import com.seazn.capture.engine.core.ScoreUpdates
+import com.seazn.capture.engine.core.ServerFacts
 import com.seazn.capture.engine.core.Snapshot
 import com.seazn.capture.engine.core.SnapshotState
 
@@ -130,6 +131,8 @@ object SnapshotWire {
       "thermalHeadroom" to finite(s.device?.thermalHeadroom),
       "captureTimestampMs" to facts.captureTimestampMs?.let(::num),
       "shed" to s.shed?.wire,
+      // T46 (design 2026-11-24 §3): the relay's and Cloudflare's last word on the held broadcast, or null.
+      "server" to s.server?.let { server(it, s.reportedAtMs) },
       "heartbeat" to
         s.heartbeat.let {
           linkedMapOf(
@@ -147,6 +150,23 @@ object SnapshotWire {
       "commandFailures" to num(record.commandFailures),
       "stickyFailure" to record.stickyFailure,
     )
+
+  /**
+   * Each member null when not known. [ageS] is whole seconds from when the answer was heard to the snapshot's own
+   * clock (both epoch ms), never below zero: a wall clock stepped back reads 0.
+   */
+  private fun server(facts: ServerFacts, reportedAtMs: Long): Map<String, Any?> {
+    val d = facts.delivery
+    return linkedMapOf(
+      "relayOutput" to d.relayOutput,
+      "programmePhase" to d.programmePhase,
+      "fps" to d.fps?.let(::num),
+      "kbps" to d.kbps?.let(::num),
+      "cameraIngest" to d.cameraIngest,
+      "programmeIngest" to d.programmeIngest,
+      "ageS" to num(maxOf(0L, reportedAtMs - facts.heardAtEpochMs) / 1_000),
+    )
+  }
 
   private fun num(value: Number): Double = value.toDouble()
 

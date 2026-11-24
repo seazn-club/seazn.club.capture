@@ -9,9 +9,11 @@ import com.seazn.capture.engine.core.HeartbeatResponse
 import com.seazn.capture.engine.core.Hosts
 import com.seazn.capture.engine.core.IngestTarget
 import com.seazn.capture.engine.core.NextMatch
+import com.seazn.capture.engine.core.RealtimeGrant
 import com.seazn.capture.engine.core.Refusal
 import com.seazn.capture.engine.core.RtmpsTarget
 import com.seazn.capture.engine.core.ScoreUpdates
+import com.seazn.capture.engine.core.ServerDelivery
 import com.seazn.capture.engine.core.ServerWord
 import com.seazn.capture.engine.core.SrtTarget
 import com.seazn.capture.engine.core.StartAnswer
@@ -128,6 +130,12 @@ object Bodies {
    * they are optional, so a body that sends none of [WAITING_KEYS] owes none.
    */
   private val WAITING_OWED = setOf("waiting", "go-live", "live", "over")
+
+  /** A beat's states that are no longer this pairing's: no grant is read from them (design §2.1). */
+  private val NOT_OURS = setOf("replaced", "taken")
+
+  /** A beat's states that tell the phone to publish: T46's facts ride only these. */
+  private val PUBLISH = setOf("go-live", "live")
 
   /** The waiting fields' keys, in the order [read] judges them: the first refused is the one named. */
   private val WAITING_KEYS = listOf("label", "autoAllowed", "pollSeconds", "venueTimezone", "scheduledStart", "destinationName")
@@ -296,6 +304,10 @@ object Bodies {
         waiting = waiting?.fields,
         // Only a 2xx's waiting fields land (the machine's rule), so only a 2xx's refused one is named.
         waitingUnreadable = waiting?.unreadable?.takeIf { status in 200..299 },
+        // Design §2.1: never on replaced or taken, which are no longer this pairing's (the web omits it there anyway).
+        realtime = if (status in 200..299 && state !in NOT_OURS) realtime(fields?.get("realtime")) else null,
+        // T46: on go-live and live only, the two answers that tell the phone to publish.
+        delivery = if (status in 200..299 && state in PUBLISH) delivery(fields?.get("delivery")) else null,
       )
     return HeartbeatResponse.Answered(status, reply, retryAfterS.takeIf { status == 429 })
   }
@@ -352,6 +364,57 @@ object Bodies {
       status == 429 && code == "rate_limited" -> ScoringLinkAnswer.Refused("rate_limited", retryAfterS)
       else -> none
     }
+  }
+
+  /**
+   * The nudge channel's origin (design §2.1): `https://host[:port]`, one trailing slash allowed, nothing else. The
+   * socket's URL is built from it (`wss://`), so a path, a query or userinfo is no grant, never a URL taken as given.
+   * ASCII spelled out, scheme in both cases, as [Hosts] spells them.
+   */
+  private val REALTIME_ORIGIN = Regex("([Hh][Tt][Tt][Pp][Ss]://[A-Za-z0-9.-]+(:[0-9]{1,5})?)/?")
+
+  /** The anon key rides the socket's query, so it is held to characters that need no encoding (a JWT's, or a key's). */
+  private val REALTIME_KEY = Regex("[A-Za-z0-9._-]{1,4096}")
+
+  /** `capture:{pairing}`: the family the phone joins, and an id of the characters a uuid is written in. */
+  private val CAPTURE_TOPIC = Regex("capture:[A-Za-z0-9_-]{1,128}")
+
+  /** A token past this is no token: a JWT is a few hundred characters. */
+  private const val TOKEN_MAX = 8_192
+
+  /**
+   * A beat answer's `realtime` (design 2026-11-24 §2.1; PROVISIONAL until vendored), or null: absent, null or any
+   * member out of shape is no grant, and never refuses the answer. Whether it has expired is the core's to judge, on
+   * its own clock. Never throws.
+   */
+  fun realtime(value: Any?): RealtimeGrant? {
+    val map = value as? Map<*, *> ?: return null
+    val url = (map["url"] as? String)?.let { REALTIME_ORIGIN.matchEntire(it) }?.groupValues?.get(1) ?: return null
+    val apikey = (map["apikey"] as? String)?.takeIf { REALTIME_KEY.matches(it) } ?: return null
+    val topic = (map["topic"] as? String)?.takeIf { CAPTURE_TOPIC.matches(it) } ?: return null
+    val token = (map["token"] as? String)?.takeIf { it.isNotEmpty() && it.length <= TOKEN_MAX } ?: return null
+    val expires = whole(map["expiresAt"])?.takeIf { it in 1..MAX_SAFE } ?: return null
+    return RealtimeGrant(url, apikey, topic, token, expires)
+  }
+
+  /**
+   * T46's `delivery` (capture-beat.v1 at web edfff98171; PROVISIONAL until vendored), or null when nothing in it is
+   * known. Each member alone: an unknown word or an integer outside 0 to 2^53 - 1 is not known, and never refuses the
+   * answer. Never throws.
+   */
+  fun delivery(value: Any?): ServerDelivery? {
+    val map = value as? Map<*, *> ?: return null
+    fun count(key: String) = whole(map[key])?.takeIf { it in 0..MAX_SAFE }
+    val read =
+      ServerDelivery(
+        relayOutput = word(map["relayOutput"], ServerDelivery.RELAY_OUTPUT),
+        programmePhase = word(map["programmePhase"], ServerDelivery.PROGRAMME_PHASE),
+        fps = count("fps"),
+        kbps = count("kbps"),
+        cameraIngest = word(map["cameraIngest"], ServerDelivery.INGEST),
+        programmeIngest = word(map["programmeIngest"], ServerDelivery.INGEST),
+      )
+    return read.takeUnless { it.empty }
   }
 
   /** Whole seconds, 0 or more; an HTTP-date or anything else is no value (the engine uses its own cadence). */

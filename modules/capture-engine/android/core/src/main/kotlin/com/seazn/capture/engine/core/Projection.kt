@@ -39,6 +39,7 @@ object Projection {
       unpaired = (phase as? Phase.Idle)?.unpaired,
       codeEndedPending = phase.pairing?.codeEndedPending ?: false,
       language = phase.pairing?.language,
+      server = phase.session?.pairing?.server,
     )
   }
 

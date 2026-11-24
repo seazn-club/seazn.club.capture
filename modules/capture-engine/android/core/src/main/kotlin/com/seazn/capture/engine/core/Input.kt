@@ -99,6 +99,15 @@ sealed interface Input {
 
   data class HeartbeatAnswered(val beatId: Int, val response: HeartbeatResponse) : Input
 
+  /**
+   * Design 2026-11-24 §2.2: the server nudged the pairing's channel, with its `reason` as sent (null for none). The
+   * machine beats at once, at most once per [Nudges.NUDGE_GAP_MS]; the reason is recorded, never acted on.
+   */
+  data class Nudge(val reason: String?) : Input
+
+  /** Design §2.4: what the nudge socket reports of itself, with a close's [status] code, or null. */
+  data class NudgeLink(val state: NudgeState, val status: Int? = null) : Input
+
   /** The answer to [Command.FetchCode] [requestId]. Only the latest ask's answer is acted on. */
   data class CodeAnswered(val requestId: Int, val answer: CodeAnswer) : Input
 

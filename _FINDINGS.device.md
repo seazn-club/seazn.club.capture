@@ -1049,3 +1049,48 @@ default.
 
 **Not the phone's:** two Go live holds at 09:42:43 and 09:42:49 failed `AlreadyLive refusedSid` for the session the
 phone had already ended; the web's to fix.
+
+**Batch 2 (the engine scan S1–S12 and the reviews of 98c12ffa, 2026-11-24).** Owner rulings of the day: one PR for
+all; S2 "Back off, never stop", doubling; the cause split below. Numbers marked DEVICE-UNVERIFIED are worked from the
+records and the code, not seen on a phone.
+
+- **The cause split, the own link (built).** `StuckWatch` (`LinkStuck.kt`) reads the regulator's link samples: on SRT,
+  at the 500k floor, with the send buffer at 75% of the latency or more (1500 ms at Cloudflare's 2000, the
+  descriptor's `cred.srt.latencyMs`), for 5 readings over at least 5 s, the attempt is replaced at once as a new ingest
+  session, keeping or opening the outage's hold, with a `link-stuck` line (new kind). R-RTRF's 4G death (1131, 2049,
+  then 1902 at the floor) reads stuck 13 s before its playlist verdict, if the buffer stayed high after the record's
+  last reading (INFERRED); the 2.4 GHz Wi-Fi run (1020, then 627) never does. DEVICE-UNVERIFIED. RTMPS reports no
+  buffer, so only the playlist verdict covers it.
+- **S2, the cause split, past the phone (built).** A not-delivered verdict with the own link healthy waits 0, 4, 8,
+  16, 32, then 64 s before its restart, staying at 64, and publishes meanwhile; `delivered` resets it and cancels a
+  waiting restart. A link cut in the last 30 s (Weak signal) restarts at once. The line carries `count` and `retryMs`.
+  The 20 s verdict stays as the safety net.
+- **S1 (built).** Below-floor rebuilds: three in a row go at once, then each waits 30, 60, 120, then 240 s from the
+  last, publishing the slow picture meanwhile; one window at both floors starts the count again. Session 8's 54 in
+  19 min would have been about 8. The shed and silenced-mic waivers stand. `video-stalled` carries `count` and
+  `retryMs` on a below-floor rebuild.
+- **S3 (built).** A drop that halves or restores the target writes `bitrate {from, to, reason}`, with `drop-halved`
+  or `drop-restored`.
+- **S4 (built).** An attempt that published 25 s clears the fallback count however it ends: a rebuild, a new ingest
+  session or a switch, not a drop alone.
+- **S5 (built).** The delivery watch's configured segment is the GOP, 3 s (`Encode.GOP_MS`, which the glue's
+  `gopDurationInS` reads), so stalled shows after 9 s; the not-delivered verdict stays at 20 s, its own constant.
+- **S6 (built).** Before the first frame no hold bounds the retries. The first minute of failures is as before; then
+  the retry waits 4, 8, 16, then 30 s, and `connect-failed` is said at most once a minute with `count`, its retry's
+  `connecting` line held back with it. After live nothing changes. `warmingDeadline` was parsed and never read:
+  deleted, since the server ends a warming session itself and says so on a beat.
+- **S8 (built).** Snapshots go up to JS at once when what they show changes, and otherwise about once a second, not
+  every tick (`BridgeCore.EMIT_MS`). JS reads a silent engine only after 3 s (`ENGINE_SILENT_MS`).
+- **S12 (built).** A failed snapshot writes `snapshot-failed {error, count}` (new kind): the first at once, then at
+  most one a minute, the class name only.
+- **Review minors (built).** (a) The switch grace ends once the playlist advances in the new session. (b) A reconnect
+  after a drop or a stuck link on another network than the publisher's gets the grace too. (c) `DefaultNetwork` carries
+  the handle in reports that are not validated. (d) A look inside the grace shows no lag (null, not 0).
+- **S7 (built, the small part).** A `LinkageError` from the facts read (an OEM API missing) is counted and said as a
+  facts failure, never held against the process, so it no longer ends a pairing. Stickiness for the capture stack's
+  own tasks is unchanged; no live trigger was seen.
+- **S10 (rejected).** `DescriptorAsks.GIVE_UP_MS` is not unreachable by the tests: `DescriptorAsksTest` ("an ask in
+  flight blocks the next until it is given up at 30 s") kills the mutation `sinceMs >= GIVE_UP_MS` → `false`.
+- **Backlog.** S9: a hung RTMPS connect holding the capture queue needs a read of komuxer's connect (cancellable or
+  blocking) before any change. S11: the two test files near 1500 lines (BridgeCoreTest is 1406 now; S7's test went to
+  a file of its own).

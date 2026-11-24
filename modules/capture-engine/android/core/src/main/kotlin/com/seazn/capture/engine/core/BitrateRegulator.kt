@@ -48,6 +48,12 @@ enum class BitrateMove(override val wire: String) : Wire {
 
   /** It was outside the floor and the ceiling, and nothing else moved it. */
   CLAMP("clamp"),
+
+  /** S3: a drop after a failing link halved it ([BitrateRegulator.afterDrop]). */
+  DROP_HALVED("drop-halved"),
+
+  /** S3: a drop after a clean link put back the last healthy target ([BitrateRegulator.afterDrop]). */
+  DROP_RESTORED("drop-restored"),
 }
 
 /**

@@ -398,7 +398,9 @@ internal object Transports {
       )
     if (decision.fellBack) commands += record("fell-back", "from" to phase.transport, "to" to decision.policy.current)
     val retries = if (session.liveSinceEpochMs == null) session.retries.dropped(now.monoMs) else session.retries
-    val next = session.copy(fallback = decision.policy, regulation = BitrateRegulator.afterDrop(session.regulation, now.monoMs), retries = retries)
+    val regulation = BitrateRegulator.afterDrop(session.regulation, now.monoMs)
+    dropMoved(session.regulation.targetBps, regulation.targetBps)?.let { commands += it }
+    val next = session.copy(fallback = decision.policy, regulation = regulation, retries = retries)
     val waiting = ConnectStep.Waiting(now.monoMs + retryWaitMs(next))
     return Step(Phase.Connecting(next, decision.policy.current, waiting, outage), commands)
   }
@@ -547,6 +549,13 @@ internal object Transports {
     val outage = onAir.outage ?: outageFor(session, onAir.transport, now, ReconnectCause.UPLINK_LOST)
     val step = replace(onAir, session, outage, now) { Command.StartNewSession(onAir.attemptId, it) }
     return step.copy(commands = listOf(line) + step.commands)
+  }
+
+  /** S3: a drop that moved the target says so, as a reading's move does, with no reading to cite. */
+  private fun dropMoved(before: Int, after: Int): Command? {
+    if (after == before) return null
+    val move = if (after < before) BitrateMove.DROP_HALVED else BitrateMove.DROP_RESTORED
+    return record("bitrate", "from" to before, "to" to after, "reason" to move)
   }
 
   /**

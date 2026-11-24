@@ -509,7 +509,7 @@ class BitrateRegulatorTest {
 
   @Test
   fun `the bitrate line's reason words`() {
-    assertEquals(listOf("drops", "backlog", "raise", "clamp"), BitrateMove.entries.map { it.wire })
+    assertEquals(listOf("drops", "backlog", "raise", "clamp", "drop-halved", "drop-restored"), BitrateMove.entries.map { it.wire })
   }
 
   @Test

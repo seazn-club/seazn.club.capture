@@ -29,9 +29,14 @@
 
 # The session record names a failure by its class (`error`, `rootError`, `site`; CD30, never a message) and the
 # engine's own words by theirs (`start-answered {answer}`, `beats {word}`, `command-failed`). Kept legible, never
-# `a.b`; InnerClasses gives a nested class its simple name. StreamPack's names keep `capture-start-failed {site}`
-# naming the call that threw (F-S4-1).
+# `a.b`; InnerClasses gives a nested class its simple name. `capture-start-failed {site}` (F-S4-1, F-S7-1) is a throw's
+# first frame outside the runtimes, as `Type.method`: CaptureRun skips Kotlin's frames by the `kotlin.` prefix, so
+# Kotlin keeps its names, and the frames it lands on (the engine, StreamPack, srtdroid, coroutines) keep theirs,
+# members included. GlueRulesTest pins each package to CaptureRun's RUNTIME list.
 -keepnames class * extends java.lang.Throwable
--keepnames class com.seazn.capture.engine.**
+-keepnames class kotlin.** { *; }
+-keepnames class kotlinx.coroutines.** { *; }
+-keepnames class io.github.thibaultbee.srtdroid.** { *; }
 -keepnames class io.github.thibaultbee.streampack.** { *; }
+-keepnames class com.seazn.capture.engine.** { *; }
 -keepattributes InnerClasses,EnclosingMethod

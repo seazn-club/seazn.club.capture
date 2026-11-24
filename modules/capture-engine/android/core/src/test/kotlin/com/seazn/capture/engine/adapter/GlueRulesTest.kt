@@ -600,8 +600,14 @@ class GlueRulesTest {
       assertTrue(rule.containsMatchIn(rules), "$pkg kept from renaming and inlining")
     }
     assertTrue("-keepnames class * extends java.lang.Throwable" in rules, "the record's `error` and `rootError` name the class")
-    assertTrue("-keepnames class com.seazn.capture.engine.**" in rules, "the record's `answer` and `word` name the engine's own")
     assertTrue("-keepattributes InnerClasses,EnclosingMethod" in rules, "a nested class keeps its simple name")
+    // `capture-start-failed {site}` (F-S7-1): the first frame outside the runtimes, as `Type.method`. The runtimes' own
+    // prefixes are skipped by name, so Kotlin's must stay `kotlin.`; the frames it lands on keep their class and member names.
+    val runtime = Regex("""private val RUNTIME = listOf\(([^)]*)\)""").find(glue("CaptureRun.kt"))?.groupValues?.get(1) ?: error("no RUNTIME")
+    val prefixes = Regex(""""([\w.]+)\."""").findAll(runtime).map { it.groupValues[1] }.toList()
+    assertEquals(listOf("java", "javax", "jdk", "sun", "kotlin"), prefixes, "platform prefixes R8 never renames, and Kotlin's")
+    val named = listOf("kotlin", "kotlinx.coroutines", "io.github.thibaultbee.srtdroid", "io.github.thibaultbee.streampack", "com.seazn.capture.engine")
+    for (pkg in named) assertTrue("-keepnames class $pkg.** { *; }" in rules, "$pkg keeps its class and member names for `site`")
   }
 
   /**

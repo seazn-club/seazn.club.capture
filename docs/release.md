@@ -167,7 +167,7 @@ sets `enableMinifyInReleaseBuilds` and `enableShrinkResourcesInReleaseBuilds`,
 so every release build, the EAS `production` bundle and a local
 `assembleRelease` alike, runs R8 and drops unused resources. Debug builds do
 not. Measured on 2026-11-24 (arm64 release APK, dev twin): 95.7 MB with
-56.6 MB of DEX before, 56.7 MB with 20.6 MB of DEX after. R8 shrinks and
+56.6 MB of DEX before, 60.8 MB with 21.9 MB of DEX after. R8 shrinks and
 renames but does not optimise: Expo's generated `android/app/build.gradle`
 names `proguard-android.txt`, which says `-dontoptimize`. R8 8.12.14 (AGP
 8.12) warns "An error occurred when parsing kotlin metadata" for classes
@@ -190,9 +190,12 @@ the app's R8 reads, each rule with a comment naming its reader, and
   rebuilds the camera) and `io.ktor.network` (`TlsCloserGuard`, F-P5-12: an
   unswallowed TLS closer throw kills the process), read from class names and
   stack frames.
-- Class names in the session record: every `Throwable`, the engine's own
-  classes and StreamPack's, so `error`, `rootError`, `site`, `answer` and
-  `word` read as they did before R8.
+- Names in the session record: every `Throwable`'s class, so `error` and
+  `rootError` read as before R8, and the engine's own classes for `answer`
+  and `word`. `capture-start-failed {site}` is a throw's first frame outside
+  the runtimes, skipping Kotlin's by its `kotlin.` prefix, so Kotlin keeps its
+  names, and so do the engine, StreamPack, srtdroid, `kotlinx.coroutines` and
+  `io.ktor.network`, members included.
 
 A new reflective or name-based read in the engine needs its rule in the same
 change. The engine must be checked on a phone after any rule change: a
@@ -202,8 +205,14 @@ missing rule is a crash or a silent watch failure, not a build error.
 (`BUNDLE-METADATA/com.android.tools.build.obfuscation/proguard.map`), and Play
 reads it from there to deobfuscate crash and ANR stack traces in Android
 vitals, so the release workflow uploads nothing more. A local `assembleRelease`
-leaves it at `android/app/build/outputs/mapping/release/mapping.txt`. The
-session record needs no mapping: the names it carries are kept.
+leaves it at `android/app/build/outputs/mapping/release/mapping.txt`. A
+record's `site` reads as before only when its frame is in a package kept above;
+a frame in any other library (OkHttp, the rest of Ktor, AndroidX) is renamed,
+and is read back with that build's mapping: the app bundle on the EAS
+build's page on expo.dev holds it in `BUNDLE-METADATA`.
+
+CI's Android compile (`.github/workflows/android-compile.yml`) runs
+`assembleRelease`, so every pull request runs R8 as well.
 
 ## Why the build number is pinned
 

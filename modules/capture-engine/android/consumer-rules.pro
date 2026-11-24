@@ -40,3 +40,9 @@
 -keepnames class io.github.thibaultbee.streampack.** { *; }
 -keepnames class com.seazn.capture.engine.** { *; }
 -keepattributes InnerClasses,EnclosingMethod
+
+# Expo 58 (AGP 9.2.1, 2026-11-24): with R8's strict keep rules, a member-less `-keep class` no longer keeps the no-arg
+# constructor. Ktor's own rule (ktor-utils-jvm) keeps its engine container that way, and ServiceLoader builds the
+# container with that constructor, so it is named here too, whatever `android.r8.strictFullModeForKeepRules` says
+# (the app turns it off: modules/capture-engine/app.plugin.ts). GlueRulesTest pins the rule.
+-keep class io.ktor.client.engine.** implements io.ktor.client.HttpClientEngineContainer { <init>(); }

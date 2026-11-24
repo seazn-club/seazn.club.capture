@@ -611,6 +611,17 @@ class GlueRulesTest {
   }
 
   /**
+   * Expo 58 (AGP 9.2.1, 2026-11-24): R8's strict keep rules dropped the no-arg constructor a member-less `-keep`
+   * used to keep. Ktor finds its HTTP engine by ServiceLoader, which builds the container with that constructor, so
+   * the rule names it explicitly, whatever the app's `android.r8.strictFullModeForKeepRules` says.
+   */
+  @Test
+  fun `R8 Ktor's engine container keeps the constructor ServiceLoader calls`() {
+    val rules = File(src.parentFile, "consumer-rules.pro").readText()
+    assertTrue("-keep class io.ktor.client.engine.** implements io.ktor.client.HttpClientEngineContainer { <init>(); }" in rules)
+  }
+
+  /**
    * CD16 and N1 (Task 38): the notification follows the snapshot only while the service is held, so an
    * idle phone posts nothing; its work on the main looper costs a line when it fails, never the process.
    */

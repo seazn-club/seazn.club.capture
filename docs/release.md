@@ -199,6 +199,24 @@ non-edge-to-edge path (the cutout mode), Material's `BottomSheetDialog`
 (`SplashScreen$Impl31`). Those are the libraries' own code: a later React
 Native, Material or AndroidX release has to drop them.
 
+**AGP 9's strict keep rules.** AGP 9.2.1 turns
+`android.r8.strictFullModeForKeepRules` on by default (AGP 8.12.0's
+`BooleanOption` defaults it to false, 9.2.1's to true, until AGP 10): a
+`-keep class X` with no member list then keeps X's name but no longer its
+no-arg constructor. The first SDK 58 release (build 1365) lost ML Kit's
+`CommonComponentRegistrar` and `VisionCommonRegistrar` constructors that way
+(firebase-components keeps the registrars with no member list), and the code
+scanner's start logged `InvalidRegistrarException` on the phone. The capture
+engine's config plugin sets the property to false, so every library's rules
+mean what they meant in the build tested under AGP 8, and two explicit rules
+name the constructors that matter whatever it says: the code scanner's
+`consumer-rules.pro` keeps every `ComponentRegistrar`'s `<init>()`, and the
+capture engine's keeps Ktor's `HttpClientEngineContainer`, which
+`ServiceLoader` builds. A sweep of the release DEX against the merged
+manifest's activities, services, providers, receivers, AndroidX Startup
+initializers and firebase registrars, and every `META-INF/services` entry,
+found no other class missing its no-arg constructor.
+
 **Keep rules.** Each library ships its own (Expo modules, React Native,
 srtdroid's core, OkHttp, coroutines). What the capture engine reads by name
 is kept by its own `modules/capture-engine/android/consumer-rules.pro`, which

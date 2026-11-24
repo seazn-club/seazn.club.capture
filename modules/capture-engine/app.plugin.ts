@@ -13,7 +13,16 @@
  * on StreamPack's metadata.
  */
 
-import { type ConfigPlugin, withProjectBuildGradle } from 'expo/config-plugins';
+import {
+  type ConfigPlugin,
+  withGradleProperties,
+  withProjectBuildGradle,
+} from 'expo/config-plugins';
+
+export type GradleProperty =
+  | { type: 'property'; key: string; value: string }
+  | { type: 'comment'; value: string }
+  | { type: 'empty' };
 
 /** Expo 58's two template lines that take the Kotlin Gradle plugin's version from the property. */
 const FROM_PROPERTY = "def kotlinVersion = findProperty('android.kotlinVersion')";
@@ -72,16 +81,37 @@ export function buildPropertiesOf(plugins: readonly unknown[] | undefined): {
   return { kotlinVersion, compileSdk };
 }
 
+const STRICT_KEEP_RULES = 'android.r8.strictFullModeForKeepRules';
+
+/**
+ * R8's keep rules as AGP 8 read them, the release build reviewed and tested on a phone (2026-11-24). AGP 9.2.1
+ * turns `android.r8.strictFullModeForKeepRules` on by default (8.12.0's BooleanOption defaults it to false, 9.2.1's
+ * to true, until AGP 10): a `-keep class X` with no member list then no longer keeps X's no-arg constructor, so a
+ * class a library builds by reflection keeps its name and loses the constructor (ML Kit's ComponentRegistrars, on
+ * the first SDK 58 release). Off, every library's rules mean what they meant. One entry, whatever ran before.
+ */
+export function withAgp8KeepRules(items: GradleProperty[]): GradleProperty[] {
+  const others = items.filter(
+    (item) => !(item.type === 'property' && item.key === STRICT_KEEP_RULES),
+  );
+  return [...others, { type: 'property', key: STRICT_KEEP_RULES, value: 'false' }];
+}
+
 /**
  * The capture engine's prebuild (C7u): a check that the Kotlin compiler is the one app.json's
- * expo-build-properties names. app.json runs this after expo-build-properties. Through Expo 57 it also set
+ * expo-build-properties names, and R8's keep rules as AGP 8 read them (expo-build-properties sets no such
+ * property). app.json runs this after expo-build-properties. Through Expo 57 it also set
  * `android.suppressUnsupportedCompileSdk=37.0`, since AGP 8.12 was tested up to compile SDK 36; AGP 9.2.1
  * (Expo 58) configures compile SDK 37 with no warning, so the property went with that SDK.
  */
 const withCaptureEngine: ConfigPlugin = (config) => {
   const { kotlinVersion } = buildPropertiesOf(config.plugins);
-  return withProjectBuildGradle(config, (mod) => {
+  const checked = withProjectBuildGradle(config, (mod) => {
     mod.modResults.contents = checkKotlinGradlePlugin(mod.modResults.contents, kotlinVersion);
+    return mod;
+  });
+  return withGradleProperties(checked, (mod) => {
+    mod.modResults = withAgp8KeepRules(mod.modResults as GradleProperty[]);
     return mod;
   });
 };

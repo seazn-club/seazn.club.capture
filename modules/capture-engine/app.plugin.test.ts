@@ -2,7 +2,12 @@ import { readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import appJson from '../../app.json';
-import { buildPropertiesOf, checkKotlinGradlePlugin } from './app.plugin';
+import {
+  buildPropertiesOf,
+  checkKotlinGradlePlugin,
+  withAgp8KeepRules,
+  type GradleProperty,
+} from './app.plugin';
 
 /**
  * C7u (owner, 2026-10-05): StreamPack 3.2.1 and its graph carry Kotlin metadata 2.4.0, which a Kotlin
@@ -112,6 +117,41 @@ describe('buildPropertiesOf', () => {
   });
 });
 
+/**
+ * AGP 9 made R8's strict full mode for keep rules the default (`android.r8.strictFullModeForKeepRules`, false in
+ * AGP 8.12.0's BooleanOption, true in 9.2.1's): a `-keep class X` with no member list stops keeping X's no-arg
+ * constructor. firebase-components' `-keep class * implements ComponentRegistrar` then left ML Kit's registrars
+ * without one, and the code scanner's ComponentDiscovery could not build them (device smoke of build 1365).
+ */
+describe('withAgp8KeepRules', () => {
+  const base: GradleProperty[] = [
+    { type: 'comment', value: 'Project-wide Gradle settings.' },
+    { type: 'property', key: 'android.useAndroidX', value: 'true' },
+  ];
+  const strict = (items: GradleProperty[]) =>
+    items.filter(
+      (item) => item.type === 'property' && item.key === 'android.r8.strictFullModeForKeepRules',
+    );
+
+  it("turns AGP 9's strict keep rules off, so every library's rule means what it meant under AGP 8", () => {
+    const items = withAgp8KeepRules(base);
+    expect(strict(items)).toEqual([
+      { type: 'property', key: 'android.r8.strictFullModeForKeepRules', value: 'false' },
+    ]);
+    expect(items.slice(0, base.length)).toEqual(base);
+  });
+
+  it('holds one entry after a second prebuild, whatever value was there', () => {
+    const was: GradleProperty[] = [
+      ...base,
+      { type: 'property', key: 'android.r8.strictFullModeForKeepRules', value: 'true' },
+    ];
+    expect(strict(withAgp8KeepRules(withAgp8KeepRules(was)))).toEqual([
+      { type: 'property', key: 'android.r8.strictFullModeForKeepRules', value: 'false' },
+    ]);
+  });
+});
+
 // The inert-seam guard: a plugin app.json does not name never runs at prebuild.
 describe('app.json', () => {
   const plugins = appJson.expo.plugins as unknown[];
@@ -123,14 +163,16 @@ describe('app.json', () => {
     expect(engine).toBeGreaterThan(names.indexOf('expo-build-properties'));
   });
 
-  it('names a plugin that registers its one Android mod, read with what app.json holds', async () => {
+  it('names a plugin that registers both of its Android mods, read with what app.json holds', async () => {
     const reference = './modules/capture-engine/app.plugin.ts';
     const plugin = (await import(`../../${reference.slice(2)}`)).default as (config: object) => {
       mods?: { android?: Record<string, unknown> };
     };
     const config = plugin({ name: 'capture', slug: 'capture', plugins });
-    // Expo 57's second mod, gradleProperties (AGP 8.12's compile SDK 37 suppression), went with that SDK.
-    expect(Object.keys(config.mods?.android ?? {}).sort()).toEqual(['projectBuildGradle']);
+    expect(Object.keys(config.mods?.android ?? {}).sort()).toEqual([
+      'gradleProperties',
+      'projectBuildGradle',
+    ]);
   });
 
   it('asks for the lowest Kotlin that reads metadata 2.4, and compile SDK 37 (ruling C7u-toolchain)', () => {

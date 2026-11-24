@@ -322,6 +322,17 @@ class NudgeLinkTest {
   }
 
   @Test
+  fun `a new key alone is a new socket`() {
+    val rig = Rig()
+    rig.link.grant(rig.grant())
+    rig.joined()
+    rig.link.grant(rig.grant().let { RealtimeGrant(it.url, "anon.other-key", it.topic, it.token, it.expiresAtS) })
+    assertEquals(2, rig.sockets.size)
+    assertTrue(rig.sockets.first().closed)
+    assertTrue(rig.socket.url.contains("apikey=anon.other-key&"))
+  }
+
+  @Test
   fun `off closes the socket, cancels the reconnect and the heartbeat, and its late close is not reported`() {
     val rig = Rig()
     rig.link.grant(rig.grant())

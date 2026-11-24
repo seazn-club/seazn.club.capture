@@ -144,9 +144,8 @@ class NudgeLink(
     retryLater()
   }
 
+  /** The next try on the backoff. Whether there is still a grant in date is [connect]'s to judge, when it runs. */
   private fun retryLater() {
-    val held = grant ?: return
-    if (held.expired(wallMs())) return
     val delay = BACKOFF_MS[attempts.coerceAtMost(BACKOFF_MS.lastIndex)]
     attempts++
     retry = scheduler.schedule(delay) { synchronized(this) { guarded { connect() } } }
@@ -266,7 +265,10 @@ class NudgeLink(
     /** 1, 2, 4, 8, 16, then 30 s for every later try. */
     val BACKOFF_MS = longArrayOf(1_000, 2_000, 4_000, 8_000, 16_000, 30_000)
 
-    /** The grant's https origin as the socket's wss URL. The key's characters need no encoding (Bodies' rule). */
-    fun url(grant: RealtimeGrant): String = "wss://${grant.url.substringAfter("://").trimEnd('/')}/realtime/v1/websocket?apikey=${grant.apikey}&vsn=1.0.0"
+    /**
+     * The grant's https origin as the socket's wss URL. Bodies holds the origin with no trailing slash, and the key's
+     * characters need no encoding (both Bodies' rules).
+     */
+    fun url(grant: RealtimeGrant): String = "wss://${grant.url.substringAfter("://")}/realtime/v1/websocket?apikey=${grant.apikey}&vsn=1.0.0"
   }
 }

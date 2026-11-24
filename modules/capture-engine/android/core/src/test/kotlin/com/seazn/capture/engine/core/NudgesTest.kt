@@ -86,6 +86,24 @@ class NudgesTest {
   }
 
   @Test
+  fun `a rejoin after a failure leaves the swap due until a beat swaps it`() {
+    val (rig, _) = joined()
+    rig.send(Input.NudgeLink(NudgeState.CLOSED, 1006))
+    rig.send(Input.NudgeLink(NudgeState.JOINED))
+    val next = grant(rig, "token-after-rejoin")
+    assertEquals(listOf<Command>(Command.Nudges(next)), told(rig.hear("waiting", realtime = next)))
+  }
+
+  @Test
+  fun `an expired grant heard never replaces a held one, even one due a swap`() {
+    val rig = MachineRig().paired()
+    val held = grant(rig, "held", leftMs = 5 * 60_000L)
+    rig.hear("waiting", realtime = held)
+    assertEquals(emptyList(), told(rig.hear("waiting", realtime = grant(rig, "stale", leftMs = -60_000))))
+    assertEquals(held, rig.phase.pairing?.realtime)
+  }
+
+  @Test
   fun `joined is no failure - the held token is kept`() {
     val (rig, _) = joined()
     rig.send(Input.NudgeLink(NudgeState.JOINED))

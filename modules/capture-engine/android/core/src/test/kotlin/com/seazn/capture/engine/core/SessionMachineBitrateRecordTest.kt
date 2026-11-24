@@ -150,8 +150,41 @@ class SessionMachineBitrateRecordTest {
     assertEquals(2, line.field("count"))
   }
 
+  /** 2 Mbps with 3 new sender drops on every reading, on a 40 ms send buffer. */
+  private fun dropping(): (Long) -> LinkCounters {
+    var bytes = 0L
+    var dropped = 0L
+    return { t ->
+      bytes += 250_000
+      dropped += 3
+      LinkCounters(bytes, t, 0, dropped, 0, 20, 40, null)
+    }
+  }
+
   @Test
-  fun `the bitrate and bitrate-held lines are the allow-list's, each key plain or a scalar`() {
+  fun `R-RTRF cuts at the floor write bitrate-floor once a minute on air, with the reading and the count`() {
+    // Drops on every reading, each cut one latency (2 s) after the last: 1500k → 750k → 500k (375k, held to the floor),
+    // two bitrate lines; then every cut lands on the floor. The first floor cut is said at once, the next a minute
+    // later with the 30 cuts since (one each 2 s), and no bitrate line says any of them.
+    val rig = MachineRig().live()
+    rig.link = dropping()
+    rig.advance(70_000)
+    assertEquals(listOf(750_000, 500_000), rig.records("bitrate").map { it.field("to") })
+    val floor = rig.records("bitrate-floor")
+    val reading = listOf("egressBps" to 2_000_000L, "dropped" to 3L, "lost" to 0L, "sendBufferMs" to 40)
+    assertEquals(
+      listOf(
+        listOf("reason" to BitrateMove.DROPS, "count" to 1) + reading,
+        listOf("reason" to BitrateMove.DROPS, "count" to 30) + reading,
+      ),
+      floor.map { it.fields },
+    )
+    assertEquals("drops", floor.first().word("reason"))
+    assertTrue(rig.sent<Command.SetBitrate>().map { it.bps } == listOf(750_000, 500_000), "the floor is never set again")
+  }
+
+  @Test
+  fun `the bitrate, bitrate-held and bitrate-floor lines are the allow-list's, each key plain or a scalar`() {
     val cut = MachineRig().live()
     cut.send(Input.Link(1, LinkCounters(250_000, 400, 0, 3, 0, 20, 40, null)))
     // The raise line is the only bitrate line with `count`.
@@ -159,8 +192,11 @@ class SessionMachineBitrateRecordTest {
     raised.link = quietThenBusy(busyFromMs = 32_000)
     raised.live()
     raised.advance(42_000)
-    val lines = cut.records("bitrate") + raised.records("bitrate") + raised.records("bitrate-held")
-    assertEquals(listOf("bitrate", "bitrate", "bitrate-held"), lines.map { it.kind })
+    val floor = MachineRig().live()
+    floor.link = dropping()
+    floor.advance(10_000)
+    val lines = cut.records("bitrate") + raised.records("bitrate") + raised.records("bitrate-held") + floor.records("bitrate-floor")
+    assertEquals(listOf("bitrate", "bitrate", "bitrate-held", "bitrate-floor"), lines.map { it.kind })
     assertTrue(lines[1].fields.any { it.first == "count" }, "the raise line carries count: ${lines[1]}")
     val kinds = list.getJSONObject("kinds").keySet()
     val plain = list.getJSONArray("plain").let { a -> (0 until a.length()).map { a.getString(it) }.toSet() }

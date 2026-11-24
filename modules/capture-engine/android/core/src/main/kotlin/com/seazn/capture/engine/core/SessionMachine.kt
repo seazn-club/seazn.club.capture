@@ -408,6 +408,7 @@ internal object Transports {
       commands += bitrateLine(before, regulated, sample)
     }
     regulated.held?.let { commands += heldLine(it, phase.watchdog.videoFps) }
+    regulated.floor?.let { commands += floorLine(it, sample) }
     return Step(next, commands)
   }
 
@@ -430,6 +431,18 @@ internal object Transports {
       )
     return Command.Record(RecordEntry("bitrate", fields + listOfNotNull(tested?.let { "count" to it.heldBefore })))
   }
+
+  /** R-RTRF (N49): cuts that found the target at the floor, which no `bitrate` line says, and the reading said on. */
+  private fun floorLine(floor: FloorCut, sample: LinkSample): Command =
+    record(
+      "bitrate-floor",
+      "reason" to floor.reason,
+      "count" to floor.count,
+      "egressBps" to sample.egressBps,
+      "dropped" to sample.droppedPackets,
+      "lost" to sample.lostPackets,
+      "sendBufferMs" to sample.sendBufferMs,
+    )
 
   /** R-990P: F-P5-7's gate held due raises, and the encoded frame rate while it did (r2's question). */
   private fun heldLine(held: HeldRaise, videoFps: Double?): Command =

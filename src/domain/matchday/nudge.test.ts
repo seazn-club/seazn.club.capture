@@ -143,17 +143,20 @@ describe('doorStep: what a door answer means for the subscription', () => {
     });
   });
 
-  it.each(['MD_WITHDRAWN', 'MD_ENDED', 'MD_UNKNOWN'] as const)(
+  it.each(['MD_WITHDRAWN', 'MD_ENDED'] as const)(
     '%s stops for good: the code is over, so the door is never asked again',
     (word) => {
       expect(doorStep(refused(word), 0, NOW)).toEqual({ kind: 'stop' });
     },
   );
 
-  it('MD_NOT_OPEN polls only and asks the door again later, with backoff', () => {
-    expect(doorStep(refused('MD_NOT_OPEN'), 0, NOW)).toEqual({ kind: 'retry', inMs: 5_000 });
-    expect(doorStep(refused('MD_NOT_OPEN'), 3, NOW)).toEqual({ kind: 'retry', inMs: 60_000 });
-  });
+  it.each(['MD_NOT_OPEN', 'MD_UNKNOWN'] as const)(
+    '%s polls only and asks the door again later, with backoff (web: only a 410 stops)',
+    (word) => {
+      expect(doorStep(refused(word), 0, NOW)).toEqual({ kind: 'retry', inMs: 5_000 });
+      expect(doorStep(refused(word), 3, NOW)).toEqual({ kind: 'retry', inMs: 60_000 });
+    },
+  );
 
   it('a 429 waits what its Retry-After asked, whatever the backoff says', () => {
     expect(doorStep({ ok: false, retryAfterMs: 90_000 }, 0, NOW)).toEqual({

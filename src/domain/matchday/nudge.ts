@@ -64,11 +64,14 @@ export type DoorStep =
   | { readonly kind: 'stop' }
   | { readonly kind: 'retry'; readonly inMs: number };
 
-/** A code that is over: the door is never asked again for it (web, 2026-11-24: 410 for good, 401 stop). */
-const OVER: ReadonlySet<string> = new Set(['MD_WITHDRAWN', 'MD_ENDED', 'MD_UNKNOWN']);
+/**
+ * A code that is over: the door is never asked again for it. Only a 410 is (web, 2026-11-24: any non-200 but 410,
+ * MD_UNKNOWN's 401 and a 503 REALTIME_UNAVAILABLE included, polls only and asks the door again later).
+ */
+const OVER: ReadonlySet<string> = new Set(['MD_WITHDRAWN', 'MD_ENDED']);
 
 /**
- * What a door answer means. A grant joins; a code that is over stops for good; a 429 waits its Retry-After; MD_NOT_OPEN,
+ * What a door answer means. A grant joins; a code that is over (410) stops for good; a 429 waits its Retry-After; MD_UNKNOWN, MD_NOT_OPEN,
  * offline, a garbled answer and a grant too short to join by all poll only and ask again after the backoff.
  */
 export function doorStep(answer: MatchDayTokenAnswer, failures: number, now: number): DoorStep {

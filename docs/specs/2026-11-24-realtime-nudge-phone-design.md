@@ -98,7 +98,7 @@ The web's wire, confirmed by the web side on 2026-11-24, is what this section an
 
 ## 4. Match Day nudge: JS
 
-- **Port.** `MatchDayPort.realtimeToken()` calls `GET /api/v1/match-day-code/realtime-token` with `Authorization: Bearer md_…`, never a query. One parser for its answer, `{token, topic, expiresAt, url, apikey}`, sits in `domain/matchday/`. Refusals are as for the day read (401, 410, 403 and 429 with `Retry-After`), and any refusal means poll only.
+- **Port.** `MatchDayPort.realtimeToken()` calls `GET /api/v1/match-day-code/realtime-token` with `Authorization: Bearer md_…`, never a query. One parser for its answer, `{token, topic, expiresAt, url, apikey}`, sits in `domain/matchday/`. Refusals are as for the day read (401, 410, 403 and 429 with `Retry-After`), plus 503 `REALTIME_UNAVAILABLE` (the server cannot mint a token now), and any refusal means poll only. Only a 410 (`MD_WITHDRAWN`, `MD_ENDED`) stops the door for good; every other non-200, a 401 included, asks again after the backoff (web, 2026-11-24). Two calls in one second may return byte-identical tokens, which is normal; all phones on one code share its 120 calls a minute.
 - **The client is its own `RealtimeClient` instance**, never Remote Scoring's. `setAuth` is socket-wide, so sharing would make one family's token overwrite the other's (web spec §4.2). Extend `realtimePort.ts` so each caller gets its own client, or add a second port. Keep `vsn` 1.0.0 and the topic exactly as answered.
 - **When it subscribes:** only while the day list is mounted and the app is in the foreground, the same gate as the poll. A background, Exit or unmount closes it.
 - **Pings:** a `nudge` gives at most one read per 4 s, plus a trailing read. An unknown reason is still a ping. The 15 s poll stays.

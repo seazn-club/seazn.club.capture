@@ -42,7 +42,7 @@ function createTimer(fire: () => void) {
  *
  * - Each join takes a fresh grant from the door, refreshed at 80% of its actual lifetime (`doorStep`).
  * - A channel that drops, a door that fails or a grant too short to join by: poll only, and ask the door again after the
- *   backoff. A 429 waits its Retry-After. A code that is over (410, 401) stops for good: the door is not asked again for
+ *   backoff. A 429 waits its Retry-After. A code that is over (410) stops for good: the door is not asked again for
  *   this code, a return to the foreground included.
  * - In the background the channel is closed and nothing is timed; the return asks the door again.
  * - The grant's token is held by the port's subscription alone: it is never stored, said or put in a URL here.

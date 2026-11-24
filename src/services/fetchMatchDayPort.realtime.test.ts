@@ -118,6 +118,10 @@ describe('realtimeToken: the Match Day realtime door (PROVISIONAL)', () => {
     ['a garbled 200', respond(200, answered({ ...GRANT, url: 'http://plain.example' }))],
     ['a 200 with no envelope', respond(200, GRANT)],
     ['a 500', respond(500, null)],
+    [
+      'a 503 REALTIME_UNAVAILABLE',
+      respond(503, { ok: false, error: { code: 'REALTIME_UNAVAILABLE' } }),
+    ],
     ['a 404 page', respond(404, '<html>')],
     ['the envelope’s own 404', respond(404, { ok: false, error: { code: 'NOT_FOUND' } })],
   ])('%s is offline', async (_name, response) => {

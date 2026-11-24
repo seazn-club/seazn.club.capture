@@ -187,7 +187,7 @@ describe('refresh at 80% of the actual lifetime', () => {
 });
 
 describe('refusals (question 2: an empty input)', () => {
-  it.each(['MD_WITHDRAWN', 'MD_ENDED', 'MD_UNKNOWN'] as const)(
+  it.each(['MD_WITHDRAWN', 'MD_ENDED'] as const)(
     '%s stops for good: no subscription, and the door is never asked again, a return included',
     async (refusal) => {
       const w = world();

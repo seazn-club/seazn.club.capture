@@ -1160,3 +1160,46 @@ socket is pinned to Wi-Fi. DEVICE-UNVERIFIED.
 verdict; while it waits, once the link is no longer poor (Weak signal lapses 30 s after the last cut), it goes at the
 sooner of that wait and the delivery ladder's time from the verdict, as the delivery ladder's step
 (`Deliveries.recovered`, `OnAir.recoveredAtMs`). A link still poor keeps the stuck wait.
+
+### N50 — A start held by a call no cancel ends would have held the capture queue past its bound
+
+**Seen:** not on a device. The engine scan's S9 (2026-11-24) asked whether komuxer's RTMPS connect, which
+`CaptureRun.connect` bounds with `withTimeoutOrNull(START_BOUND_MS)` (14 s, C6 I-1), is a cancellable suspend or a
+blocking socket call. A cancel ends only a suspend; a blocking call holds the queue, and the Stop, unpair and release
+queued behind it, until it returns.
+
+**Read (javap of the jars the module pins, no sources in the Gradle cache):**
+
+- StreamPack 3.2.1, `streampack-rtmp`: `RtmpEndpoint.open` runs on its `ioDispatcher` (`withContext`), takes the
+  endpoint's `Mutex`, and calls komuxer's `RtmpConnectionBuilder.connect` with `RtmpClientSettings` all defaults
+  (mask 63). `RtmpEndpoint.close` takes the same `Mutex`.
+- komuxer 0.5.0, `rtmp`: `connect` wraps the TCP connect and TLS in `withTimeout(connectionTimeout)`
+  (`withConnectionTimeout`; `DEFAULT_CONNECTION_TIMEOUT` is 10 s, so "komuxer has no timeout of its own" is no longer
+  true), then the RTMP handshake and `connect` command, all suspends on Ktor's channels.
+- Ktor 3.5.1, `ktor-network-jvm`: `TcpSocketBuilder.connect(host, port)` builds `InetSocketAddress(host, port)`, which
+  makes a `java.net.InetSocketAddress` and so resolves the host with a blocking call; then `tcpConnect` opens a
+  non-blocking `SocketChannel` and waits in `SelectorManagerSupport.select`, a `CancellableContinuationImpl`.
+
+**So: cancellable, but for one call.** A host that black-holes TCP 443 hangs in `select`, which a cancel ends, and
+komuxer's own 10 s ends first. The host's lookup is the call no cancel ends (Android's `getaddrinfo` ignores an
+interrupt, as `HostLookup` already says). `HostLookup.warm` looks the host up first, within the bound, so komuxer's
+lookup normally finds the platform's cache warm; a resolver that stalls on the second lookup all the same is the
+residual. That lookup runs on StreamPack's IO thread inside `withContext`, which waits for its block even once
+cancelled, so the start, awaited in the queue, held it past the bound.
+
+**Fixed (phone), for a Stop only:** the start runs as a job of its own, not the queue's child, and the bound ends the
+wait for it (`CaptureRun.connect`). At the bound the attempt fails `TIMEOUT` as before; a start that ends within
+`ABANDON_MS` (500 ms) of its cancel is closed at once, as before; one that does not is abandoned, and the queue goes on.
+That frees a Stop, which needs no endpoint close, and the machine hears the failure at the bound. Its endpoint is closed
+once it ends, only while no newer attempt holds the endpoint (C6 CRITICAL) and within the same opening: after an unpair
+or a re-pair's new build its late end touches nothing. Tests (`CaptureRunAttemptTest`, "S9 …"): a start holding a real
+thread for up to 30 s fails `TIMEOUT` at 14 s and a Stop queued behind it is done before the machine's 15 s; an
+abandoned start that ends after the next attempt connected, or after an unpair or a re-pair, closes nothing. Each guard
+was mutated once and a test failed.
+
+**Not fixed: an unpair, and the next RTMPS attempt.** An unpair's release runs on the queue (`closed()` →
+`parts.release()` → `stopStream()`/`close()`, `StreamerAdapter`), and `RtmpEndpoint.close` takes the same `Mutex` the
+abandoned open holds, so the unpair, and everything queued behind it, still waits until the resolver returns. The core
+tests do not show it: the fake's release takes no lock. The next RTMPS attempt is not held by the queue, but its own
+open waits on that `Mutex`, and fails `TIMEOUT` at its own 14 s bound if the resolver has not returned. Device-only and
+not reproduced: it needs a resolver that answers the warm lookup and stalls on komuxer's own.

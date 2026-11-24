@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 /**
- * expo-file-system 57.0.7's `File`, `Directory` and `Paths`, as small as this wiring needs: a path-keyed map, the
+ * expo-file-system 58.0.14's `File`, `Directory` and `Paths`, as small as this wiring needs: a path-keyed map, the
  * document directory where Android's `getFilesDir()` is (expo-modules-core `AppDirectoriesService`). The full stand-in
  * and the platform's own behaviour are `expoQueueFiles.test.ts`'s.
  */
@@ -24,7 +24,9 @@ vi.mock('expo-file-system', () => {
     async text(): Promise<string> {
       return disk.files.get(this.uri) ?? '';
     }
-    write(text: string): void {
+    // 58: `write` is asynchronous; the text lands on a later task, as in expoQueueFiles.test.ts.
+    async write(text: string): Promise<void> {
+      await new Promise((resolve) => setTimeout(resolve, 0));
       disk.files.set(this.uri, text);
     }
     async move(to: File): Promise<void> {

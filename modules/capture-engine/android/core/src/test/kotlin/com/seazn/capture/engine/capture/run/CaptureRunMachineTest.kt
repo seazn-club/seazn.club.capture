@@ -62,7 +62,7 @@ class CaptureRunMachineTest {
       Engine(clock, scheduler, commands = { executed += it; run.execute(it) }, snapshots = { snapshot = it }, record = SessionRecord { lines += it })
 
     init {
-      // BridgeCore's cameraBusy: the camera is taken (its `holds` check is BridgeCoreTest's).
+      // BridgeCore's cameraBusy: the camera is taken (its `holds` check is BridgeCoreFailureTest's).
       val busy = { request: PairRequest -> told.busy += request; engine.send(Input.CameraContended); scheduler.advanceBy(0) }
       val calls = told.calls(report = { told.reports += it; engine.send(it); scheduler.advanceBy(0) }, cameraBusy = busy)
       run = CaptureRun(parts, signals, cameras, calls, { Side.LEFT }, scope.queueScope(), monoMs = { scope.testScheduler.currentTime })

@@ -1,5 +1,5 @@
 import { act, render, screen } from '@testing-library/react';
-import type { TextLayoutEventData, TextProps } from 'react-native';
+import type { TextLayoutEvent, TextProps } from 'react-native';
 import { describe, expect, it, vi } from 'vitest';
 import { NameText } from '@/ui/components/NameText';
 import { layout } from '@/ui/theme/tokens';
@@ -30,7 +30,9 @@ vi.mock('@/ui/components/Text', () => ({
 
 /** Android's lines for the last Text drawn, as `onTextLayout` would hand them back. */
 function linesAre(...texts: string[]) {
-  const lines = texts.map((text) => ({ text })) as unknown as TextLayoutEventData['lines'];
+  const lines = texts.map((text) => ({
+    text,
+  })) as unknown as TextLayoutEvent['nativeEvent']['lines'];
   const handler = laidOut.handler;
   if (handler === undefined || handler === null)
     throw new Error('the Text was given no onTextLayout');

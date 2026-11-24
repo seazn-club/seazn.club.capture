@@ -158,6 +158,103 @@ seazn-club/seazn.club.capture`).
    app is Live Stream and Remote Scoring for badminton (AGENTS §1; table
    tennis is plan S2-2, and the Dashboard mode is S4).
 
+## R8: the release build is minified
+
+Play Console flagged build 1314 (DEX optimisation low, 1% obfuscation, no R8,
+56.5 MB of DEX), and the owner asked for R8 in a pull request of its own
+(2026-11-24: "Ok separate pr after 68"). `app.json`'s `expo-build-properties`
+sets `enableMinifyInReleaseBuilds` and `enableShrinkResourcesInReleaseBuilds`,
+so every release build, the EAS `production` bundle and a local
+`assembleRelease` alike, runs R8 and drops unused resources. Debug builds do
+not. Measured on 2026-11-24 (arm64 release APK, dev twin): 95.7 MB with
+56.6 MB of DEX before, 60.8 MB with 21.9 MB of DEX after. R8 shrinks and
+renames but does not optimise. Through Expo 57 the generated
+`android/app/build.gradle` named `proguard-android.txt`, which says
+`-dontoptimize`; Expo 58's names `proguard-android-optimize.txt`, so
+`app.json`'s `expo-build-properties` adds `extraProguardRules: "-dontoptimize"`
+(written into `android/app/proguard-rules.pro` at prebuild) and the release
+build stays the one reviewed with R8: shrink and rename only. Turning
+optimisation on is a change of its own, checked on a phone. R8 8.12.14 (AGP
+8.12, Expo 57) warned "An error occurred when parsing kotlin metadata" for
+classes compiled by Kotlin 2.3 and 2.4 (ours, StreamPack's); the R8 in AGP
+9.2.1 (Expo 58) prints none. Only `kotlin-reflect` reads that metadata: in
+this app, Expo's records, which Expo's own rules keep whole. The phone check
+after this change is what settles it.
+
+**Expo SDK 58** (2026-11-24; owner: "Expo upgrade in Phase 5 after R8, same
+PR", after Play Console flagged deprecated edge-to-edge calls on 1.0.15).
+React Native 0.88.1, AGP 9.2.1, Gradle 9.4.1, compile SDK 37, target SDK 36,
+Kotlin 2.3.0 (app.json's `kotlinVersion`, which Expo 58's root
+`build.gradle` reads itself). The arm64 release APK went from 60.8 MB
+(21.9 MB of DEX) to 54.2 MB (14.9 MB of DEX): Expo Router 58 no longer pulls
+`@expo/ui` and `expo-symbols` in, and `@expo/ui` was 424 of the app's classes
+with Jetpack Compose behind them. What Play Console flagged, read from the
+release DEX: React Native's `StatusBarModule` no longer touches the status
+bar's colour (0.87 removed `backgroundColor` and `translucent`), and
+Material's `EdgeToEdgeUtils` calls are gone. Still in the DEX: React Native's
+`WindowUtilKt.enableEdgeToEdge` (`setStatusBarColor`, `setNavigationBarColor`
+and `layoutInDisplayCutoutMode`), its `statusBarHide`/`statusBarShow` on the
+non-edge-to-edge path (the cutout mode), Material's `BottomSheetDialog`
+(`setStatusBarColor`, `getNavigationBarColor`) and AndroidX's splash screen
+(`SplashScreen$Impl31`). Those are the libraries' own code: a later React
+Native, Material or AndroidX release has to drop them.
+
+**AGP 9's strict keep rules.** AGP 9.2.1 turns
+`android.r8.strictFullModeForKeepRules` on by default (AGP 8.12.0's
+`BooleanOption` defaults it to false, 9.2.1's to true, until AGP 10): a
+`-keep class X` with no member list then keeps X's name but no longer its
+no-arg constructor. The first SDK 58 release (build 1365) lost ML Kit's
+`CommonComponentRegistrar` and `VisionCommonRegistrar` constructors that way
+(firebase-components keeps the registrars with no member list), and the code
+scanner's start logged `InvalidRegistrarException` on the phone. The capture
+engine's config plugin sets the property to false, so every library's rules
+mean what they meant in the build tested under AGP 8, and two explicit rules
+name the constructors that matter whatever it says: the code scanner's
+`consumer-rules.pro` keeps every `ComponentRegistrar`'s `<init>()`, and the
+capture engine's keeps Ktor's `HttpClientEngineContainer`, which
+`ServiceLoader` builds. A sweep of the release DEX against the merged
+manifest's activities, services, providers, receivers, AndroidX Startup
+initializers and firebase registrars, and every `META-INF/services` entry,
+found no other class missing its no-arg constructor.
+
+**Keep rules.** Each library ships its own (Expo modules, React Native,
+srtdroid's core, OkHttp, coroutines). What the capture engine reads by name
+is kept by its own `modules/capture-engine/android/consumer-rules.pro`, which
+the app's R8 reads, each rule with a comment naming its reader, and
+`GlueRulesTest` pins every rule to the name its reader uses:
+
+- StreamPack's `audioRecord` field (`AudioSessionIds`, the mic watch) and
+  srtdroid's `CoroutineSrtSocket.socket` (`SeaznSrtSink`, N49), read by
+  reflection; srtdroid's own rules keep `SrtSocket.srtsocket`.
+- The JNI shim's `SrtNetworkBinder.nativeBind`, found by its C name.
+- StreamPack's camera source package (`CameraFailures`: a camera failure
+  rebuilds the camera) and `io.ktor.network` (`TlsCloserGuard`, F-P5-12: an
+  unswallowed TLS closer throw kills the process), read from class names and
+  stack frames.
+- Names in the session record: every `Throwable`'s class, so `error` and
+  `rootError` read as before R8, and the engine's own classes for `answer`
+  and `word`. `capture-start-failed {site}` is a throw's first frame outside
+  the runtimes, skipping Kotlin's by its `kotlin.` prefix, so Kotlin keeps its
+  names, and so do the engine, StreamPack, srtdroid, `kotlinx.coroutines` and
+  `io.ktor.network`, members included.
+
+A new reflective or name-based read in the engine needs its rule in the same
+change. The engine must be checked on a phone after any rule change: a
+missing rule is a crash or a silent watch failure, not a build error.
+
+**Mapping.** AGP writes R8's mapping into the app bundle
+(`BUNDLE-METADATA/com.android.tools.build.obfuscation/proguard.map`), and Play
+reads it from there to deobfuscate crash and ANR stack traces in Android
+vitals, so the release workflow uploads nothing more. A local `assembleRelease`
+leaves it at `android/app/build/outputs/mapping/release/mapping.txt`. A
+record's `site` reads as before only when its frame is in a package kept above;
+a frame in any other library (OkHttp, the rest of Ktor, AndroidX) is renamed,
+and is read back with that build's mapping: the app bundle on the EAS
+build's page on expo.dev holds it in `BUNDLE-METADATA`.
+
+CI's Android compile (`.github/workflows/android-compile.yml`) runs
+`assembleRelease`, so every pull request runs R8 as well.
+
 ## Why the build number is pinned
 
 EAS uploads a shallow clone of the repo (depth 1), so `git rev-list --count`

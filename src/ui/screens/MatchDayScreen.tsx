@@ -1,5 +1,12 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import {
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  type ScrollViewInstance,
+  StyleSheet,
+  View,
+} from 'react-native';
 import {
   bannerFor,
   courtCardsAt,
@@ -539,7 +546,7 @@ const DayHeader = memo(function DayHeader({
  * nothing.
  */
 function useScrollToCourt(court: string | null) {
-  const scroller = useRef<ScrollView>(null);
+  const scroller = useRef<ScrollViewInstance>(null);
   const done = useRef(false);
   const onSlot = useCallback(
     (name: string, y: number) => {

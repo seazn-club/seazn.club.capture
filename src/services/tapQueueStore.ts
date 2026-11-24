@@ -29,7 +29,7 @@ export type { BootCache, MatchQueue, QueueDead, QueuedEvent } from '@/domain/sco
  * carries one, wherever it hides.
  *
  * A save is a temp file moved over the old one, but that move is not one step where it matters: on Android
- * expo-file-system 57.0.7 deletes the target and then renames (`CopyMoveStrategy.kt`, `prepareAsDestination` and
+ * expo-file-system 58.0.14 deletes the target and then renames (`CopyMoveStrategy.kt`, `prepareAsDestination` and
  * `tryNativeMove`), so a kill between the two leaves the new queue only as `{id}.json.tmp`. A read therefore treats a
  * temp file that decodes as the queue when the main file is missing or garbled, and promotes it.
  */

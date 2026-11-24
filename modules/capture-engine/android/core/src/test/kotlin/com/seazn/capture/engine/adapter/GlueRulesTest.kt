@@ -228,7 +228,7 @@ class GlueRulesTest {
    * Device session 4, F-S4-1: StreamPack's camera-loss lines reach the capture's watch, through the one flow the
    * build makes: StreamPack's logger is the build's `VendorLines`, which tells the flow each loss, and the capture
    * is given that flow and hands it to the run; a start's failure is read by the core's `CameraFailures`. N45: its busy
-   * errors reach the run the same way, through a flow of their own. The run's side is CaptureRunTest's; this is the
+   * errors reach the run the same way, through a flow of their own. The run's side is the CaptureRun*Test files'; this is the
    * wiring no JVM test reaches.
    */
   @Test
@@ -251,7 +251,7 @@ class GlueRulesTest {
   /**
    * Re-review 4 cap (controller ruling 2026-10-05): the app's return to the foreground re-arms the capture's camera
    * rebuilds. No native foreground watcher existed: Expo's module lifecycle is the one, and the host hands it to
-   * the capture it holds, building nothing for it. CaptureRunTest drives the run's side.
+   * the capture it holds, building nothing for it. The CaptureRun*Test files drive the run's side.
    */
   @Test
   fun `re-review 4 the app's return to the foreground reaches the capture's run, building nothing`() {
@@ -582,6 +582,46 @@ class GlueRulesTest {
   }
 
   /**
+   * R8 (owner, 2026-11-24): the release build minifies. Two core readers decide behaviour by a class's or a stack
+   * frame's package: CameraFailures (StreamPack's camera source, a camera failure rebuilds the camera) and
+   * TlsCloserGuard (Ktor's network, F-P5-12: unswallowed, Android kills the process). Each prefix they read is kept
+   * from renaming and inlining (`-keep,allowshrinking ... { *; }`), and the record's class names stay legible.
+   */
+  @Test
+  fun `R8 every package read by name decides nothing differently in a release that minifies`() {
+    val core = File(src.parentFile, "core/src/main/kotlin/com/seazn/capture/engine/adapter")
+    fun prefix(file: String, name: String): String =
+      Regex("""private const val $name = "([\w.]+)\."""").find(File(core, file).readText())?.groupValues?.get(1) ?: error("no $name in $file")
+    val read = listOf(prefix("CameraFailures.kt", "SOURCE"), prefix("TlsCloserGuard.kt", "KTOR_NETWORK"))
+    assertEquals(listOf("io.github.thibaultbee.streampack.core.elements.sources.video.camera", "io.ktor.network"), read)
+    val rules = File(src.parentFile, "consumer-rules.pro").readText()
+    for (pkg in read) {
+      val rule = Regex("""-keep,allowshrinking class ${Regex.escape(pkg)}\.\*\* \{ \*; \}""")
+      assertTrue(rule.containsMatchIn(rules), "$pkg kept from renaming and inlining")
+    }
+    assertTrue("-keepnames class * extends java.lang.Throwable" in rules, "the record's `error` and `rootError` name the class")
+    assertTrue("-keepattributes InnerClasses,EnclosingMethod" in rules, "a nested class keeps its simple name")
+    // `capture-start-failed {site}` (F-S7-1): the first frame outside the runtimes, as `Type.method`. The runtimes' own
+    // prefixes are skipped by name, so Kotlin's must stay `kotlin.`; the frames it lands on keep their class and member names.
+    val runtime = Regex("""private val RUNTIME = listOf\(([^)]*)\)""").find(glue("CaptureRun.kt"))?.groupValues?.get(1) ?: error("no RUNTIME")
+    val prefixes = Regex(""""([\w.]+)\."""").findAll(runtime).map { it.groupValues[1] }.toList()
+    assertEquals(listOf("java", "javax", "jdk", "sun", "kotlin"), prefixes, "platform prefixes R8 never renames, and Kotlin's")
+    val named = listOf("kotlin", "kotlinx.coroutines", "io.github.thibaultbee.srtdroid", "io.github.thibaultbee.streampack", "com.seazn.capture.engine")
+    for (pkg in named) assertTrue("-keepnames class $pkg.** { *; }" in rules, "$pkg keeps its class and member names for `site`")
+  }
+
+  /**
+   * Expo 58 (AGP 9.2.1, 2026-11-24): R8's strict keep rules dropped the no-arg constructor a member-less `-keep`
+   * used to keep. Ktor finds its HTTP engine by ServiceLoader, which builds the container with that constructor, so
+   * the rule names it explicitly, whatever the app's `android.r8.strictFullModeForKeepRules` says.
+   */
+  @Test
+  fun `R8 Ktor's engine container keeps the constructor ServiceLoader calls`() {
+    val rules = File(src.parentFile, "consumer-rules.pro").readText()
+    assertTrue("-keep class io.ktor.client.engine.** implements io.ktor.client.HttpClientEngineContainer { <init>(); }" in rules)
+  }
+
+  /**
    * CD16 and N1 (Task 38): the notification follows the snapshot only while the service is held, so an
    * idle phone posts nothing; its work on the main looper costs a line when it fails, never the process.
    */
@@ -796,7 +836,7 @@ class GlueRulesTest {
 
   /**
    * Review C7 I-2 and M-4: StreamPack opens the camera lazily, at the first preview or the start, so the glue calls
-   * no camera held; the run does, once StreamPack reports the source open (CaptureRunTest, CaptureRunMachineTest).
+   * no camera held; the run does, once StreamPack reports the source open (the CaptureRun*Test files).
    * Every camera source the glue sets is announced first (`cameras.opening`), so its own open is ours; the open
    * signal is the source's previewing or streaming flow (3.2.1, javap); the readiness reads the open's outcome;
    * and the preview's open failure, which 3.2.1's PreviewView hands its listener, reaches the capture.
@@ -883,7 +923,7 @@ class GlueRulesTest {
    * Device fix round, item (c): StreamPack 3.2.1's `VideoInput.setSource` skips a camera source of the same id
    * (`CameraSourceFactory.isSourceEquals`, javap), so the reopen's swap opens a camera only from the slate. Over a
    * camera source it answers false before announcing or setting anything, never a silent true; with nothing on air
-   * the run builds the camera afresh instead (CaptureRunTest, CaptureRunMachineTest).
+   * the run builds the camera afresh instead (the CaptureRun*Test files).
    */
   @Test
   fun `(c) the reopen's swap opens only from the slate, and answers false over a camera source`() {

@@ -283,7 +283,7 @@ describe('the app killed and started again', () => {
     expect([...files.files.keys()]).toEqual([nameOf(FIXTURE)]);
   });
 
-  // expo-file-system 57.0.7 on Android deletes the target and then renames (CopyMoveStrategy.kt), so a kill between
+  // expo-file-system 58.0.14 on Android deletes the target and then renames (CopyMoveStrategy.kt), so a kill between
   // the two leaves the new queue only as `{id}.json.tmp`: the save's temp file is then the one copy there is.
   it('a kill between the delete and the rename leaves only the temp file: it is the queue, and is promoted', async () => {
     const files = createMemoryQueueFiles();

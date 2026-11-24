@@ -63,7 +63,7 @@ export function useAppLifecycle(): Lifecycle {
   return { phase, lastAwayMs, absences };
 }
 
-function normalise(status: AppStateStatus | null): LifecyclePhase {
+function normalise(status: string | null | undefined): LifecyclePhase {
   if (status === 'active') return 'active';
   if (status === 'inactive') return 'inactive';
   return 'background';

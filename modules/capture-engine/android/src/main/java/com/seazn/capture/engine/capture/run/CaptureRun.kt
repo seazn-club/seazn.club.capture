@@ -12,9 +12,13 @@ import com.seazn.capture.engine.core.PairRequest
 import com.seazn.capture.engine.core.RecordEntry
 import com.seazn.capture.engine.core.SessionMachine
 import com.seazn.capture.engine.core.Side
+import com.seazn.capture.engine.core.Stabilisation
+import com.seazn.capture.engine.core.Stabiliser
 import java.io.IOException
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -46,6 +50,8 @@ class CaptureRun(
   private val scope: CoroutineScope,
   /** N45 I1: the monotonic clock in ms, which spaces the probe's record lines; the test's virtual clock in core's tests. */
   private val monoMs: () -> Long = { System.nanoTime() / 1_000_000 },
+  /** S9 (N50): where a start runs; the scope's own dispatcher. Core's tests hand it a real thread to block. */
+  private val startContext: CoroutineContext = EmptyCoroutineContext,
 ) {
   private val serial = CaptureSerial(scope, calls.failure)
 
@@ -69,6 +75,9 @@ class CaptureRun(
   @Volatile private var stoppedThrough = 0
 
   private var micNoted = false
+
+  /** S9 (N50): releases so far; an abandoned start's late close acts only within the opening it was made in. */
+  private var releases = 0
   private var closeWatch: Job? = null
 
   /** I-2: the opening's watch of StreamPack's camera opens, and of its losses (F-S4-1), from the build to the release. */
@@ -107,6 +116,9 @@ class CaptureRun(
    */
   private var probeReleasedAt: Long? = null
   @Volatile private var quickRetakes = 0
+
+  /** Spec 2026-11-24-camera-stabilisation §4: the camera and OIS state the last `stabilisation` line said, in this opening. */
+  private var stabilisedLine: Pair<String, Stabiliser>? = null
 
   fun open(asked: PairRequest) = serial.submit { opened(asked) }
 
@@ -180,8 +192,15 @@ class CaptureRun(
       scope.launch {
         launch {
           parts.cameraOpens().collect { id ->
+            // Spec 2026-11-24 §5: read as the report is heard, as [CameraAvailability.opened] reads it.
+            val accepted = !cameras.falseOpen(id)
             cameras.opened(id)?.let(calls.report)
-            serial.submit(::openSeen)
+            serial.submit {
+              openSeen()
+              // Every camera source opened, a switch's, a reopen's and the slate's fall included; never a busy open's
+              // false report, as a setting against a device not open opens it outside the take and the probe.
+              if (accepted) stabilise(id)
+            }
           }
         }
         // N45 I2: the busy word is marked as it is heard, before its take is queued: StreamPack's report of the same
@@ -194,6 +213,7 @@ class CaptureRun(
         // error-2 take over once the holder let go, and Go live stayed off (re-review probe G).
         launch {
           parts.busyOpens().collect { id ->
+            cameras.busyHeard(id) // spec 2026-11-24 §4: the stabilise gate's, on air or off
             if (attempt != null) cameras.busyOpen(id)
             serial.submit { busyByDevice(id) }
           }
@@ -462,6 +482,7 @@ class CaptureRun(
   }
 
   private suspend fun closed() {
+    releases += 1
     request = null
     attempt?.let(::asked)
     closeWatch?.cancel() // cleanup: the mark, not the cancel, decides the drop
@@ -470,7 +491,30 @@ class CaptureRun(
     openWatch = null
     attempt = null
     rotation = null
+    stabilisedLine = null
     parts.release()
+  }
+
+  /**
+   * Spec 2026-11-24-camera-stabilisation §3: camera [camera], just reported open, gets OIS wherever it has it (owner,
+   * 2026-11-24: "OIS only"). One line when the camera or its state differs from the last said in this opening. A setter
+   * that throws writes one `capture-call-failed` line and is never the session's failure: the picture goes on
+   * unstabilised rather than the broadcast ending, and the next open says its state again.
+   */
+  private suspend fun stabilise(camera: String) {
+    try {
+      val available = parts.opticalStabiliser(camera) ?: return
+      val state = Stabilisation.optical(available)
+      if (state == Stabiliser.ON) parts.stabilise(camera)
+      if (stabilisedLine == camera to state) return
+      stabilisedLine = camera to state
+      calls.line(Stabilisation.entry(state))
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      stabilisedLine = null
+      calls.line(RecordEntry("capture-call-failed", listOf("action" to "stabilisation", "error" to e.javaClass.simpleName)))
+    }
   }
 
   private suspend fun run(command: Command) {
@@ -553,9 +597,13 @@ class CaptureRun(
 
   /**
    * One endpoint: a connect replaces whatever attempt it still holds, as a stop asked for. The start is
-   * bounded by [START_BOUND_MS] (C6 I-1): every later command waits behind it on the one queue, and
-   * komuxer's connect has no timeout of its own, so a hung start would hold an unpair's release, and the
-   * camera, for as long as it hung.
+   * bounded by [START_BOUND_MS] (C6 I-1): every later command waits behind it on the one queue, so a hung
+   * start would hold an unpair's release, and the camera, for as long as it hung.
+   *
+   * S9 (N50): the start runs as a job of its own, never the queue's child, and the bound stops the wait for
+   * it, not only the start. A cancel ends komuxer's connect, but not Ktor's lookup of the ingest host inside
+   * it, a blocking call on StreamPack's IO thread; a start awaited as a child (`withContext`) would hold the
+   * queue until that call returned, however long, the bound notwithstanding.
    */
   private suspend fun connect(command: Command.Connect) {
     val id = command.attemptId
@@ -563,9 +611,10 @@ class CaptureRun(
     parts.beforeConnect(id, command.startBitrateBps)
     attempt = id
     signals.starting(id) // M-3: a drop while the start is in flight waits for its end
+    val start = scope.async(startContext) { parts.start(command) }
     val started =
       try {
-        withTimeoutOrNull(START_BOUND_MS) { parts.start(command) }
+        withTimeoutOrNull(START_BOUND_MS) { start.await() }
       } catch (e: CancellationException) {
         signals.startEnded(id, StartEnd.RETURNED)?.let(calls.report)
         throw e
@@ -580,7 +629,7 @@ class CaptureRun(
         return
       }
     signals.startEnded(id, if (started == null) StartEnd.FAILED else StartEnd.RETURNED)?.let(calls.report)
-    if (started == null) return timedOut(id)
+    if (started == null) return timedOut(id, start)
     if (!started) return calls.report(Input.ConnectFailed(id, ConnectFailure.OTHER, "srt url does not parse"))
     signals.connected(id)?.let(calls.report)
     noteMicSession()
@@ -615,10 +664,23 @@ class CaptureRun(
   /**
    * C6 I-1: the start did not end within its bound, a TIMEOUT (the text is what `SrtOptions.failure`
    * reads). The cancelled start may have left the endpoint half open: it is closed as a stop asked for.
+   *
+   * S9 (N50): a start that ends within [ABANDON_MS] of its cancel is closed now, as before. One that does not
+   * holds a thread no cancel reaches, and StreamPack's endpoint `Mutex`: it is abandoned and the queue goes on.
+   * That frees a Stop, which needs no endpoint close. It does not free an unpair: the release closes the
+   * endpoint, and that close waits on the same `Mutex`, so the queue, and everything behind the unpair, waits
+   * until the abandoned call returns. The next RTMPS attempt is not held by the queue, but its own open waits on
+   * the `Mutex`, within its own bound. The abandoned start's endpoint is closed once it ends, only while no newer
+   * attempt holds the endpoint (C6 CRITICAL) and within the same opening: after a release, or a re-pair's new
+   * build, its late end touches nothing.
    */
-  private suspend fun timedOut(id: Int) {
+  private suspend fun timedOut(id: Int, start: Job) {
     signals.connectFailed(id, TimeoutException("start timed out after $START_BOUND_MS ms"))?.let(calls.report)
-    stopHeld(id)
+    start.cancel()
+    if (withTimeoutOrNull(ABANDON_MS) { start.join() } != null) return stopHeld(id)
+    letGo(id)
+    val opening = releases
+    start.invokeOnCompletion { serial.submit { if (attempt == null && releases == opening) parts.stop() } }
   }
 
   /**
@@ -677,11 +739,16 @@ class CaptureRun(
   }
 
   private suspend fun stopHeld(id: Int) {
+    letGo(id)
+    parts.stop()
+  }
+
+  /** Attempt [id]'s endpoint is no longer the run's: its close is asked for, and no drop. */
+  private fun letGo(id: Int) {
     asked(id)
     closeWatch?.cancel() // cleanup: the mark, not the cancel, decides the drop
     closeWatch = null
     attempt = null
-    parts.stop()
   }
 
   private fun asked(id: Int) {
@@ -707,6 +774,13 @@ class CaptureRun(
      * machine gives up on it. SRT's own connect gives up at `SrtOptions`' CONNTIMEO, well inside it.
      */
     const val START_BOUND_MS = SessionMachine.CONNECT_TIMEOUT_MS - 1_000
+
+    /**
+     * S9 (N50): how long a start cancelled at its bound is waited for before it is abandoned. A cancel ends a start
+     * that suspends at once; this is for one that holds its thread. Inside the second between the bound and the
+     * machine's connect timeout, so the queue is still free before the machine gives up.
+     */
+    const val ABANDON_MS = 500L
 
     /**
      * Re-review 4, controller ruling 2026-10-05 (progress.md): consecutive camera-loss rebuilds with no open seen

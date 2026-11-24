@@ -12,7 +12,7 @@ export type MemoryQueueFiles = QueueFiles & {
   /**
    * The next call of this kind rejects, once: a disk that fails, or an app that dies between two steps. `move`
    * fails before it does anything; `moveAfterDelete` fails after the target is deleted and before the source is
-   * renamed onto it, the gap a kill leaves on Android (expo-file-system 57.0.7 `CopyMoveStrategy.kt`: the target is
+   * renamed onto it, the gap a kill leaves on Android (expo-file-system 58.0.14 `CopyMoveStrategy.kt`: the target is
    * deleted first, then renamed over).
    */
   failNext(op: Op): void;

@@ -11,6 +11,8 @@ android {
   defaultConfig {
     versionCode 1
     versionName "0.1.0"
+    // ML Kit's registrars, built by reflection (consumer-rules.pro).
+    consumerProguardFiles 'consumer-rules.pro'
   }
   lintOptions {
     abortOnError false

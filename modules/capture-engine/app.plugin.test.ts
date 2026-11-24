@@ -4,19 +4,23 @@ import { describe, expect, it } from 'vitest';
 import appJson from '../../app.json';
 import {
   buildPropertiesOf,
-  pinKotlinGradlePlugin,
-  withSuppressedCompileSdk,
+  checkKotlinGradlePlugin,
+  withAgp8KeepRules,
   type GradleProperty,
 } from './app.plugin';
 
 /**
  * C7u (owner, 2026-10-05): StreamPack 3.2.1 and its graph carry Kotlin metadata 2.4.0, which a Kotlin
- * compiler reads only from 2.3.0 on (a compiler reads one metadata version ahead of its own). Expo 57's
- * `android.kotlinVersion` sets Expo's own `kotlinVersion` and never the compiler: the root build.gradle
- * names the Kotlin Gradle plugin with no version, so React Native's Gradle plugin brings 2.1.20 (C7u
- * report, `buildEnvironment`). This plugin gives that classpath the version app.json asks for.
+ * compiler reads only from 2.3.0 on (a compiler reads one metadata version ahead of its own). Through Expo 57
+ * the root build.gradle named the Kotlin Gradle plugin with no version, and this plugin wrote app.json's
+ * `android.kotlinVersion` into it. Expo 58's template takes the version from that property itself
+ * (`findProperty('android.kotlinVersion')`, which expo-build-properties writes to gradle.properties), so the
+ * plugin now only checks that the template still does, and that the version reads metadata 2.4.
  */
-const UNVERSIONED = "classpath('org.jetbrains.kotlin:kotlin-gradle-plugin')";
+const FROM_PROPERTY = "def kotlinVersion = findProperty('android.kotlinVersion')";
+const VERSIONED_FROM_PROPERTY = '"org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion"';
+/** Expo 57's line: the classpath with no version, which React Native's Gradle plugin then chose. */
+const UNVERSIONED_ONLY = "classpath('org.jetbrains.kotlin:kotlin-gradle-plugin')";
 
 /**
  * One file of a ustar archive, by its path: Expo's prebuild template ships as `expo/template.tgz`, and the
@@ -39,58 +43,53 @@ function fromTarGz(archive: string, path: string): string {
   throw new Error(`${path} is not in ${archive}`);
 }
 
-/** The root build.gradle Expo 57's prebuild writes, read from the installed template, never typed here. */
+/** The root build.gradle Expo 58's prebuild writes, read from the installed template, never typed here. */
 const TEMPLATE = fromTarGz('../../node_modules/expo/template.tgz', 'package/android/build.gradle');
 
-const versioned = (version: string) =>
-  `classpath('org.jetbrains.kotlin:kotlin-gradle-plugin:${version}')`;
-
-describe('pinKotlinGradlePlugin', () => {
-  it("reads Expo's real template, which names the Kotlin Gradle plugin once, unversioned", () => {
+describe('checkKotlinGradlePlugin', () => {
+  it("reads Expo's real template, which versions the Kotlin Gradle plugin from android.kotlinVersion", () => {
     expect(TEMPLATE).toContain('buildscript {');
-    expect(TEMPLATE.split(UNVERSIONED).length - 1).toBe(1);
-    expect(TEMPLATE.split('kotlin-gradle-plugin').length - 1).toBe(1);
+    expect(TEMPLATE.split(FROM_PROPERTY).length - 1).toBe(1);
+    expect(TEMPLATE.split(VERSIONED_FROM_PROPERTY).length - 1).toBe(1);
   });
 
-  it('versions the one unversioned Kotlin Gradle plugin, and nothing else', () => {
-    const pinned = pinKotlinGradlePlugin(TEMPLATE, '2.3.0');
-    expect(pinned).toBe(TEMPLATE.replace(UNVERSIONED, versioned('2.3.0')));
-    expect(pinned.split('kotlin-gradle-plugin').length - 1).toBe(1);
+  it('leaves the template as it is: the version reaches the compiler without an edit', () => {
+    expect(checkKotlinGradlePlugin(TEMPLATE, '2.3.0')).toBe(TEMPLATE);
   });
 
   it('leaves its own output as it is: a second prebuild over the same file', () => {
-    const once = pinKotlinGradlePlugin(TEMPLATE, '2.3.0');
-    expect(pinKotlinGradlePlugin(once, '2.3.0')).toBe(once);
-  });
-
-  it('moves the version a previous prebuild wrote: a second prebuild after app.json changed', () => {
-    const once = pinKotlinGradlePlugin(TEMPLATE, '2.3.0');
-    expect(pinKotlinGradlePlugin(once, '2.3.21')).toBe(pinKotlinGradlePlugin(TEMPLATE, '2.3.21'));
+    const once = checkKotlinGradlePlugin(TEMPLATE, '2.3.0');
+    expect(checkKotlinGradlePlugin(once, '2.3.0')).toBe(once);
   });
 
   // The one synthetic input: a template with no plugin at all. The others are the real one, changed.
-  it('refuses a template that names the plugin nowhere, or twice: the Expo template changed', () => {
-    expect(() => pinKotlinGradlePlugin('buildscript {}\n', '2.3.0')).toThrow(/0 times/);
-    expect(() => pinKotlinGradlePlugin(TEMPLATE.replace(UNVERSIONED, ''), '2.3.0')).toThrow(
-      /0 times/,
+  it('refuses a template that no longer reads android.kotlinVersion: the Expo template changed', () => {
+    expect(() => checkKotlinGradlePlugin('buildscript {}\n', '2.3.0')).toThrow(/template changed/);
+    expect(() => checkKotlinGradlePlugin(TEMPLATE.replace(FROM_PROPERTY, ''), '2.3.0')).toThrow(
+      /template changed/,
     );
-    expect(() => pinKotlinGradlePlugin(`${TEMPLATE}\n${UNVERSIONED}\n`, '2.3.0')).toThrow(
-      /2 times/,
-    );
+    expect(() =>
+      checkKotlinGradlePlugin(TEMPLATE.replace(VERSIONED_FROM_PROPERTY, "''"), '2.3.0'),
+    ).toThrow(/template changed/);
+  });
+
+  it("refuses Expo 57's template, whose classpath took React Native's Kotlin", () => {
+    const expo57 = `buildscript {\n  dependencies {\n    ${UNVERSIONED_ONLY}\n  }\n}\n`;
+    expect(() => checkKotlinGradlePlugin(expo57, '2.3.0')).toThrow(/template changed/);
   });
 
   // From the rule, not the code: metadata 2.4.0 needs a compiler of 2.3.0 or newer.
   it.each(['2.3.0', '2.3.21', '2.4.10', '3.0.0'])(
     'takes %s, which reads metadata 2.4',
     (version) => {
-      expect(pinKotlinGradlePlugin(TEMPLATE, version)).toContain(versioned(version));
+      expect(checkKotlinGradlePlugin(TEMPLATE, version)).toBe(TEMPLATE);
     },
   );
 
   it.each(['2.1.20', '2.2.21', '1.9.24', '', 'latest', '2.3', '2.3.0; rm'])(
     'refuses %j, which reads no metadata 2.4 or is no version',
     (version) => {
-      expect(() => pinKotlinGradlePlugin(TEMPLATE, version)).toThrow(/Kotlin 2\.3\.0 or newer/);
+      expect(() => checkKotlinGradlePlugin(TEMPLATE, version)).toThrow(/Kotlin 2\.3\.0 or newer/);
     },
   );
 });
@@ -118,34 +117,38 @@ describe('buildPropertiesOf', () => {
   });
 });
 
-describe('withSuppressedCompileSdk', () => {
+/**
+ * AGP 9 made R8's strict full mode for keep rules the default (`android.r8.strictFullModeForKeepRules`, false in
+ * AGP 8.12.0's BooleanOption, true in 9.2.1's): a `-keep class X` with no member list stops keeping X's no-arg
+ * constructor. firebase-components' `-keep class * implements ComponentRegistrar` then left ML Kit's registrars
+ * without one, and the code scanner's ComponentDiscovery could not build them (device smoke of build 1365).
+ */
+describe('withAgp8KeepRules', () => {
   const base: GradleProperty[] = [
     { type: 'comment', value: 'Project-wide Gradle settings.' },
     { type: 'property', key: 'android.useAndroidX', value: 'true' },
   ];
-  const suppressed = (items: GradleProperty[]) =>
+  const strict = (items: GradleProperty[]) =>
     items.filter(
-      (item) => item.type === 'property' && item.key === 'android.suppressUnsupportedCompileSdk',
+      (item) => item.type === 'property' && item.key === 'android.r8.strictFullModeForKeepRules',
     );
 
-  it("adds AGP's own suppression for the compile SDK, as AGP 8.12 spells it for 37", () => {
-    const items = withSuppressedCompileSdk(base, 37);
-    expect(suppressed(items)).toEqual([
-      { type: 'property', key: 'android.suppressUnsupportedCompileSdk', value: '37.0' },
+  it("turns AGP 9's strict keep rules off, so every library's rule means what it meant under AGP 8", () => {
+    const items = withAgp8KeepRules(base);
+    expect(strict(items)).toEqual([
+      { type: 'property', key: 'android.r8.strictFullModeForKeepRules', value: 'false' },
     ]);
     expect(items.slice(0, base.length)).toEqual(base);
   });
 
-  it('holds one entry after a second prebuild, and moves it with the compile SDK', () => {
-    const twice = withSuppressedCompileSdk(withSuppressedCompileSdk(base, 37), 37);
-    expect(suppressed(twice)).toHaveLength(1);
-    expect(suppressed(withSuppressedCompileSdk(twice, 38))).toEqual([
-      { type: 'property', key: 'android.suppressUnsupportedCompileSdk', value: '38.0' },
+  it('holds one entry after a second prebuild, whatever value was there', () => {
+    const was: GradleProperty[] = [
+      ...base,
+      { type: 'property', key: 'android.r8.strictFullModeForKeepRules', value: 'true' },
+    ];
+    expect(strict(withAgp8KeepRules(withAgp8KeepRules(was)))).toEqual([
+      { type: 'property', key: 'android.r8.strictFullModeForKeepRules', value: 'false' },
     ]);
-  });
-
-  it('adds it to an empty file too', () => {
-    expect(suppressed(withSuppressedCompileSdk([], 37))).toHaveLength(1);
   });
 });
 

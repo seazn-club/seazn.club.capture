@@ -11,8 +11,9 @@ const NAME = /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/;
  * and Android's Auto Backup leaves it alone (the secure store's backup rules include only shared preferences:
  * `test/androidBackup.test.ts`). Over expo-file-system's `File` and `Directory`. `move` is the platform's own, with
  * `overwrite`, and is NOT atomic over an existing file: on Android it deletes the target and then renames
- * (`CopyMoveStrategy.LocalFile.prepareAsDestination` and `tryNativeMove`, expo-file-system 57.0.7), so a kill between
+ * (`CopyMoveStrategy.LocalFile.prepareAsDestination` and `tryNativeMove`, expo-file-system 58.0.14), so a kill between
  * the two leaves only the source. The store reads for that (`tapQueueStore`: a temp file that decodes is promoted).
+ * `write` is asynchronous from SDK 58 and is awaited, so the move after it finds the text on disk.
  * What a phone does is a device claim.
  */
 export function createExpoQueueFiles(name: 'scoring' | 'matchday'): QueueFiles {
@@ -40,7 +41,7 @@ export function createExpoQueueFiles(name: 'scoring' | 'matchday'): QueueFiles {
       return found.exists ? found.text() : null;
     },
     write: async (name, text) => {
-      file(name).write(text);
+      await file(name).write(text);
     },
     move: async (from, to) => {
       await file(from).move(file(to), { overwrite: true });

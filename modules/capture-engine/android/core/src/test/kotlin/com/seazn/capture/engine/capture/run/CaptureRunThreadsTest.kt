@@ -60,10 +60,12 @@ class CaptureRunThreadsTest {
       assertTrue(connected.await(5, TimeUnit.SECONDS), "attempt 1 connected")
       parts.farEndCloses()
       assertTrue(seen.await(5, TimeUnit.SECONDS), "the watch saw the close")
+      // The drop watches, taken before the stop: a start the stop goes on to make (S9) is a child of the scope too.
+      val watches = scope.coroutineContext.job.children.filter { it !== consumer && it !in opening }.toList()
       stop(run, parts, reached)
       assertTrue(reached.await(5, TimeUnit.SECONDS), "the stop ran on the other thread")
       go.countDown()
-      runBlocking { withTimeout(5_000) { scope.coroutineContext.job.children.filter { it !== consumer && it !in opening }.forEach { it.join() } } }
+      runBlocking { withTimeout(5_000) { watches.forEach { it.join() } } }
       parts.gates.values.forEach { it.complete(true) }
       return reports.toList()
     } finally {

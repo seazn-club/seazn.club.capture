@@ -20,6 +20,11 @@ import com.seazn.capture.engine.core.Side
 import com.seazn.capture.engine.thrownAt
 import java.io.IOException
 import java.net.ConnectException
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -167,6 +172,95 @@ class CaptureRunAttemptTest : CaptureRunTestKit() {
       assertEquals(2, s.parts.publishing)
       assertEquals(listOf(ConnectFailure.TIMEOUT), s.told.reports.filterIsInstance<Input.ConnectFailed>().map { it.failure })
       assertEquals(listOf<Input>(Input.Connected(2)), s.told.reports.filter { it !is Input.ConnectFailed })
+    }
+
+  // --- S9 (N50): a start that holds its thread, which no cancel ends, is abandoned at the bound ---
+
+  /**
+   * komuxer's connect suspends and a cancel ends it, but Ktor resolves the ingest host inside it with a blocking call, on
+   * StreamPack's IO thread, which no cancel ends (N50). A start of an attempt in [blocked] holds a real thread of [pool]
+   * until [freed], for at most 30 s; the queue runs on the test's clock. Opened, its log cleared.
+   */
+  private fun TestScope.blockedStarts(pool: ExecutorService, freed: CountDownLatch, blocked: Set<Int> = setOf(1)): Scene {
+    val parts = FakeParts()
+    val told = Told()
+    val cameras = CameraAvailability()
+    val run = CaptureRun(parts, AttemptSignals(), cameras, told.calls(), { Side.LEFT }, queueScope(), startContext = pool.asCoroutineDispatcher())
+    parts.starting = { id -> if (id in blocked) freed.await(30, TimeUnit.SECONDS) }
+    run.open(request)
+    advanceUntilIdle()
+    parts.log.clear()
+    return Scene(parts, told, cameras, run)
+  }
+
+  /**
+   * Runs what the queue has due now, never moving the test's clock (a start on [blockedStarts]' pool runs in real time),
+   * until [done] or [forMs] of real time.
+   */
+  private fun TestScope.pumpReal(forMs: Long = 5_000, done: () -> Boolean = { false }) {
+    val until = System.nanoTime() + forMs * 1_000_000
+    while (!done() && System.nanoTime() < until) {
+      Thread.sleep(10)
+      runCurrent()
+    }
+  }
+
+  @Test
+  fun `S9 a start that holds its thread past the bound fails TIMEOUT at the bound, and a Stop queued behind it is done then`() =
+    runTest {
+      val pool = Executors.newFixedThreadPool(2)
+      val freed = CountDownLatch(1)
+      try {
+        val s = blockedStarts(pool, freed)
+        s.run.execute(connect(1))
+        s.run.execute(Command.StopBroadcast)
+        pumpReal(forMs = 200) // the start reaches its thread, and holds it
+        advanceTimeBy(CaptureRun.START_BOUND_MS - 1)
+        runCurrent()
+        assertEquals(emptyList(), s.told.reports, "inside the bound the start is waited for")
+        advanceTimeBy(1)
+        runCurrent()
+        val failed = s.told.reports.single()
+        assertIs<Input.ConnectFailed>(failed, "at the bound, with the start's thread still held")
+        assertEquals(1, failed.attemptId)
+        assertEquals(ConnectFailure.TIMEOUT, failed.failure)
+        advanceTimeBy(SessionMachine.CONNECT_TIMEOUT_MS - CaptureRun.START_BOUND_MS - 1)
+        runCurrent()
+        assertTrue("after" in s.parts.log, "the Stop queued behind the start is done before the machine's connect timeout: ${s.parts.log}")
+        assertFalse(s.parts.log.any { it.startsWith("stop") }, "the endpoint waits for the abandoned start, which holds it")
+        freed.countDown()
+        pumpReal { "stop -" in s.parts.log }
+        advanceUntilIdle() // no start is in flight now
+        assertEquals(listOf("stop -", "stop done"), s.parts.log.takeLast(2), "the abandoned start ended: its endpoint is closed, once")
+        assertEquals(listOf<Input>(failed), s.told.reports, "the late end reports nothing")
+      } finally {
+        freed.countDown()
+        pool.shutdownNow()
+      }
+    }
+
+  @Test
+  fun `S9 an abandoned start that ends after the next attempt connected closes nothing - the newer attempt keeps publishing`() =
+    runTest {
+      val pool = Executors.newFixedThreadPool(2)
+      val freed = CountDownLatch(1)
+      try {
+        val s = blockedStarts(pool, freed)
+        s.run.execute(connect(1))
+        pumpReal(forMs = 200)
+        advanceTimeBy(SessionMachine.CONNECT_TIMEOUT_MS)
+        runCurrent()
+        s.run.execute(connect(2))
+        pumpReal { s.parts.publishing == 2 && Input.Connected(2) in s.told.reports }
+        assertEquals(2, s.parts.publishing, "attempt 2 connected beside the start still held: ${s.parts.log}")
+        freed.countDown()
+        pumpReal(forMs = 300)
+        assertEquals(2, s.parts.publishing, "attempt 2 keeps publishing")
+        assertFalse(s.parts.log.any { it.startsWith("stop") }, "attempt 1's late end closes nothing: ${s.parts.log}")
+      } finally {
+        freed.countDown()
+        pool.shutdownNow()
+      }
     }
 
   // --- The broadcast's end, and the commands passed through ---

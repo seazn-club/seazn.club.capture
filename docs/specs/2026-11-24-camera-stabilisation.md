@@ -35,10 +35,20 @@ after a loss, a switch, a reopen and the slate's fall each give the streamer a *
 starts with the camera's defaults. So OIS is turned on each time StreamPack reports a camera source open
 (`CaptureRun.cameraOpens()`). The work runs on the run's serial queue.
 
-**Never on a false open.** On air, StreamPack can report a source open after an open that failed busy (N45). The run
-skips such a report (`CameraAvailability.falseOpen`). The reason is in the bytecode: `CameraSettings.set` and
+**Never on a false open.** StreamPack can report a source open after an open that failed busy (N45). The run skips
+any report of a camera's open after a busy open of it, on air or off, until the next open is asked
+(`CameraAvailability.busyHeard` and `falseOpen`). The reason is in the bytecode: `CameraSettings.set` and
 `applyRepeatingSession` open the device when it is not open. A setting against a false open would therefore open the
-camera outside the take and probe machinery, and could hold the queue.
+camera outside the take and probe machinery, could evict the app holding it, and could hold the queue. This mark is
+the gate's own. The take's busy mark, which `opened` reads, stays on air only (review R1-I2, probe G).
+
+Two limits, both device-only:
+
+- A real open after the holder lets go cannot be told apart from a false one. It goes without OIS until the next open
+  is asked: a rebuild, a switch, a reopen, the slate's fall or a new pairing.
+- `falseOpen` is read when the open report is heard. Busy words arrive on a different collector (`busyOpens`). If
+  StreamPack reports the open before its busy word, the setter still goes through. `opened` relies on the same
+  ordering.
 
 These are the StreamPack 3.2.1 facts this rests on (read with `javap` from the pinned AAR):
 

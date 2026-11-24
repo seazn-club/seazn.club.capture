@@ -109,7 +109,30 @@ class CaptureRunStabilisationTest : CaptureRunTestKit() {
       advanceUntilIdle()
       reported(s, "0")
       assertEquals(listOf("0"), s.parts.stabilised, "the false open set nothing")
-      does(s, Command.StopBroadcast) // the busy mark ends with the broadcast (review R1-I2)
+      does(s, Command.StopBroadcast) // the take's busy mark ends with the broadcast (review R1-I2); the gate's does not
+      reported(s, "0")
+      assertEquals(listOf("0"), s.parts.stabilised, "still since the busy open")
+      s.parts.lose("0") // off air, a rebuild asks a new open
+      advanceUntilIdle()
+      reported(s, "0")
+      assertEquals(listOf("0", "0"), s.parts.stabilised)
+    }
+
+  /**
+   * Re-review of d8243929, Minor 1: off air too. The busy mark the take reads stays on air only (review R1-I2), but a
+   * setting against an open that failed busy would open the device itself and could evict the app holding it.
+   */
+  @Test
+  fun `a busy open's report off air is never stabilised either, until the next open is asked`() =
+    runTest {
+      val s = opened()
+      reported(s, "0")
+      s.parts.busyOpen("0")
+      advanceUntilIdle()
+      reported(s, "0")
+      assertEquals(listOf("0"), s.parts.stabilised, "the false open set nothing")
+      s.parts.lose("0") // a rebuild asks a new open
+      advanceUntilIdle()
       reported(s, "0")
       assertEquals(listOf("0", "0"), s.parts.stabilised)
     }

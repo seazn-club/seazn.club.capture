@@ -213,6 +213,7 @@ class CaptureRun(
         // error-2 take over once the holder let go, and Go live stayed off (re-review probe G).
         launch {
           parts.busyOpens().collect { id ->
+            cameras.busyHeard(id) // spec 2026-11-24 §4: the stabilise gate's, on air or off
             if (attempt != null) cameras.busyOpen(id)
             serial.submit { busyByDevice(id) }
           }

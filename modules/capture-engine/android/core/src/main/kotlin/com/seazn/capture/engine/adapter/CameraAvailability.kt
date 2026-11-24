@@ -40,6 +40,9 @@ class CameraAvailability(private val selfWindowMs: Long = 1_500) {
   /** N45 I2: StreamPack logged the open of [ours] failed busy since it was asked ([busyOpen]); only a new open asked clears it. */
   private var busySinceOpening = false
 
+  /** Spec 2026-11-24-camera-stabilisation §4: an open of ours logged busy since it was asked, on air or off. */
+  private var busyForSettings = false
+
   /** N45 I1: the take told is the capture's own, of [ours] ([taken]): its available is no release. A new open asked, or the release, ends it. */
   private var ownTake = false
 
@@ -59,8 +62,28 @@ class CameraAvailability(private val selfWindowMs: Long = 1_500) {
     ours = id
     failed = false
     busySinceOpening = false
+    busyForSettings = false
     ownTake = false
   }
+
+  /**
+   * Spec 2026-11-24-camera-stabilisation §4: StreamPack logged an open of [id] busy, on air or off. Marked for the
+   * stabilise gate alone: [busyOpen]'s mark, which [opened] reads, stays on air only (review R1-I2, probe G).
+   */
+  @Synchronized
+  fun busyHeard(id: String) {
+    if (id == ours) busyForSettings = true
+  }
+
+  /**
+   * Spec §4: a report of [id] open since a busy open of it, on air or off, until the next open is asked. Never
+   * stabilised: a StreamPack setting against a device that is not open opens it (javap, 3.2.1: `CameraSettings.set`
+   * and `applyRepeatingSession`), outside the take and the probe, and could evict the app that holds it. A real open
+   * after the holder lets go is not told apart, so it goes without OIS until the next open asked. Another camera's
+   * report (a switch's) is not this one's business: its own source is held, and stabilised.
+   */
+  @Synchronized
+  fun falseOpen(id: String): Boolean = id == ours && busyForSettings
 
   /**
    * I-2: StreamPack reports [id]'s source open (previewing or streaming): ours, so no longer contended, and
@@ -71,15 +94,6 @@ class CameraAvailability(private val selfWindowMs: Long = 1_500) {
    * open; which busy failures come at which stage is device-only), and read after the busy word's take it told the take
    * over, so the machine reopened a camera another app held and reconnected twice in 10 s (review, probe A).
    */
-  /**
-   * Spec 2026-11-24-camera-stabilisation §5: a report of [id] open that is a busy open's false report ([busyOpen]), not an
-   * open. Such a report is never stabilised, since a StreamPack setting against a device that is not open opens it
-   * (javap, 3.2.1: `CameraSettings.set` and `applyRepeatingSession`), outside the take and the probe. Another camera's
-   * report (a switch's) is not this one's business: its own source is held, and stabilised.
-   */
-  @Synchronized
-  fun falseOpen(id: String): Boolean = id == ours && busySinceOpening
-
   @Synchronized
   fun opened(id: String): Input? {
     if (id != ours || busySinceOpening) return null

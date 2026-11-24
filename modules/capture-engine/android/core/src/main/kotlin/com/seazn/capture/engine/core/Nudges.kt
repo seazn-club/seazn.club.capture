@@ -135,13 +135,34 @@ internal object Nudges {
    * should hold ([grantOf]) changed from [before]'s.
    */
   fun closed(before: Phase, step: Step, now: Now): Step {
-    val (phase, lines) = tidied(step.phase, now)
+    val (tidy, tidyLines) = tidied(step.phase, now)
+    val (phase, foldLines) = foldsFlushed(before, tidy, step.commands)
+    val lines = tidyLines + foldLines
     val was = grantOf(before)
     val held = grantOf(phase)
     val told = if (held == was) emptyList() else listOf(held?.let { Command.Nudges(it) } ?: Command.NudgesOff)
     if (lines.isEmpty() && told.isEmpty() && phase === step.phase) return step
     return step.copy(phase = phase, commands = step.commands + lines + told)
   }
+
+  /**
+   * Nudges folded with no beat are never lost (re-review of 4e9dd20b): a cadence beat that goes without a nudge line,
+   * or the pairing's end, writes `nudge {reason: other, suppressed: n}` for them, only when there are any.
+   */
+  private fun foldsFlushed(before: Phase, phase: Phase, commands: List<Command>): Pair<Phase, List<Command>> {
+    val beating = phase.beating
+    if (beating != null) {
+      val beat = commands.any { it is Command.PostHeartbeat } && commands.none { it is Command.Record && it.entry.kind == "nudge" }
+      if (!beat || beating.nudgesFolded <= 0) return phase to emptyList()
+      return phase.withPairing(beating.copy(nudgesFolded = 0)) to listOf(foldedLine(beating.nudgesFolded))
+    }
+    val held = before.beating?.nudgesFolded ?: 0
+    val pairing = phase.pairing
+    val kept = if (pairing != null && pairing.nudgesFolded != 0) phase.withPairing(pairing.copy(nudgesFolded = 0)) else phase
+    return kept to if (held > 0) listOf(foldedLine(held)) else emptyList()
+  }
+
+  private fun foldedLine(n: Int): Command = line("nudge", "reason" to NudgeReason.OTHER, "suppressed" to n)
 
   private fun tidied(phase: Phase, now: Now): Pair<Phase, List<Command>> {
     val pairing = phase.pairing ?: return phase to emptyList()

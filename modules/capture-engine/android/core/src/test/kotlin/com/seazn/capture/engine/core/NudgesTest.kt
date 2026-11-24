@@ -293,6 +293,49 @@ class NudgesTest {
     assertEquals(1, rig.records("nudge").size, "no beat went, so no line: it is counted for the next")
   }
 
+  /** Paired and quiet, one nudged beat in flight, and [n] more nudges folded behind it with no line. */
+  private fun folded(n: Int): MachineRig {
+    val rig = quiet()
+    rig.send(Input.Nudge("go-live"))
+    repeat(n) {
+      rig.at(rig.mono + 10)
+      rig.send(Input.Nudge("stop"))
+    }
+    rig.send(Input.HeartbeatAnswered(rig.inFlightBeat(), HeartbeatResponse.Answered(200, BeatReply("waiting", null, null, null, Configs.waiting(60)))))
+    assertEquals(listOf<Any?>(0), rig.records("nudge").map { it.field("suppressed") })
+    return rig
+  }
+
+  @Test
+  fun `nudges folded when the storm stops are written with the next cadence beat, once`() {
+    val rig = folded(3)
+    val mark = rig.commands.size
+    rig.advance(130_000)
+    assertTrue(beats(rig.commands.drop(mark)).size >= 2, "more than one cadence beat went")
+    val lines = rig.records("nudge").map { it.field("reason") to it.field("suppressed") }
+    assertEquals(listOf<Pair<Any?, Any?>>("go-live" to 0, "other" to 3), lines)
+  }
+
+  @Test
+  fun `a cadence beat with nothing folded writes no nudge line`() {
+    val rig = quiet()
+    rig.advance(130_000)
+    assertEquals(emptyList(), rig.records("nudge"))
+  }
+
+  @Test
+  fun `nudges folded when the pairing ends are written as it ends`() {
+    for (name in listOf("unpair", "replaced")) {
+      val rig = folded(2)
+      endBy(rig, name)
+      val lines = rig.records("nudge").map { it.field("reason") to it.field("suppressed") }
+      assertEquals(listOf<Pair<Any?, Any?>>("go-live" to 0, "other" to 2), lines, name)
+    }
+    val none = quiet()
+    endBy(none, "unpair")
+    assertEquals(emptyList(), none.records("nudge"), "nothing folded, no line")
+  }
+
   @Test
   fun `a nudge during a 429's wait sends nothing until the wait is over`() {
     val rig = quiet()

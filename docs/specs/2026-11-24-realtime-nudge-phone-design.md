@@ -85,6 +85,8 @@ The web's wire, confirmed by the web side on 2026-11-24, is what this section an
 
 ## 3. T46 delivery facts: native, snapshot, Diagnostics
 
+**Diagnostics only** (owner, 2026-11-24). The server's delivery facts (`telemetry.server`) appear in the Diagnostics card and the record, and nowhere else: they never drive the status line (`statusKey.ts`, `LINE_TIER`), a caption, the notification or any HUD state. As built, the one reader in JS is `serverRows` in `src/hooks/diagnostics.ts`, and in native the snapshot (`Projection.kt`, `SnapshotWire.kt`) and the `server-delivery` lines (`Nudges.kt`).
+
 - **Native read.** `Bodies.kt` reads the optional `delivery` on go-live and live answers: `relayOutput`, `programmePhase`, `fps`, `kbps`, `cameraIngest`, `programmeIngest`.
   - Each member is optional. An unknown word means not known, and an integer out of range means not known.
   - The enum sets are copied from the contract's prose at vendor time.
@@ -135,6 +137,6 @@ The web's wire, confirmed by the web side on 2026-11-24, is what this section an
 
 ## 7. Open questions (each with a recommendation)
 
-1. **Should the status line use the relay facts?** For example, "Viewers receiving via relay", or "Relay reconnecting" while the phone itself is fine. Recommend **not yet**: Diagnostics only until the device test shows the facts are timely (relay beats are 5 s; facts older than 15 s are dropped).
+1. **Should the status line use the relay facts?** Closed: **no**. Diagnostics only (owner, 2026-11-24; §3). The facts never reach the status line or the HUD. The recommendation was "not yet", until the device test showed the facts were timely (relay beats are 5 s; facts older than 15 s are dropped).
 2. **Nudge socket while paired but waiting far from the start** (the 60 s cadence). Recommend **yes**: that is where it saves the most (up to 60 s to about 1 s), and the cost is one idle socket.
 3. **Match Day refresh while the list is open for hours.** Recommend refreshing at 80% of the TTL as above. The door is metered at 120 a minute per code, so this is well inside it.

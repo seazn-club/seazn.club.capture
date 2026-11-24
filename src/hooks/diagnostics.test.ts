@@ -489,6 +489,8 @@ describe('T46: the server rows', () => {
     expect(value('live', null)).toBe('Live');
     expect(value(null, 30)).toBe('30 fps 2800k');
     expect(value(null, null)).toBe('—');
+    // A rate needs both numbers: fps alone is not a rate.
+    expect(sections('live', { ...FACTS, kbps: null })[2]?.rows[1]?.value).toBe('Live');
   });
 
   it.each(LANGS)('%s: every word reads as its dictionary says', (lang) => {

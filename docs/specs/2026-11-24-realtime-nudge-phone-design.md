@@ -44,36 +44,44 @@
 
 ### 2.2 Core (pure)
 
-- The pairing carries `realtimeGrant: RealtimeGrant?`.
-- It is replaced by each answer that carries one, and dropped on unpair, forget, replaced, over or code end.
-- The projection never reads it.
+The web's wire, confirmed by the web side on 2026-11-24, is what this section and §2.3 follow.
+
+- The pairing carries `realtime: RealtimeGrant?`. The projection never reads it.
+- **Token churn.** The server mints a fresh 30-minute token on **every** beat. The core keeps the grant it holds, so a beat's fresh token alone changes nothing. It takes the beat's grant only when:
+  - it holds none;
+  - the answer names another channel (another `topic`, `url` or `apikey`): leave and rejoin;
+  - the held token has **under 10 minutes** left;
+  - the socket reported an error or a refusal since the last swap (`realtimeSwapDue`).
+    An expired grant heard is no grant. Ten beats with fresh tokens and 25 minutes left give no command (`NudgesTest`).
+- It drops the grant when the pairing ends (unpair, Forget, replaced, taken, the code's end, a 401's `codeEndedPending`, Ended) or when the held token expires (judged on every input, a tick included). A broadcast's end keeps it: the court and the stream code still beat.
 - Core emits two commands:
-  - `Command.Nudges(grant)` when the grant's topic or token changes;
-  - `Command.NudgesOff` when the grant goes.
+  - `Command.Nudges(grant)` when the grant the socket should hold changes;
+  - `Command.NudgesOff` when it goes.
 - New input `Input.Nudge(reason)`. A `reason` outside `go-live|stop|replaced|over|next-match` is read as a ping, and its word is recorded as `other`.
 - A nudge calls `Heartbeats.atOnce`, limited to **one immediate beat per 2 s** (web constraint 2). A nudge inside the 2 s is folded: the beat already due covers it.
   - A nudge while a beat is in flight or a 429 wait holds does nothing more, as `atOnce` already guarantees.
 - A nudge never moves the cadence, never changes the phase and never touches the start-pending clock (N48).
+- New input `Input.NudgeLink(state, status)`: the socket's report, for the record (§2.4) and the swap rule above.
 
 ### 2.3 The socket (glue, `engine/realtime/NudgeLink.kt`)
 
-- **Transport:** OkHttp's WebSocket. OkHttp is already on the module's compile classpath through React Native (`compileOnly okhttp 4.9.2`), so it adds no new dependency. Check what React Native ships at runtime.
-- **Phoenix protocol v1 JSON** (`vsn=1.0.0`, the same choice as `realtimePort.ts`, text frames only).
-  - URL: `wss://{host}/realtime/v1/websocket?apikey={apikey}&vsn=1.0.0`. The **anon key** is public and is how Supabase's socket is addressed. The **token** goes only in the join payload and the `access_token` message, never in the URL.
-  - Join: `phx_join` on `realtime:{topic}`, payload `{config: {broadcast: {self: false}, private: true}, access_token: token}`.
-  - Heartbeat: `phoenix` `heartbeat` every 25 s.
-  - A `broadcast` with `event: "nudge"` reports `Input.Nudge(payload.reason)`. Any other event is ignored.
-  - A refreshed token on the same topic sends `access_token` on the joined channel. A new topic leaves the old channel and joins the new one.
-- **Lifecycle:** it runs while there is a grant, so only while paired. On close or error it reconnects with backoff 1, 2, 4, 8, 16, then 30 s, and never reconnects without a grant.
+- **Transport:** OkHttp's WebSocket (`OkHttpNudgeSockets`). The module compiles against `okhttp 4.9.2` (`compileOnly`); the app's release runtime classpath resolves `4.12.0` (`:app:dependencies`), so it adds no dependency.
+- **Phoenix protocol v1 JSON** (`vsn=1.0.0`, text frames only).
+  - URL: `wss://{host}/realtime/v1/websocket?apikey={apikey}&vsn=1.0.0`, the host taken from the grant's `https` `url`. The **anon key** is public and is how Supabase's socket is addressed. The **token** goes only in the join payload and the `access_token` message, never in the URL.
+  - Join: `phx_join` on `realtime:{topic}` (so `realtime:capture:{id}`), payload `{config: {broadcast: {self: false}, private: true}, access_token: token}`.
+  - Heartbeat: `phoenix` `heartbeat` every 25 s. One still unanswered when the next is due ends the socket.
+  - A nudge arrives as event `broadcast` with payload `{type: "broadcast", event: "nudge", payload: {v, reason, at}}`: `v` is epoch ms (a number), `at` an ISO string, and **the reason is at `payload.payload.reason`**. It reports `Input.Nudge(reason)`. Any other event is ignored.
+  - A swapped token on the same topic goes as `access_token` on the joined channel (after the join's ok, if the join is still unanswered). A new topic leaves the old channel and joins the new one on the same socket. A new host or key is a new socket.
+- **Lifecycle:** it runs while there is a grant, so only while paired. The join's ok reports `joined`; its error `refused`; the channel's `phx_error` or `phx_close`, a missed heartbeat or the socket's end `closed` (with the close code when there is one). Each but `joined` closes the socket and reconnects with backoff 1, 2, 4, 8, 16, then 30 s, reset by a join, and never without a grant or with an expired one.
   - It does not hold the wake lock or keep the socket up in Doze. A dozing phone loses the socket, and the beat covers it (N27; web constraint 4).
-  - An expired token (`expiresAt` passed) closes the socket and waits for the next beat's grant.
-- **Threading:** OkHttp's callbacks report into the engine as every other watch does (`core.report`), guarded so that a throw costs a line, never the process (the NetworkWatch pattern).
+  - An expired token closes the socket (the core's `NudgesOff`) and waits for the next beat's grant.
+- **Threading:** every socket event hops onto the engine's thread and is dropped when it belongs to a socket the link has let go, so a late close is never reported. Reports go to `core.report`; a throw costs a `watch-failed {action: nudge-link}` line, never the process (the NetworkWatch pattern).
 
 ### 2.4 Record
 
-- `nudges {state: joined|closed|refused|expired, code}`: the state changes only; a reconnect loop is rate-limited to one line a minute with a count.
+- `nudges {state: joined|closed|refused|expired, status, suppressed}`: the state changes only. `status` is the socket's close code (the record's `code` key is on the never list, and new keys would break the vendored record contract). A reconnect loop is held to one line a minute: a change within the minute waits and goes when the minute is up, `suppressed` counting what was held back.
 - `nudge {reason}`: one per heard nudge; they are rare, a handful per match.
-- Both kinds and their words go on `allow-list.json`, with Kotlin/TS parity. No token, URL, topic or host is ever written: the topic carries the pairing id, so it is not written either.
+- All three kinds (with `server-delivery`, §3) and their words go on `allow-list.json`, with Kotlin/TS parity (102 kinds). No token, URL, topic or host is ever written: the topic carries the pairing id, so it is not written either. `RealtimeSecretsTest` sweeps a whole pairing's snapshots, record lines, commands and inputs for them.
 
 ## 3. T46 delivery facts: native, snapshot, Diagnostics
 
@@ -81,10 +89,10 @@
   - Each member is optional. An unknown word means not known, and an integer out of range means not known.
   - The enum sets are copied from the contract's prose at vendor time.
   - It never refuses the answer.
-- **Core** keeps the last facts, with the time they were heard. They are cleared off air and on any answer without them.
-- **Snapshot.** The snapshot carries `server: {relayOutput, programmePhase, fps, kbps, cameraIngest, programmeIngest, ageS}`, each nullable. It needs a snapshot wire field and a `snapshotWire.ts` reader (one parser each side, AGENTS §4), with shared vectors.
-- **Diagnostics.** The card gains four rows, Relay, Programme, Camera ingest and Programme ingest, as words plus fps/kbps. All four languages, house voice. They are shown only while live; otherwise they are hidden.
-- **Record.** A `server-delivery` line on change only (the same words), so the record can line up the phone's view with the relay's.
+- **Core** keeps the last facts, with the time they were heard. T46 sends `delivery` on **go-live and live answers only**, and an absent member is not known. They are held only while a broadcast is, cleared off air (no line) and by a go-live or live answer without them.
+- **Snapshot.** The snapshot carries `telemetry.server: {relayOutput, programmePhase, fps, kbps, cameraIngest, programmeIngest, ageS}` or null, each member nullable, `ageS` whole seconds to the snapshot's own clock. It sits in telemetry, so it is cleared with it and a build before T46 (no key) still reads. A `snapshotWire.ts` reader reads it member by member (a garbled member is null, a garbled whole is null, never a refused snapshot), with shared vectors.
+- **Diagnostics.** The card gains four rows under Server, after Delivery: Relay, Programme, Camera feed and Programme feed. All four languages, house voice. They show only on air (publishing, degraded, reconnecting). A live programme reads as its rate ("30 fps 2800k"); any other phase is its word, since the word and the rate together do not fit the row at 640 in every language (`settingsFit.test.ts`). On air the card is 13 rows, 332 dp, and its half scrolls; off air it is Q1's nine.
+- **Record.** A `server-delivery {source, state}` line per word that changed (`source`: relay, programme, camera-ingest, programme-ingest; `state` the word, or `unknown`), on go-live and live answers only, so the record can line up the phone's view with the relay's. Existing keys only.
 
 ## 4. Match Day nudge: JS
 

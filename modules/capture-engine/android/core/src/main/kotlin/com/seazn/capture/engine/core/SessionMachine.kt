@@ -694,8 +694,9 @@ internal object Timers {
     // S2: a not-delivered restart whose backoff is over.
     // Review of batch 2, item 5: a link that turned poor inside the wait is the phone's, so it goes at once.
     if (watched.restartAtMs?.let { now.monoMs >= it || Deliveries.poorLinkDue(watched, now) } == true) {
-      return Deliveries.restart(watched.copy(restartAtMs = null), now)
+      return Deliveries.restart(watched.copy(restartAtMs = null, recoveredAtMs = null), now)
     }
+    Deliveries.recovered(watched, now)?.let { return it }
     // Publishing time counts only while frames advance: our own reopen or switch pauses it until the
     // camera's first frame, so a pause of ours never reads as Cloudflare falling behind.
     val (delivery, requests) = watched.session.delivery.tick(now.monoMs, watchdog.advancing(now.monoMs))
@@ -854,7 +855,7 @@ internal object Deliveries {
       waiting = null
       commands += record("delivered")
     }
-    val updated = phase.copy(session = next, restartAtMs = waiting)
+    val updated = phase.copy(session = next, restartAtMs = waiting, recoveredAtMs = phase.recoveredAtMs?.takeIf { waiting != null })
     // A restart already waits: the looks inside its wait say nothing more.
     if (verdict == null || waiting != null) return Step(updated, commands)
     val judged = notDelivered(updated, verdict, now)
@@ -885,13 +886,28 @@ internal object Deliveries {
         "retryMs" to waitMs,
       )
     val counted = onAir.copy(session = onAir.session.copy(notDelivered = true, deliveryRestarts = restarts))
-    if (waitMs > 0) return Step(counted.copy(restartAtMs = now.monoMs + waitMs), listOf(noted))
+    if (waitMs > 0) {
+      // A healthy wait is the delivery ladder's already, never later than this, so it is only ever a poor wait's.
+      val recoveredAt = now.monoMs + DeliveryWatch.restartWaitMs(restarts + 1)
+      return Step(counted.copy(restartAtMs = now.monoMs + waitMs, recoveredAtMs = recoveredAt), listOf(noted))
+    }
     val step = restart(counted, now)
     return step.copy(commands = listOf(noted) + step.commands)
   }
 
   /** The cause split: the phone's own link failed lately, what the operator sees as Weak signal. */
   fun ownLinkFailing(onAir: Phase.OnAir, now: Now): Boolean = DegradeReason.POOR_UPLINK in Projection.reasons(onAir.session, now)
+
+  /**
+   * Re-review of 28f46d54: a restart waiting out the stuck ladder whose link is no longer poor goes at the delivery
+   * ladder's time when that is sooner, as that ladder's step. Null while it waits on.
+   */
+  fun recovered(onAir: Phase.OnAir, now: Now): Step? {
+    val at = onAir.recoveredAtMs ?: return null
+    if (onAir.restartAtMs == null || now.monoMs < at || ownLinkFailing(onAir, now)) return null
+    val stepped = onAir.session.copy(deliveryRestarts = onAir.session.deliveryRestarts + 1)
+    return restart(onAir.copy(session = stepped, restartAtMs = null, recoveredAtMs = null), now)
+  }
 
   /** A waiting restart whose link turned poor goes once the stuck ladder allows it, not at the delivery ladder's time. */
   fun poorLinkDue(onAir: Phase.OnAir, now: Now): Boolean = ownLinkFailing(onAir, now) && onAir.session.stuckReplaces.mayReplace(now.monoMs)

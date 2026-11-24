@@ -173,4 +173,69 @@ class LinkStuckReplacesTest {
     // The run was stuck all along: the first reading once the gate is open is the verdict, not a run of five more.
     assertTrue(first - gate <= 1_000, "${first - gate} ms after the gate opened")
   }
+
+  /**
+   * Re-review of 28f46d54: a poor link's restart waits out the stuck ladder, judged at the verdict; a link that recovers
+   * while it waits goes on the delivery ladder's time instead, whichever is sooner. One still poor keeps the stuck wait.
+   */
+  private fun MachineRig.poorNow() {
+    val onAir = phase as? Phase.OnAir ?: return
+    val poor = onAir.session.regulation.copy(lastCutAtMs = mono, failed = FailedRate(floor * 2, mono))
+    phase = onAir.copy(session = onAir.session.copy(regulation = poor))
+  }
+
+  /** Four stuck replaces behind it, the last at the start (the next waits 60 s), Weak signal; run to the verdict. */
+  private fun toPoorVerdict(stillPoor: Boolean, deliveryRestarts: Int = 0): Driven {
+    val driven = driven()
+    val rig = driven.rig
+    rig.phase =
+      (rig.phase as Phase.OnAir).let {
+        it.copy(session = it.session.copy(stuckReplaces = StuckReplaces(count = 4, lastAtMs = rig.mono), deliveryRestarts = deliveryRestarts))
+      }
+    rig.poorNow()
+    while (rig.records("not-delivered").isEmpty()) {
+      driven.run(500)
+      if (stillPoor) rig.poorNow()
+    }
+    return driven
+  }
+
+  @Test
+  fun `a link that recovers while a poor restart waits goes on the delivery ladder`() {
+    val driven = toPoorVerdict(stillPoor = false)
+    val rig = driven.rig
+    val line = rig.records("not-delivered").single()
+    assertTrue((line.field("retryMs") as Long) > 20_000, "poor at the verdict: the stuck wait, ${line.fields}")
+    val before = rig.sent<Command.StartNewSession>().size
+    // Weak signal lapses 30 s after the last cut, about 10 s on; the delivery ladder's first step is 0.
+    driven.run(12_000)
+    assertEquals(before + 1, rig.sent<Command.StartNewSession>().size, "restarted once the link was no longer poor")
+    assertEquals(1, rig.session.deliveryRestarts, "a step of the delivery ladder")
+  }
+
+  @Test
+  fun `a link still poor keeps the stuck ladder's wait`() {
+    val driven = toPoorVerdict(stillPoor = true)
+    val rig = driven.rig
+    val wait = rig.records("not-delivered").single().field("retryMs") as Long
+    assertTrue(wait > 20_000, "$wait")
+    val before = rig.sent<Command.StartNewSession>().size
+    rig.advance(wait - 1_000) { rig.poorNow() }
+    assertEquals(before, rig.sent<Command.StartNewSession>().size, "no restart inside the stuck wait")
+    rig.advance(1_500) { rig.poorNow() }
+    assertEquals(before + 1, rig.sent<Command.StartNewSession>().size, "then the stuck step")
+  }
+
+  @Test
+  fun `a recovered link whose delivery ladder is later keeps the sooner stuck wait`() {
+    // Five delivery restarts behind it: its next step waits 64 s, past the stuck ladder's 60 s from the start.
+    val driven = toPoorVerdict(stillPoor = false, deliveryRestarts = 5)
+    val rig = driven.rig
+    val wait = rig.records("not-delivered").single().field("retryMs") as Long
+    val before = rig.sent<Command.StartNewSession>().size
+    driven.run(wait - 1_000)
+    assertEquals(before, rig.sent<Command.StartNewSession>().size, "no longer poor after 30 s, but the stuck wait is sooner")
+    driven.run(1_500)
+    assertEquals(before + 1, rig.sent<Command.StartNewSession>().size)
+  }
 }

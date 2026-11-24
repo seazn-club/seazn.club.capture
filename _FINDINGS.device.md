@@ -1155,3 +1155,8 @@ socket is pinned to Wi-Fi. DEVICE-UNVERIFIED.
 - **Going live says the start's held failures** (`connect-failed {transport, count}`), as the session's end does.
 - **A stuck verdict refused** by the 6 s gate or a replace's wait keeps its run (`StuckWatch.refused`), so it acts at the
   first reading the gate allows.
+
+**Batch 2, re-review of 28f46d54 (2026-11-24).** A poor link's restart waits out the stuck ladder, judged at the
+verdict; while it waits, once the link is no longer poor (Weak signal lapses 30 s after the last cut), it goes at the
+sooner of that wait and the delivery ladder's time from the verdict, as the delivery ladder's step
+(`Deliveries.recovered`, `OnAir.recoveredAtMs`). A link still poor keeps the stuck wait.

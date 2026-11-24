@@ -249,6 +249,11 @@ sealed interface Phase {
      * waits. A new attempt, which is itself a reconnect, never carries one.
      */
     val restartAtMs: Long? = null,
+    /**
+     * Re-review of 28f46d54: for a restart waiting out the stuck ladder (a poor link at the verdict), when the delivery
+     * ladder would have gone; once the link is no longer poor, the restart goes at the sooner of the two.
+     */
+    val recoveredAtMs: Long? = null,
     /** This attempt's first advancing frame (review of batch 2, item 6): what proves a path, not the connect. */
     val framesAtMs: Long? = null,
   ) : Phase {

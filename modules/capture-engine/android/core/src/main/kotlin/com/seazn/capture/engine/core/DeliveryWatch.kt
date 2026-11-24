@@ -307,6 +307,24 @@ data class DeliveryWatch(
      */
     const val SWITCH_GRACE_MS = 45_000L
 
+    /**
+     * S2, the owner's ruling (2026-11-24, "Back off, never stop"): the extra wait before the restart a not-delivered
+     * verdict asks for, doubling from [FIRST_BACKOFF_MS] after the first verdict, which restarts at once, to
+     * [MAX_BACKOFF_MS], where it stays. Counted since `delivered` ([Session.deliveryRestarts]).
+     */
+    const val FIRST_BACKOFF_MS = 4_000L
+    const val MAX_BACKOFF_MS = 64_000L
+
+    /** The wait before the restart of verdict [restart] (1 for the first since `delivered`): 0, 4, 8, 16, 32, then 64 s. */
+    fun restartWaitMs(restart: Int): Long {
+      if (restart <= 1) return 0
+      val doublings = (restart - 2).coerceAtMost(MAX_DOUBLINGS)
+      return minOf(FIRST_BACKOFF_MS shl doublings, MAX_BACKOFF_MS)
+    }
+
+    /** 4 s doubled four times is 64 s; the cap also keeps the shift from overflowing. */
+    private const val MAX_DOUBLINGS = 4
+
     /** Delivered media falling 20 s further behind publishing within one minute. */
     const val LAG_GROWTH_LIMIT_MS = 20_000L
     const val LAG_WINDOW_MS = 60_000L

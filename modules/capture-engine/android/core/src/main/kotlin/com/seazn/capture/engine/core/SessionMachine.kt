@@ -495,7 +495,35 @@ internal object Transports {
     }
     regulated.held?.let { commands += heldLine(it, phase.watchdog.videoFps) }
     regulated.floor?.let { commands += floorLine(it, sample) }
-    return Step(next, commands)
+    val (stuckWatch, stuck) = phase.stuck.read(sample, regulation.targetBps, phase.transport, latency, now.monoMs)
+    val watched = next.copy(stuck = stuckWatch)
+    if (stuck == null) return Step(watched, commands)
+    val replaced = linkStuck(watched, stuck, sample, now)
+    return replaced.copy(commands = commands + replaced.commands)
+  }
+
+  /**
+   * The cause split (owner, 2026-11-24): the phone's own link is stuck ([StuckWatch]), so it is replaced at once, as a new
+   * ingest session, on the transport in hand, with no backoff and before the playlist's verdict. The outage it is in is
+   * kept, or one opens now: the hold bounds it as any reconnect. It is no failure: the fallback policy never hears it.
+   * Its outage's cause is [ReconnectCause.UPLINK_LOST], the snapshot's word for an uplink being replaced.
+   */
+  private fun linkStuck(onAir: Phase.OnAir, stuck: Stuck, sample: LinkSample, now: Now): Step {
+    val session = onAir.session
+    val line =
+      record(
+        "link-stuck",
+        "attempt" to onAir.attemptId,
+        "count" to stuck.readings,
+        "target" to session.regulation.targetBps,
+        "sendBufferMs" to sample.sendBufferMs,
+        "egressBps" to sample.egressBps,
+        "dropped" to sample.droppedPackets,
+        "lost" to sample.lostPackets,
+      )
+    val outage = onAir.outage ?: outageFor(session, onAir.transport, now, ReconnectCause.UPLINK_LOST)
+    val step = replace(onAir, session, outage, now) { Command.StartNewSession(onAir.attemptId, it) }
+    return step.copy(commands = listOf(line) + step.commands)
   }
 
   /**
@@ -613,6 +641,8 @@ internal object Timers {
     val (watchdog, verdict) = phase.watchdog.tick(now.monoMs, phase.session.camera.slateOnAir)
     val watched = phase.copy(watchdog = watchdog)
     if (verdict is StallVerdict.Rebuild) return rebuild(watched, verdict, now)
+    // S2: a not-delivered restart whose backoff is over.
+    if (watched.restartAtMs?.let { now.monoMs >= it } == true) return Deliveries.restart(watched.copy(restartAtMs = null), now)
     // Publishing time counts only while frames advance: our own reopen or switch pauses it until the
     // camera's first frame, so a pause of ours never reads as Cloudflare falling behind.
     val (delivery, requests) = watched.session.delivery.tick(now.monoMs, watchdog.advancing(now.monoMs))
@@ -762,23 +792,52 @@ internal object Deliveries {
     // Re-review 6: a rendition refused off the playback host leaves delivery unknown; the record says why, once.
     if (watch.refusedOffHost && !session.delivery.refusedOffHost) commands += record("rendition-refused", "reason" to DeliveryWatch.OFF_HOST)
     var next = session.copy(delivery = watch)
+    var waiting = phase.restartAtMs
     if (next.notDelivered && watch.delivery == Delivery.OK) {
-      next = next.copy(notDelivered = false)
+      // S2: delivered again, so the backoff starts over, and a restart waiting for it never goes.
+      next = next.copy(notDelivered = false, deliveryRestarts = 0)
+      waiting = null
       commands += record("delivered")
     }
-    val updated = phase.copy(session = next)
-    if (verdict == null) return Step(updated, commands)
-    val restarted = newSession(updated, verdict, now)
-    return restarted.copy(commands = commands + restarted.commands)
+    val updated = phase.copy(session = next, restartAtMs = waiting)
+    // A restart already waits: the looks inside its wait say nothing more.
+    if (verdict == null || waiting != null) return Step(updated, commands)
+    val judged = notDelivered(updated, verdict, now)
+    return judged.copy(commands = commands + judged.commands)
   }
 
-  /** Not delivered: force a new ingest session, and say so until the playlist moves again. */
-  private fun newSession(onAir: Phase.OnAir, verdict: NotDelivered, now: Now): Step {
-    val session = onAir.session.copy(notDelivered = true, delivery = onAir.session.delivery.newSession())
-    val outage = onAir.outage ?: Transports.outageFor(session, onAir.transport, now, ReconnectCause.NOT_DELIVERED)
-    val noted = record("not-delivered", "cause" to verdict.cause, "stalledMs" to verdict.stalledMs, "lagGrowthMs" to verdict.lagGrowthMs)
-    val step = Transports.replace(onAir, session, outage, now) { Command.StartNewSession(onAir.attemptId, it) }
+  /**
+   * Not delivered: say so until the playlist moves again, and force a new ingest session. S2, the owner's ruling
+   * (2026-11-24, "Back off, never stop"): with the phone's own link healthy the fault is past it, so the restart waits
+   * [DeliveryWatch.restartWaitMs], 0 for the first verdict since `delivered` and doubling to 64 s, and the stream
+   * publishes meanwhile. The cause split: a link that failed lately, what the operator sees as Weak signal (a cut in the
+   * last [SessionMachine.POOR_UPLINK_MS], [DegradeReason.POOR_UPLINK]), is the phone's, so it restarts at once. The line
+   * carries the verdict's number since `delivered` (`count`) and its wait (`retryMs`).
+   */
+  private fun notDelivered(onAir: Phase.OnAir, verdict: NotDelivered, now: Now): Step {
+    val restarts = onAir.session.deliveryRestarts + 1
+    val ownLinkFailing = DegradeReason.POOR_UPLINK in Projection.reasons(onAir.session, now)
+    val waitMs = if (ownLinkFailing) 0 else DeliveryWatch.restartWaitMs(restarts)
+    val noted =
+      record(
+        "not-delivered",
+        "cause" to verdict.cause,
+        "stalledMs" to verdict.stalledMs,
+        "lagGrowthMs" to verdict.lagGrowthMs,
+        "count" to restarts,
+        "retryMs" to waitMs,
+      )
+    val counted = onAir.copy(session = onAir.session.copy(notDelivered = true, deliveryRestarts = restarts))
+    if (waitMs > 0) return Step(counted.copy(restartAtMs = now.monoMs + waitMs), listOf(noted))
+    val step = restart(counted, now)
     return step.copy(commands = listOf(noted) + step.commands)
+  }
+
+  /** The restart a not-delivered verdict asked for: a new ingest session, which the watch follows from zero. */
+  fun restart(onAir: Phase.OnAir, now: Now): Step {
+    val session = onAir.session.copy(delivery = onAir.session.delivery.newSession())
+    val outage = onAir.outage ?: Transports.outageFor(session, onAir.transport, now, ReconnectCause.NOT_DELIVERED)
+    return Transports.replace(onAir, session, outage, now) { Command.StartNewSession(onAir.attemptId, it) }
   }
 }
 

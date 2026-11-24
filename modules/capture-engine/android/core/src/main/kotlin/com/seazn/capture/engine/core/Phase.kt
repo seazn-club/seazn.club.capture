@@ -139,6 +139,8 @@ data class Session(
   /** Set by the first encoded frame, and kept across drops: the HUD's elapsed time never resets. */
   val liveSinceEpochMs: Long? = null,
   val notDelivered: Boolean = false,
+  /** S2: not-delivered verdicts since the playlist last showed delivery (`delivered`), the backoff's step. */
+  val deliveryRestarts: Int = 0,
   val camera: CameraState = CameraState.OWN,
   /** Seeded at arm from the last mic fact, which outlives the session before it, as the network's does (review 18 I1). */
   val micSilenced: Boolean = false,
@@ -234,6 +236,13 @@ sealed interface Phase {
     val srt: SrtTelemetry? = null,
     val egressBps: Long? = null,
     val outage: Outage?,
+    /** The cause split: this attempt's run of stuck link readings ([StuckWatch]). */
+    val stuck: StuckWatch = StuckWatch(),
+    /**
+     * S2: a not-delivered restart waiting out its backoff ([Deliveries]), due at this monotonic time; null when none
+     * waits. A new attempt, which is itself a reconnect, never carries one.
+     */
+    val restartAtMs: Long? = null,
   ) : Phase {
     override val name = "on-air"
   }

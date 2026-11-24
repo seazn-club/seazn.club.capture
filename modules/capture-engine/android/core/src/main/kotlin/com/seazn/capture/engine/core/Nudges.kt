@@ -58,13 +58,23 @@ internal object Nudges {
   /** The grant the socket should hold in [phase]: the beating pairing's, unless a 401 has ended its code. */
   fun grantOf(phase: Phase): RealtimeGrant? = phase.beating?.takeUnless { it.codeEndedPending }?.realtime
 
-  /** A nudge heard: its line, and one beat at once unless one went for a nudge less than [NUDGE_GAP_MS] ago. */
+  /**
+   * A nudge heard: one beat at once unless one went for a nudge less than [NUDGE_GAP_MS] ago. The `nudge` line goes
+   * only with a beat, carrying in `suppressed` the nudges folded since the last line (a beat inside the gap, in flight
+   * or held by a 429), so a looping server writes at most one line per beat and never floods the record (the
+   * controller's ruling, 2026-11-24, from review). With no pairing beating the nudge is a line alone.
+   */
   fun heard(phase: Phase, input: Input.Nudge, now: Now): Step {
-    val noted = line("nudge", "reason" to NudgeReason.of(input.reason))
-    val pairing = phase.beating ?: return Step(phase, listOf(noted))
+    val reason = NudgeReason.of(input.reason)
+    val pairing = phase.beating ?: return Step(phase, listOf(line("nudge", "reason" to reason, "suppressed" to 0)))
+    val folded = pairing.copy(nudgesFolded = pairing.nudgesFolded + 1)
     val last = pairing.nudgedAtMs
-    if (last != null && now.monoMs - last < NUDGE_GAP_MS) return Step(phase, listOf(noted))
-    return Heartbeats.atOnce(Step(phase.withPairing(pairing.copy(nudgedAtMs = now.monoMs)), listOf(noted)), now)
+    if (last != null && now.monoMs - last < NUDGE_GAP_MS) return Step(phase.withPairing(folded))
+    val beat = Heartbeats.atOnce(Step(phase.withPairing(pairing.copy(nudgedAtMs = now.monoMs))), now)
+    val after = beat.phase.beating ?: return beat
+    if (beat.commands.none { it is Command.PostHeartbeat }) return beat.copy(phase = beat.phase.withPairing(after.copy(nudgesFolded = folded.nudgesFolded)))
+    val noted = line("nudge", "reason" to reason, "suppressed" to pairing.nudgesFolded)
+    return beat.copy(phase = beat.phase.withPairing(after.copy(nudgesFolded = 0)), commands = listOf(noted) + beat.commands)
   }
 
   /** The socket's report: its line when it changed, and after an error or a refusal the next beat's grant is taken. */

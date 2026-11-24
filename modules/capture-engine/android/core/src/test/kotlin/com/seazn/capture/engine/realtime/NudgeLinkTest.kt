@@ -170,6 +170,27 @@ class NudgeLinkTest {
   }
 
   @Test
+  fun `a join unanswered for 10 s reports closed, closes and reconnects - an answered one is never timed out`() {
+    val rig = Rig()
+    rig.link.grant(rig.grant())
+    rig.open()
+    rig.run(9_999)
+    assertTrue(rig.reports.isEmpty())
+    rig.run(1)
+    assertEquals(listOf<Input>(Input.NudgeLink(NudgeState.CLOSED)), rig.reports)
+    assertTrue(rig.socket.closed)
+    rig.run(1_000)
+    assertEquals(2, rig.sockets.size)
+
+    val answered = Rig()
+    answered.link.grant(answered.grant())
+    answered.joined()
+    answered.run(20_000)
+    assertEquals(listOf<Input>(Input.NudgeLink(NudgeState.JOINED)), answered.reports)
+    assertFalse(answered.socket.closed)
+  }
+
+  @Test
   fun `a channel error or close on our topic reports closed and reconnects`() {
     for (event in listOf("phx_error", "phx_close")) {
       val rig = Rig()

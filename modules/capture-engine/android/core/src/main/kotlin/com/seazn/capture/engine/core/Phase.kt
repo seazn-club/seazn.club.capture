@@ -98,6 +98,8 @@ data class PairingState(
   val realtimeSwapDue: Boolean = false,
   /** When the last nudge brought a beat forward, on the monotonic clock ([Nudges.NUDGE_GAP_MS]). */
   val nudgedAtMs: Long? = null,
+  /** Nudges folded since the last `nudge` line (no beat went for them): the next line carries the count (review, 2026-11-24). */
+  val nudgesFolded: Int = 0,
   /** The `nudges` lines written and held back ([NudgeLines]). */
   val nudgeLines: NudgeLines = NudgeLines(),
   /** T46 (design §3): the last delivery facts heard while a broadcast is held; null otherwise. */

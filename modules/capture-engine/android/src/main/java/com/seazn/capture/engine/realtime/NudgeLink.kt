@@ -36,7 +36,8 @@ fun interface NudgeSocketPort {
  * - `wss://{the grant's host}/realtime/v1/websocket?apikey={anon key}&vsn=1.0.0`. The anon key is public; the token
  *   goes only in the join's payload and in `access_token`, never in the URL.
  * - Once open: `phx_join` on `realtime:{topic}` with `{config: {broadcast: {self: false}, private: true}, access_token}`,
- *   and a `heartbeat` on `phoenix` every [HEARTBEAT_MS]; one still unanswered when the next is due ends the socket.
+ *   and a `heartbeat` on `phoenix` every [HEARTBEAT_MS]; one still unanswered when the next is due ends the socket, and so
+ *   does a join unanswered after [JOIN_TIMEOUT_MS].
  * - A `broadcast` on our topic whose `payload.event` is `nudge` reports [Input.Nudge] with `payload.payload.reason`;
  *   the core reads the word. Anything else is ignored.
  * - A new token on the same channel goes as `access_token` (after the join's ok, if it is not in yet); a new topic
@@ -71,9 +72,14 @@ class NudgeLink(
   private var heartbeatRef: String? = null
   private var heartbeat: Cancellable? = null
   private var retry: Cancellable? = null
+  private var joinWait: Cancellable? = null
   private var attempts = 0
 
-  /** The grant the socket should hold: connect, refresh the token, or move to another channel or host. */
+  /**
+   * The grant the socket should hold: connect, refresh the token, or move to another channel or host. With no socket
+   * (a reconnect waiting on the backoff included) it connects at once: a new grant comes only with a beat's answer
+   * (the core swaps it after a refusal), so these tries are bounded by the beat cadence, not the backoff.
+   */
   @Synchronized
   fun grant(next: RealtimeGrant) = guarded {
     val held = grant
@@ -123,6 +129,8 @@ class NudgeLink(
     heartbeat?.cancel()
     heartbeat = null
     heartbeatRef = null
+    joinWait?.cancel()
+    joinWait = null
     val gone = socket
     socket = null
     open = false
@@ -166,6 +174,8 @@ class NudgeLink(
     tokenIn = held.token
     val config = linkedMapOf("broadcast" to linkedMapOf("self" to false), "private" to true)
     send(frame("realtime:${held.topic}", "phx_join", linkedMapOf("config" to config, "access_token" to held.token), joining, joinRef = joining))
+    joinWait?.cancel()
+    joinWait = scheduler.schedule(JOIN_TIMEOUT_MS) { synchronized(this) { guarded { if (!joined && joinRef == joining) lost(NudgeState.CLOSED) } } }
   }
 
   private fun refresh() {
@@ -205,6 +215,8 @@ class NudgeLink(
   }
 
   private fun joinReplied(status: Any?) {
+    joinWait?.cancel()
+    joinWait = null
     if (status != "ok") return lost(NudgeState.REFUSED)
     joined = true
     attempts = 0
@@ -261,6 +273,9 @@ class NudgeLink(
   companion object {
     /** Phoenix's own heartbeat interval, and realtime-js's. */
     const val HEARTBEAT_MS = 25_000L
+
+    /** A join unanswered this long ends the socket, as a missed heartbeat does (realtime-js's push timeout). */
+    const val JOIN_TIMEOUT_MS = 10_000L
 
     /** 1, 2, 4, 8, 16, then 30 s for every later try. */
     val BACKOFF_MS = longArrayOf(1_000, 2_000, 4_000, 8_000, 16_000, 30_000)

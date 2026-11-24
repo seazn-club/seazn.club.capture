@@ -104,6 +104,21 @@ class NudgesTest {
   }
 
   @Test
+  fun `after a process death the restored pairing holds no grant, and the first 2xx beat asks for the socket`() {
+    val (rig, _) = joined()
+    // A new engine: the cold start's re-pair. The store keeps no grant (PairingState's default).
+    val cold = MachineRig()
+    cold.at(rig.mono + 5_000)
+    cold.send(Input.Pair(Configs.pairRequest(claim = Claim.RESUME), Configs.PHONE, stopped = null))
+    cold.send(Input.Network(true))
+    cold.ready()
+    assertNull(cold.phase.pairing?.realtime)
+    assertEquals(emptyList(), cold.toldAll())
+    val fresh = grant(cold, "token-cold")
+    assertEquals(listOf<Command>(Command.Nudges(fresh)), told(cold.hear("waiting", realtime = fresh)))
+  }
+
+  @Test
   fun `joined is no failure - the held token is kept`() {
     val (rig, _) = joined()
     rig.send(Input.NudgeLink(NudgeState.JOINED))
@@ -234,6 +249,7 @@ class NudgesTest {
     for (reason in heard) {
       rig.at(rig.mono + 2_000)
       rig.send(Input.Nudge(reason))
+      rig.send(Input.HeartbeatAnswered(rig.inFlightBeat(), HeartbeatResponse.Answered(200, BeatReply("waiting", null, null, null, Configs.waiting(60)))))
     }
     assertEquals(listOf("go-live", "stop", "replaced", "over", "next-match", "other", "other", "other", "other"), rig.records("nudge").map { it.field("reason") })
   }
@@ -247,7 +263,23 @@ class NudgesTest {
     assertEquals(emptyList(), beats(rig.send(Input.Nudge("stop"))), "folded: 1,999 ms after the last")
     rig.at(rig.mono + 1)
     assertEquals(1, beats(rig.send(Input.Nudge("stop"))).size, "2 s after the last")
-    assertEquals(3, rig.records("nudge").size, "every nudge is recorded, folded or not")
+    // The line goes with the beat only, and carries the nudge folded since the last line.
+    assertEquals(listOf<Any?>(0, 1), rig.records("nudge").map { it.field("suppressed") })
+  }
+
+  @Test
+  fun `a server looping nudges writes one line per beat, never one per nudge`() {
+    val rig = quiet()
+    rig.send(Input.Nudge("go-live"))
+    for (n in 1..50) {
+      rig.at(rig.mono + 10)
+      rig.send(Input.Nudge("go-live"))
+    }
+    assertEquals(listOf<Any?>(0), rig.records("nudge").map { it.field("suppressed") }, "50 folded, no line")
+    rig.send(Input.HeartbeatAnswered(rig.inFlightBeat(), HeartbeatResponse.Answered(200, BeatReply("waiting", null, null, null, Configs.waiting(60)))))
+    rig.at(rig.mono + 2_000)
+    rig.send(Input.Nudge("stop"))
+    assertEquals(listOf<Any?>(0, 50), rig.records("nudge").map { it.field("suppressed") })
   }
 
   @Test
@@ -258,6 +290,7 @@ class NudgesTest {
     rig.at(rig.mono + 3_000)
     assertEquals(emptyList(), beats(rig.send(Input.Nudge("stop"))))
     assertEquals(id, rig.inFlightBeat())
+    assertEquals(1, rig.records("nudge").size, "no beat went, so no line: it is counted for the next")
   }
 
   @Test

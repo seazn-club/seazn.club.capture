@@ -168,13 +168,36 @@ so every release build, the EAS `production` bundle and a local
 `assembleRelease` alike, runs R8 and drops unused resources. Debug builds do
 not. Measured on 2026-11-24 (arm64 release APK, dev twin): 95.7 MB with
 56.6 MB of DEX before, 60.8 MB with 21.9 MB of DEX after. R8 shrinks and
-renames but does not optimise: Expo's generated `android/app/build.gradle`
-names `proguard-android.txt`, which says `-dontoptimize`. R8 8.12.14 (AGP
-8.12) warns "An error occurred when parsing kotlin metadata" for classes
-compiled by Kotlin 2.3 and 2.4 (ours, StreamPack's), so it cannot rewrite
-their Kotlin metadata. Only `kotlin-reflect` reads that metadata: in this app,
-Expo's records, which Expo's own rules keep whole. The phone check after this
-change is what settles it.
+renames but does not optimise. Through Expo 57 the generated
+`android/app/build.gradle` named `proguard-android.txt`, which says
+`-dontoptimize`; Expo 58's names `proguard-android-optimize.txt`, so
+`app.json`'s `expo-build-properties` adds `extraProguardRules: "-dontoptimize"`
+(written into `android/app/proguard-rules.pro` at prebuild) and the release
+build stays the one reviewed with R8: shrink and rename only. Turning
+optimisation on is a change of its own, checked on a phone. R8 8.12.14 (AGP
+8.12, Expo 57) warned "An error occurred when parsing kotlin metadata" for
+classes compiled by Kotlin 2.3 and 2.4 (ours, StreamPack's); the R8 in AGP
+9.2.1 (Expo 58) prints none. Only `kotlin-reflect` reads that metadata: in
+this app, Expo's records, which Expo's own rules keep whole. The phone check
+after this change is what settles it.
+
+**Expo SDK 58** (2026-11-24; owner: "Expo upgrade in Phase 5 after R8, same
+PR", after Play Console flagged deprecated edge-to-edge calls on 1.0.15).
+React Native 0.88.1, AGP 9.2.1, Gradle 9.4.1, compile SDK 37, target SDK 36,
+Kotlin 2.3.0 (app.json's `kotlinVersion`, which Expo 58's root
+`build.gradle` reads itself). The arm64 release APK went from 60.8 MB
+(21.9 MB of DEX) to 54.2 MB (14.9 MB of DEX): Expo Router 58 no longer pulls
+`@expo/ui` and `expo-symbols` in, and `@expo/ui` was 424 of the app's classes
+with Jetpack Compose behind them. What Play Console flagged, read from the
+release DEX: React Native's `StatusBarModule` no longer touches the status
+bar's colour (0.87 removed `backgroundColor` and `translucent`), and
+Material's `EdgeToEdgeUtils` calls are gone. Still in the DEX: React Native's
+`WindowUtilKt.enableEdgeToEdge` (`setStatusBarColor`, `setNavigationBarColor`
+and `layoutInDisplayCutoutMode`), its `statusBarHide`/`statusBarShow` on the
+non-edge-to-edge path (the cutout mode), Material's `BottomSheetDialog`
+(`setStatusBarColor`, `getNavigationBarColor`) and AndroidX's splash screen
+(`SplashScreen$Impl31`). Those are the libraries' own code: a later React
+Native, Material or AndroidX release has to drop them.
 
 **Keep rules.** Each library ships its own (Expo modules, React Native,
 srtdroid's core, OkHttp, coroutines). What the capture engine reads by name

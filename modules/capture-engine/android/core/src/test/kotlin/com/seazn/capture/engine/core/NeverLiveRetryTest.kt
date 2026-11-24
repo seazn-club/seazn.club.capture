@@ -117,4 +117,23 @@ class NeverLiveRetryTest {
     rig.send(Input.Stop)
     assertEquals(said, rig.records("connect-failed").size)
   }
+
+  /** Re-review of d006c2dd, item 3: going live says the failures held back, as an end does. */
+  @Test
+  fun `going live says the failures held back since the last line`() {
+    val rig = failingFor(130_000)
+    assertEquals(4, rig.session.retries.unsaid)
+    val waiting = (rig.phase as Phase.Connecting).step as ConnectStep.Waiting
+    rig.at(waiting.connectAtMs)
+    rig.send(Input.Tick)
+    rig.send(Input.Connected(rig.attempt!!))
+    rig.advance(1_000, videoPerStep = 15)
+    val live = rig.sent<Command.Record>().map { it.entry }
+    val held = live.last { it.kind == "connect-failed" }
+    assertEquals(listOf("transport" to Transport.SRT, "count" to 4), held.fields)
+    assertTrue(live.indexOf(held) < live.indexOfFirst { it.kind == "live" } + 2, "with the live line")
+    assertEquals(0, rig.session.retries.unsaid)
+    rig.send(Input.Stop)
+    assertEquals(1, rig.records("connect-failed").count { it.fields.size == 2 }, "said once, not again at the end")
+  }
 }

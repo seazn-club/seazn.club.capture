@@ -38,6 +38,12 @@ data class NeverLiveRetries(
     return copy(slow = slow + 1, saidAtMs = nowMs, unsaid = 0, quiet = false) to Said(unsaid + 1)
   }
 
+  /** The failures held back, said now (going live, or the session's end), and the state with none held. */
+  fun said(transport: Transport): Pair<NeverLiveRetries, Command?> {
+    if (unsaid == 0) return this to null
+    return copy(unsaid = 0) to Command.Record(RecordEntry("connect-failed", listOf("transport" to transport, "count" to unsaid)))
+  }
+
   /** One more attempt ended before live with its own line (a drop), so only the ladder moves. */
   fun dropped(nowMs: Long): NeverLiveRetries {
     val first = firstAtMs ?: nowMs
@@ -54,9 +60,9 @@ data class NeverLiveRetries(
      */
     fun closed(before: Phase, step: Step): Step {
       val session = before.session ?: return step
-      val unsaid = session.retries.unsaid
-      if (unsaid == 0 || step.phase.session?.sid == session.sid) return step
-      return step.copy(commands = step.commands + Command.Record(RecordEntry("connect-failed", listOf("transport" to session.fallback.current, "count" to unsaid))))
+      if (step.phase.session?.sid == session.sid) return step
+      val line = session.retries.said(session.fallback.current).second ?: return step
+      return step.copy(commands = step.commands + line)
     }
 
     /** A minute of trying as before: a fix at the ground (a hotspot turned on, a cable) is usually that quick. */

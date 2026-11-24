@@ -106,7 +106,7 @@ class LinkStuckReplacesTest {
     val before = driven.replacedAt.size
     driven.run(20_000)
     assertTrue(driven.replacedAt.size > before, "a replace at once again")
-    assertEquals(0L, driven.rig.records("link-stuck").last().field("retryMs"), "the first of a new run: the next goes at once too")
+    assertEquals(0L, driven.rig.records("link-stuck")[before].field("retryMs"), "the first of a new run: the next goes at once too")
   }
 
   /** [StuckReplaces.read] over readings a second apart from [from] to [to]: [stuckAt] are stuck, all [advancing]. */
@@ -122,5 +122,55 @@ class LinkStuckReplacesTest {
     val broken = two.reading(2_000, 50_000, advancing = true, stuckAt = setOf(20_000))
     assertEquals(2, broken.count, "a stuck reading at 20 s starts the 30 s again: 21 to 50 is 29 s")
     assertEquals(0, broken.reading(51_000, 51_000, advancing = true).count)
+  }
+
+  /**
+   * Re-review of d006c2dd, item 2 (the controller's ruling: one fault, one ladder): a not-delivered restart for a link
+   * that stays poor waits out the stuck ladder and counts as its step, so restarts are not every 20 s.
+   */
+  @Test
+  fun `a link that stays poor restarts on the stuck ladder, not at every 20 s verdict`() {
+    val driven = driven()
+    val starts = mutableListOf<Long>()
+    // Weak signal all along: the regulator's last cut is always fresh and its failed rate stands (the floor's own cuts
+    // move no target, so the rig keeps it so by hand); the playlist never moves.
+    driven.rig.advance(240_000) {
+      val rig = driven.rig
+      (rig.phase as? Phase.OnAir)?.let { onAir ->
+        val poor = onAir.session.regulation.copy(lastCutAtMs = rig.mono, failed = FailedRate(floor * 2, rig.mono))
+        rig.phase = onAir.copy(session = onAir.session.copy(regulation = poor))
+      }
+      val connecting = rig.phase as? Phase.Connecting
+      if (connecting?.step is ConnectStep.Requested) rig.send(Input.Connected(rig.attempt!!))
+      if (rig.sent<Command.StartNewSession>().size > starts.size) starts += rig.mono
+    }
+    val gaps = starts.zipWithNext { a, b -> b - a }
+    assertTrue(starts.size >= 4, "$starts")
+    for ((i, gap) in gaps.withIndex().drop(1)) {
+      val wait = StuckReplaces.waitMs(i + 2)
+      assertTrue(gap >= wait, "restart ${i + 2} came $gap after the one before, its ladder wait is $wait: $gaps")
+    }
+    assertTrue(starts.size <= 7, "not one every ~20 s for 4 minutes: $gaps")
+  }
+
+  /** Re-review of d006c2dd, item 4: a verdict the 6 s gate refused acts at the first reading once the gate opens. */
+  @Test
+  fun `a stuck verdict refused while the playlist moved acts as soon as it stops`() {
+    val driven = driven()
+    driven.buffer = 1_900
+    driven.moving = true
+    driven.run(20_000)
+    assertEquals(emptyList(), driven.replacedAt)
+    driven.moving = false
+    var opened: Long? = null
+    driven.rig.advance(15_000) {
+      val onAir = driven.rig.phase as? Phase.OnAir
+      if (opened == null && onAir != null && onAir.session.delivery.sinceAdvanceMs >= StuckReplaces.STUCK_UNDELIVERED_MS) opened = driven.rig.mono
+      if (driven.rig.records("link-stuck").size > driven.replacedAt.size) driven.replacedAt += driven.rig.mono
+    }
+    val first = driven.replacedAt.firstOrNull() ?: error("never replaced")
+    val gate = opened ?: error("the gate never opened")
+    // The run was stuck all along: the first reading once the gate is open is the verdict, not a run of five more.
+    assertTrue(first - gate <= 1_000, "${first - gate} ms after the gate opened")
   }
 }

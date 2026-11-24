@@ -473,8 +473,11 @@ internal object Transports {
     if (watchdog.advancing(now.monoMs)) {
       if (next.framesAtMs == null) next = next.copy(framesAtMs = now.monoMs)
       if (next.session.liveSinceEpochMs == null) {
-        next = next.copy(session = next.session.copy(liveSinceEpochMs = now.wallMs))
+        // Re-review of d006c2dd, item 3: going live says the start's failures the minute held back.
+        val (retries, held) = next.session.retries.said(phase.transport)
+        next = next.copy(session = next.session.copy(liveSinceEpochMs = now.wallMs, retries = retries))
         commands += record("live", "transport" to phase.transport)
+        held?.let { commands += it }
       }
       // A reopened or switched camera is ours again once it delivers a frame.
       if (next.session.camera == CameraState.RESUMING || next.session.camera == CameraState.SWITCHING) {
@@ -517,8 +520,10 @@ internal object Transports {
     val advancing = session.delivery.sinceAdvanceMs < StuckReplaces.STUCK_UNDELIVERED_MS
     val replaces = session.stuckReplaces.read(stuckWatch.readings > 0 || stuck != null, advancing, now.monoMs)
     val watched = next.copy(stuck = stuckWatch, session = next.session.copy(stuckReplaces = replaces))
-    // Review of batch 2, item 1: a picture the playlist still delivers is never replaced, and replaces back off.
-    if (stuck == null || advancing || !replaces.mayReplace(now.monoMs)) return Step(watched, commands)
+    if (stuck == null) return Step(watched, commands)
+    // Review of batch 2, item 1: a picture the playlist still delivers is never replaced, and replaces back off. A
+    // verdict refused here keeps its run (re-review of d006c2dd, item 4): it acts at the first reading the gate allows.
+    if (advancing || !replaces.mayReplace(now.monoMs)) return Step(watched.copy(stuck = phase.stuck.refused(stuck, now.monoMs)), commands)
     val replaced = linkStuck(watched, stuck, sample, now)
     return replaced.copy(commands = commands + replaced.commands)
   }
@@ -688,7 +693,7 @@ internal object Timers {
     if (verdict is StallVerdict.Rebuild) return rebuild(watched, verdict, now)
     // S2: a not-delivered restart whose backoff is over.
     // Review of batch 2, item 5: a link that turned poor inside the wait is the phone's, so it goes at once.
-    if (watched.restartAtMs?.let { now.monoMs >= it || Deliveries.ownLinkFailing(watched, now) } == true) {
+    if (watched.restartAtMs?.let { now.monoMs >= it || Deliveries.poorLinkDue(watched, now) } == true) {
       return Deliveries.restart(watched.copy(restartAtMs = null), now)
     }
     // Publishing time counts only while frames advance: our own reopen or switch pauses it until the
@@ -866,9 +871,10 @@ internal object Deliveries {
    */
   private fun notDelivered(onAir: Phase.OnAir, verdict: NotDelivered, now: Now): Step {
     val ownLinkFailing = ownLinkFailing(onAir, now)
-    // Review of batch 2, item 5: a restart at once for a poor link is not a step of the ladder.
+    // Review of batch 2, item 5: a restart for a poor link is not a step of the delivery ladder. One fault, one ladder
+    // (re-review of d006c2dd, item 2, the controller's ruling): it waits out the stuck ladder instead, as its step.
     val restarts = if (ownLinkFailing) onAir.session.deliveryRestarts else onAir.session.deliveryRestarts + 1
-    val waitMs = if (ownLinkFailing) 0 else DeliveryWatch.restartWaitMs(restarts)
+    val waitMs = if (ownLinkFailing) onAir.session.stuckReplaces.waitLeftMs(now.monoMs) else DeliveryWatch.restartWaitMs(restarts)
     val noted =
       record(
         "not-delivered",
@@ -887,9 +893,14 @@ internal object Deliveries {
   /** The cause split: the phone's own link failed lately, what the operator sees as Weak signal. */
   fun ownLinkFailing(onAir: Phase.OnAir, now: Now): Boolean = DegradeReason.POOR_UPLINK in Projection.reasons(onAir.session, now)
 
+  /** A waiting restart whose link turned poor goes once the stuck ladder allows it, not at the delivery ladder's time. */
+  fun poorLinkDue(onAir: Phase.OnAir, now: Now): Boolean = ownLinkFailing(onAir, now) && onAir.session.stuckReplaces.mayReplace(now.monoMs)
+
   /** The restart a not-delivered verdict asked for: a new ingest session, which the watch follows from zero. */
   fun restart(onAir: Phase.OnAir, now: Now): Step {
-    val session = onAir.session.copy(delivery = onAir.session.delivery.newSession())
+    // One fault, one ladder: a restart for a poor link is a step of the stuck ladder.
+    val replaces = onAir.session.stuckReplaces.let { if (ownLinkFailing(onAir, now)) it.replaced(now.monoMs) else it }
+    val session = onAir.session.copy(delivery = onAir.session.delivery.newSession(), stuckReplaces = replaces)
     val outage = onAir.outage ?: Transports.outageFor(session, onAir.transport, now, ReconnectCause.NOT_DELIVERED)
     return Transports.replace(onAir, session, outage, now) { Command.StartNewSession(onAir.attemptId, it) }
   }

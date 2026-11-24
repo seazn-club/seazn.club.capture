@@ -201,8 +201,9 @@ class Engine(
       if (input != Input.Tick && shown == lastShown) return
       lastShown = shown
       snapshots.publish(snapshot)
-      // Review of batch 2, item 4: a snapshot that goes up again says the failures held back since the last line.
-      flushFailed(now)
+      // Review of batch 2, item 4: a snapshot that goes up again says the failures held back, at the line's own rate
+      // (re-review of d006c2dd, item 1): failures and recoveries by turns never write a line each.
+      if (failedSaidAtMs?.let { now.monoMs - it >= SNAPSHOT_LINE_MS } != false) flushFailed(now)
     } catch (failure: Exception) {
       snapshotFailures += 1
       snapshotFailed(failure, now)
@@ -222,9 +223,10 @@ class Engine(
     flushFailed(now)
   }
 
-  /** The `snapshot-failed` line for the failures not yet said, if any; the rate's clock is [snapshotFailed]'s. */
+  /** The `snapshot-failed` line for the failures not yet said, if any, which restarts the line's minute. */
   private fun flushFailed(now: Now) {
     if (failedUnsaid == 0) return
+    failedSaidAtMs = now.monoMs
     val line = RecordEntry("snapshot-failed", listOf("error" to failedError, "count" to failedUnsaid))
     failedUnsaid = 0
     record.append(now.wallMs, line)

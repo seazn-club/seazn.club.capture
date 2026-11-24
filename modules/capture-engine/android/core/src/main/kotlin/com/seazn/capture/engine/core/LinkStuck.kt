@@ -34,6 +34,12 @@ data class StuckWatch(
     return StuckWatch() to Stuck(count, nowMs - since)
   }
 
+  /**
+   * Re-review of d006c2dd, item 4: a verdict the machine refused (the playlist still moved, or a replace still waits)
+   * keeps its run, so the next stuck reading is the verdict again, at once, and a reading that is not stuck ends it.
+   */
+  fun refused(stuck: Stuck, nowMs: Long): StuckWatch = StuckWatch(nowMs - stuck.stuckMs, stuck.readings)
+
   private fun stuck(sample: LinkSample, targetBps: Int, transport: Transport, srtLatencyMs: Int): Boolean {
     if (transport != Transport.SRT || targetBps > Encode.FLOOR_BPS) return false
     // A negative reading (the record has -336) is never 75% of the latency, so it ends the run like any drained one.
@@ -66,7 +72,10 @@ data class StuckReplaces(
   /** When the run of readings that were not stuck began; null after a stuck one. */
   val clearSinceMs: Long? = null,
 ) {
-  fun mayReplace(nowMs: Long): Boolean = lastAtMs?.let { nowMs - it >= waitMs(count + 1) } ?: true
+  fun mayReplace(nowMs: Long): Boolean = waitLeftMs(nowMs) == 0L
+
+  /** How long the next replace must still wait: 0 when it may go now. */
+  fun waitLeftMs(nowMs: Long): Long = lastAtMs?.let { (it + waitMs(count + 1) - nowMs).coerceAtLeast(0) } ?: 0
 
   fun replaced(nowMs: Long): StuckReplaces = StuckReplaces(count + 1, nowMs, clearSinceMs = null)
 

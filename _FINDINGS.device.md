@@ -1138,3 +1138,16 @@ socket is pinned to Wi-Fi. DEVICE-UNVERIFIED.
   the new `connect` (`CaptureRun.reconnect`), so the old socket's shutdown goes out before the new socket opens, on the
   old socket's own network. That the shutdown reaches Cloudflare, and that Cloudflare then lets the new connection take
   the input at once, is INFERRED and device-only, as is everything the shim does.
+
+**Batch 2, re-review of d006c2dd (2026-11-24).**
+
+- **`snapshot-failed` keeps its minute on recovery.** A snapshot that goes up again says the held failures only once a
+  minute has passed since the last line, and every line restarts the minute; the rest wait for the next such
+  recovery or the session's end. Failures and recoveries by turns write at most three lines in two minutes.
+- **One fault, one ladder (the controller's ruling, applying the recommendation).** A not-delivered restart for a poor
+  link waits out the stuck ladder's wait (`StuckReplaces.waitLeftMs`) instead of going at once, and counts as its step;
+  the first two still go at once. A waiting restart whose link turns poor goes once that ladder allows it. A link that
+  stays poor restarts on 15, 30, 60, 120 s, not every 20 s.
+- **Going live says the start's held failures** (`connect-failed {transport, count}`), as the session's end does.
+- **A stuck verdict refused** by the 6 s gate or a replace's wait keeps its run (`StuckWatch.refused`), so it acts at the
+  first reading the gate allows.

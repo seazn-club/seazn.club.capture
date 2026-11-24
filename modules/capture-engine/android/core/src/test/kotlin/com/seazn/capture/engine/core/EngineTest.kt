@@ -196,6 +196,32 @@ class EngineTest {
     assertEquals(engine.snapshotFailures, after.sum(), "every failure said once")
   }
 
+  /** Re-review of d006c2dd, item 1: a recovery says the held count only once a minute, so fail/ok never floods. */
+  @Test
+  fun `S12 snapshots that fail and recover by turns write at most three lines in two minutes`() {
+    var tick = 0
+    val engine = engine(projection = { phase, now -> if (++tick % 2 == 0) throw IllegalStateException("x") else Projection.snapshot(phase, now) })
+    engine.start()
+    scheduler.advanceBy(120_000)
+    val said = lines.filter { """"kind":"snapshot-failed"""" in it }.map { JSONObject(it).getInt("count") }
+    assertTrue(engine.snapshotFailures >= 100, "${engine.snapshotFailures} failures")
+    // The first failure at once, then the recovery a minute on; a recovery's line restarts the minute too, so the
+    // failure just after it waits (a third line here would mean it did not).
+    assertTrue(said.size <= 2, "$said")
+  }
+
+  /** A recovery's line restarts the minute, so a failure just after it is held, not said. */
+  @Test
+  fun `S12 a failure just after a recovery's line waits its minute`() {
+    var tick = 0
+    // Ticks 1 and 2 fail (0.5 s said, 1 s held), then good until tick 122 (61 s) fails.
+    val engine = engine(projection = { phase, now -> tick += 1; if (tick <= 2 || tick == 122) throw IllegalStateException("x") else Projection.snapshot(phase, now) })
+    engine.start()
+    scheduler.advanceBy(62_000)
+    val said = lines.filter { """"kind":"snapshot-failed"""" in it }.map { JSONObject(it).getInt("count") }
+    assertEquals(listOf(1, 1), said, "0.5 s, then the recovery at 60.5 s says the held one; 61 s's waits")
+  }
+
   @Test
   fun `a failure inside the machine ends fatal-error instead of escaping`() {
     val engine = engine { _, _, _ -> throw IllegalStateException("bug") }

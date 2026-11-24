@@ -269,7 +269,7 @@ object Bodies {
         maxDurationMinutes = WireValues.int(fields["maxDurationMinutes"])?.takeIf { it >= 1 } ?: return CodeAnswer.Unreadable("maxDurationMinutes"),
         // A closed set: any other word is "", which the snapshot crosses as null, for this field alone.
         scoreUpdates = ScoreUpdates.of(fields["scoreUpdates"] as? String)?.wire ?: "",
-        warmingDeadlineEpochS = whole(fields["warmingDeadline"]) ?: 0,
+        // `warmingDeadline` is not read (S6): the server ends a warming session itself and says so on a beat.
       )
     val waiting = read(fields, env)
     return CodeAnswer.Open(sid, state, descriptor, waiting.fields, waiting.unreadable)

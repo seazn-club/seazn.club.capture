@@ -241,9 +241,12 @@ internal object Transports {
   private val CONNECT_COUNTERS = LinkCounters(0, 0, 0, 0, 0, null, null, null)
 
   fun connect(session: Session, transport: Transport, outage: Outage?, now: Now): Step {
-    val (next, connect) = connectCommand(session, transport, now) ?: return missingTarget(session, transport, now)
+    val (asked, connect) = connectCommand(session, transport, now) ?: return missingTarget(session, transport, now)
+    // S6: a retry whose failure line was held back is asked with no line of its own either.
+    val quiet = asked.retries.quiet
+    val next = if (quiet) asked.copy(retries = asked.retries.copy(quiet = false)) else asked
     val phase = Phase.Connecting(next, transport, ConnectStep.Requested(connect.attemptId, now.monoMs), outage)
-    return Step(phase, listOf(connect, record("connecting", "transport" to transport, "attempt" to connect.attemptId)))
+    return Step(phase, listOfNotNull(connect, record("connecting", "transport" to transport, "attempt" to connect.attemptId).takeIf { !quiet }))
   }
 
   /**
@@ -324,25 +327,33 @@ internal object Transports {
    * A failed connect: counted or not by the fallback policy, then a retry [SessionMachine.RETRY_MS]
    * later. A [drop] before the connect answered is judged by the policy's drop rule with nothing
    * published: the far end closing counts (F-P5-2's collapse), a local stop does not (B6 review m5).
+   * S6: before live and past its first minute of failing, the retry backs off ([NeverLiveRetries.waitMs]) and the line is
+   * said at most once a minute, with the failures it stands for (`count`); a fall-back is always said.
    */
   fun failed(phase: Phase.Connecting, failure: ConnectFailure, message: String?, now: Now, drop: DropReason? = null): Step {
     val session = phase.session
     val validated = session.networkValidated
     val decision = if (drop == null) session.fallback.connectFailed(failure, validated) else session.fallback.dropped(drop, validated, publishedMs = 0)
-    val commands = mutableListOf(failedRecord(phase.transport, failure, drop, validated, decision.counted, message))
+    val neverLive = session.liveSinceEpochMs == null
+    val (retries, said) = if (neverLive) session.retries.failed(now.monoMs) else session.retries to null
+    val commands = mutableListOf<Command>()
+    if (!neverLive || said != null) commands += failedRecord(phase.transport, failure, drop, validated, decision.counted, message, said?.count)
     if (decision.fellBack) commands += record("fell-back", "from" to phase.transport, "to" to decision.policy.current)
-    var next = session.copy(fallback = decision.policy)
+    var next = session.copy(fallback = decision.policy, retries = retries)
     // Ruling 15: refused ingest may mean the organiser stopped the session. B6 ruling C1 spaces them.
     if (failure == ConnectFailure.REFUSED && next.descriptor.mayAsk(now.monoMs)) {
       val (asked, fetch) = askDescriptor(next, now)
       next = asked
       commands += fetch
     }
-    val waiting = ConnectStep.Waiting(now.monoMs + SessionMachine.RETRY_MS)
+    val waiting = ConnectStep.Waiting(now.monoMs + retryWaitMs(next))
     return Step(phase.copy(session = next, transport = decision.policy.current, step = waiting), commands)
   }
 
-  private fun failedRecord(transport: Transport, failure: ConnectFailure, drop: DropReason?, validated: Boolean, counted: Boolean, message: String?): Command {
+  /** S6: before live the ladder's wait for the failures so far; after, [SessionMachine.RETRY_MS], the hold bounding it. */
+  private fun retryWaitMs(session: Session): Long = if (session.liveSinceEpochMs == null) session.retries.waitMs() else SessionMachine.RETRY_MS
+
+  private fun failedRecord(transport: Transport, failure: ConnectFailure, drop: DropReason?, validated: Boolean, counted: Boolean, message: String?, count: Int?): Command {
     val fields =
       listOfNotNull(
         "transport" to transport,
@@ -351,6 +362,7 @@ internal object Transports {
         "validated" to validated,
         "counted" to counted,
         "message" to message,
+        count?.let { "count" to it },
       )
     return record("connect-failed", *fields.toTypedArray())
   }
@@ -385,8 +397,9 @@ internal object Transports {
         fetch,
       )
     if (decision.fellBack) commands += record("fell-back", "from" to phase.transport, "to" to decision.policy.current)
-    val next = session.copy(fallback = decision.policy, regulation = BitrateRegulator.afterDrop(session.regulation, now.monoMs))
-    val waiting = ConnectStep.Waiting(now.monoMs + SessionMachine.RETRY_MS)
+    val retries = if (session.liveSinceEpochMs == null) session.retries.dropped(now.monoMs) else session.retries
+    val next = session.copy(fallback = decision.policy, regulation = BitrateRegulator.afterDrop(session.regulation, now.monoMs), retries = retries)
+    val waiting = ConnectStep.Waiting(now.monoMs + retryWaitMs(next))
     return Step(Phase.Connecting(next, decision.policy.current, waiting, outage), commands)
   }
 

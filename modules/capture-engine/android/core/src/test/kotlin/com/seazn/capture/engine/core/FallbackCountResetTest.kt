@@ -22,10 +22,10 @@ class FallbackCountResetTest {
   }
 
   /** Two counted failures of the attempts that follow an end by [ending], [publishedMs] after the connect. */
-  private fun afterEnd(publishedMs: Long, ending: (MachineRig) -> Unit): FallbackPolicy {
+  private fun afterEnd(publishedMs: Long, ending: String): FallbackPolicy {
     val rig = liveAfterOneFailure()
     rig.advance(publishedMs - 1_000)
-    ending(rig)
+    end(rig, ending)
     repeat(2) {
       val attempt = rig.attempt ?: run { rig.advance(SessionMachine.RETRY_MS); rig.attempt!! }
       rig.send(Input.ConnectFailed(attempt, ConnectFailure.TIMEOUT, null))
@@ -34,16 +34,22 @@ class FallbackCountResetTest {
     return rig.session.fallback
   }
 
-  private val endings: List<Pair<String, (MachineRig) -> Unit>> =
-    listOf(
-      "a stall rebuild" to { rig -> rig.advance(4_000, videoPerStep = 0) },
-      "a switch" to { rig -> rig.send(Input.Network(true, 100L)); rig.send(Input.Network(true, 101L)) },
-    )
+  private val endings = listOf("a stall rebuild", "a switch")
+
+  private fun end(rig: MachineRig, ending: String) {
+    when (ending) {
+      "a stall rebuild" -> rig.advance(4_000, videoPerStep = 0)
+      else -> {
+        rig.send(Input.Network(true, 100L))
+        rig.send(Input.Network(true, 101L))
+      }
+    }
+  }
 
   @Test
   fun `an attempt that published 30 s and ended by a rebuild or a switch clears the count - two failures later it is still SRT`() {
-    for ((name, ending) in endings) {
-      val policy = afterEnd(30_000, ending)
+    for (name in endings) {
+      val policy = afterEnd(30_000, name)
       assertEquals(Transport.SRT, policy.current, name)
       assertEquals(2, policy.count, "$name: the two after it")
     }
@@ -51,8 +57,8 @@ class FallbackCountResetTest {
 
   @Test
   fun `one that published under 25 s keeps the count - the third failure falls back`() {
-    for ((name, ending) in endings) {
-      val policy = afterEnd(10_000, ending)
+    for (name in endings) {
+      val policy = afterEnd(10_000, name)
       assertEquals(Transport.RTMPS, policy.current, name)
     }
   }

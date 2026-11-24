@@ -31,7 +31,6 @@ class BroadcastDescriptor(
   val label: String,
   val maxDurationMinutes: Int,
   val scoreUpdates: String,
-  val warmingDeadlineEpochS: Long,
 ) {
   /** A18: false when the server sent no SRT, so the engine publishes RTMPS with no fallback. */
   val srtOffered: Boolean

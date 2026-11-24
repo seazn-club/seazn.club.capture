@@ -51,7 +51,6 @@ object Configs {
       label = "Example Town v Sample CC",
       maxDurationMinutes = maxDurationMinutes,
       scoreUpdates = "realtime",
-      warmingDeadlineEpochS = 1_790_000_600,
     )
 
   // Made up, within capture-beat.v1's 16 to 64 characters.

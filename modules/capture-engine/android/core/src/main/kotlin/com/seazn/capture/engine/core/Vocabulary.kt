@@ -123,3 +123,24 @@ data class DeviceSample(
   val drainPctPerHour: Double?,
   val shed: ShedStep?,
 )
+
+/**
+ * N49: what the machine made of a switch of the validated default network, the `network-switched` line's `result`. It is
+ * judged against the network the attempt in hand was asked on ([Session.attemptNetwork]), never the last default.
+ */
+enum class NetworkSwitch(override val wire: String) : Wire {
+  /** Connected, and on another network: replaced at once, a new link (fix round 1, items 3 and 4). */
+  REPLACED("replaced"),
+
+  /** Still connecting, and asked on another network: replaced once it connects, never torn down mid-connect. */
+  PENDING("pending"),
+
+  /** Back on the network the attempt was asked on, after a switch away: nothing to replace. */
+  SAME("same"),
+
+  /** Between attempts: the next one is asked on the new default, so nothing is replaced. */
+  BETWEEN_ATTEMPTS("between-attempts"),
+
+  /** Nothing is publishing, so no socket is on the old network: only recorded. */
+  NOT_ON_AIR("not-on-air"),
+}

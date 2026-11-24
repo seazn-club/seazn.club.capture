@@ -181,7 +181,7 @@ class HttpTest {
     assertEquals(listOf("Authorization" to "Bearer ${Configs.TOKEN}", "Content-Type" to "application/json", "Cache-Control" to "no-store"), request.headers)
     assertEquals("""{"phone":"phone-7f1e0c2a9b3d"}""", request.body)
     assertEquals(Input.StartAnswered(4, StartAnswer.Started(SID)), HttpAnswers.start(4, HttpOutcome.Answered(200, """{"sid":"$SID"}""")))
-    assertEquals(Input.StartAnswered(5, StartAnswer.Failed("no answer: reset")), HttpAnswers.start(5, HttpOutcome.Failed("reset")))
+    assertEquals(Input.StartAnswered(5, StartAnswer.Failed("no-answer:reset")), HttpAnswers.start(5, HttpOutcome.Failed("reset")))
   }
 
   @Test
@@ -217,7 +217,7 @@ class HttpTest {
     for ((failure, name) in thrown) {
       val outcome = HttpOutcome.failed(failure)
       assertEquals(HttpOutcome.Failed(name), outcome)
-      assertEquals(Input.StartAnswered(4, StartAnswer.Failed("no answer: $name")), HttpAnswers.start(4, outcome))
+      assertEquals(Input.StartAnswered(4, StartAnswer.Failed("no-answer:$name")), HttpAnswers.start(4, outcome))
       assertEquals(Input.CodeAnswered(12, CodeAnswer.Unreachable(name)), HttpAnswers.code(12, outcome, Environment.STAGING))
       assertEquals(Input.HeartbeatAnswered(7, HeartbeatResponse.Failed(name)), HttpAnswers.heartbeat(7, outcome, Environment.STAGING))
       assertEquals(Input.PlaylistFetched(3, FetchResult.Failed(name)), HttpAnswers.playlist(3, outcome))
@@ -225,10 +225,17 @@ class HttpTest {
   }
 
   @Test
-  fun `C0b a start that timed out frees the hold - the operator's next hold posts again`() {
+  fun `C0b a start that timed out waits for a beat, then frees the hold 20 s after its ask - the next hold posts again`() {
     val rig = readyRig()
     rig.starts = { id -> HttpAnswers.start(id, HttpOutcome.failed(SocketTimeoutException("timeout"))).answer }
+    val askedAt = rig.mono
     rig.send(Input.Start)
+    // N48 (owner, 2026-11-23, "Pending until beat"): no answer is not a failure, and the hold stays taken.
+    assertEquals(null, assertIs<Phase.Paired>(rig.phase).pairing.refusal)
+    rig.send(Input.Start)
+    assertEquals(1, rig.sent<Command.PostStart>().size)
+    rig.at(askedAt + StartAsks.START_CONFIRM_MS)
+    rig.send(Input.Tick)
     assertEquals(Refusal.START_FAILED, assertIs<Phase.Paired>(rig.phase).pairing.refusal)
     rig.send(Input.Start)
     assertEquals(2, rig.sent<Command.PostStart>().size)

@@ -75,8 +75,12 @@ sealed interface Input {
    * `NET_CAPABILITY_VALIDATED`, pushed on every change, in any phase. The machine keeps the last one
    * between sessions and seeds each session with it at arm (final review I-1). Until the first, it is
    * not validated.
+   *
+   * N49: a validated report names its network, [handle] (`Network.getNetworkHandle()`), and is told again whenever the
+   * validated default becomes another network ([DefaultNetwork]). The machine asks each attempt on the default it holds
+   * and replaces one that is no longer on it ([Transports.network]). Null names none: the default is left as it was.
    */
-  data class Network(val validated: Boolean) : Input
+  data class Network(val validated: Boolean, val handle: Long? = null) : Input
 
   /** Another app opened a camera while ours is held (F-P5-9). */
   data object CameraContended : Input
@@ -94,6 +98,15 @@ sealed interface Input {
   data class PlaylistFetched(val requestId: Int, val result: FetchResult) : Input
 
   data class HeartbeatAnswered(val beatId: Int, val response: HeartbeatResponse) : Input
+
+  /**
+   * Design 2026-11-24 §2.2: the server nudged the pairing's channel, with its `reason` as sent (null for none). The
+   * machine beats at once, at most once per [Nudges.NUDGE_GAP_MS]; the reason is recorded, never acted on.
+   */
+  data class Nudge(val reason: String?) : Input
+
+  /** Design §2.4: what the nudge socket reports of itself, with a close's [status] code, or null. */
+  data class NudgeLink(val state: NudgeState, val status: Int? = null) : Input
 
   /** The answer to [Command.FetchCode] [requestId]. Only the latest ask's answer is acted on. */
   data class CodeAnswered(val requestId: Int, val answer: CodeAnswer) : Input

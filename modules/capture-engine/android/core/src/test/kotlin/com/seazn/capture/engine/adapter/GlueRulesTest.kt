@@ -381,8 +381,12 @@ class GlueRulesTest {
   @Test
   fun `M-8 M-9 the network and pose callbacks and the exit read are guarded`() {
     val network = glue("NetworkWatch.kt")
-    assertTrue(Regex("""override fun onCapabilitiesChanged\(network: Network, caps: NetworkCapabilities\) = guarded \{ changed\(""").containsMatchIn(network), "onCapabilitiesChanged")
-    assertTrue(Regex("""override fun onLost\(network: Network\) = guarded \{ changed\(false\) \}""").containsMatchIn(network), "onLost")
+    // N49: each callback feeds the core's rule (DefaultNetwork), the validated network's handle with it, and keeps none of its own.
+    val capabilities = """override fun onCapabilitiesChanged\(network: Network, caps: NetworkCapabilities\) = guarded \{ changed\(current\.capabilities\(""" +
+      """network\.networkHandle, caps\.hasCapability\(NetworkCapabilities\.NET_CAPABILITY_VALIDATED\)\)\) \}"""
+    assertTrue(Regex(capabilities).containsMatchIn(network), "onCapabilitiesChanged")
+    assertTrue(Regex("""override fun onLost\(network: Network\) = guarded \{ changed\(current\.lost\(\)\) \}""").containsMatchIn(network), "onLost")
+    assertTrue(Regex("""private fun changed\(heard: DefaultNetwork\.Heard\) \{\s+current = heard\.next\s+heard\.inputs\.forEach\(report\)\s+\}""").containsMatchIn(network), "every input heard is reported, in order")
     assertTrue(Regex("""catch \(e: Exception\) \{\s+line\(RecordEntry\("watch-failed", listOf\("action" to "network", "error" to e\.javaClass\.simpleName\)\)\)""").containsMatchIn(body(network, "private fun guarded(")), "network's line")
     // Fix round 2: the network watch starts inside the build, where EngineHost.line drops every line, and its
     // first callback can come before the build returns; its lines go to the running core directly.
@@ -953,6 +957,37 @@ class GlueRulesTest {
       "SeaznSrtSink(Dispatchers.IO.limitedParallelism(2), signals, calls.report, calls.line)" in glue("StreamerAdapter.kt"),
       "the adapter hands the sink the record's line",
     )
+  }
+
+  /**
+   * N49, binding: `SrtBind`'s rule runs in core's tests (`SrtBindTest`); this pins its wiring, the inert seam otherwise.
+   * The adapter hands the sink the network the attempt was asked on, the sink binds after every option and before the
+   * connect, on the address it connects to, through the JNI shim; the shim's C name is the binder's, its library is the
+   * one the binder loads and the module builds, and the fields read by name are kept for an app that minifies.
+   */
+  @Test
+  fun `N49 the SRT sink binds each socket to its attempt's network before the connect, through the JNI shim`() {
+    assertTrue("sink.next(plan, connect.attemptId, connect.network)" in code(glue("StreamerAdapter.kt")), "the adapter passes the attempt's network")
+    val sink = code(glue("SeaznSrtSink.kt"))
+    assertTrue("private val binding = SrtBind(SrtNetworkBinder, line)" in sink, "the sink binds through the shim, into the record")
+    val open = body(sink, "override suspend fun openImpl(")
+    val bind = open.indexOf("val opened = binding.open(id, network, target, { fresh(plan) }, ::socketId) { it.close() }")
+    val connect = open.indexOf("connection.connect(Port(opened), id, target)")
+    assertTrue(bind in 0 until connect, "the bind (a failed acquire's socket closed, a fresh one made), then the connect: $open")
+    assertEquals(1, Regex("""CoroutineSrtSocket\(dispatcher\)""").findAll(sink).count(), "one place makes a socket")
+    assertTrue("for ((option, value) in plan.before)" in body(sink, "private fun fresh(plan: SrtPlan)"), "every socket, the fresh one too, has every option")
+    assertTrue("val (plan, id, network) = pending" in open, "the network is the one set with this attempt's plan")
+    assertTrue(Regex("""getDeclaredField\("socket"\)[\s\S]*getDeclaredField\("srtsocket"\)""").containsMatchIn(sink), "srtdroid 1.10.1's socket id, read by name")
+    val binder = code(glue("SrtNetworkBinder.kt"))
+    assertTrue("System.loadLibrary(\"seazn_srt_bind\")" in binder, "the binder loads the shim")
+    assertTrue("@JvmStatic private external fun nativeBind(srtSocket: Int, network: Long, ipv6: Boolean): Int" in binder)
+    val shim = File(src, "main/cpp/srt_bind.c").readText()
+    assertTrue("Java_com_seazn_capture_engine_srt_SrtNetworkBinder_nativeBind(JNIEnv *env, jclass type, jint srt_socket, jlong network, jboolean ipv6)" in shim, "the C name is the binder's")
+    assertTrue("add_library(seazn_srt_bind SHARED srt_bind.c)" in File(src, "main/cpp/CMakeLists.txt").readText(), "the library the binder loads")
+    assertTrue(Regex("""externalNativeBuild \{\s*cmake \{\s*path "src/main/cpp/CMakeLists.txt"""").containsMatchIn(File(src.parentFile, "build.gradle").readText()), "the module builds it")
+    val rules = File(src.parentFile, "consumer-rules.pro").readText()
+    assertTrue(Regex("""-keepclassmembers class io\.github\.thibaultbee\.srtdroid\.ktx\.CoroutineSrtSocket \{\s*private final io\.github\.thibaultbee\.srtdroid\.core\.models\.SrtSocket socket;\s*\}""").containsMatchIn(rules), "the ktx field kept")
+    assertTrue(Regex("""-keepclasseswithmembernames class com\.seazn\.capture\.engine\.srt\.SrtNetworkBinder \{\s*native <methods>;\s*\}""").containsMatchIn(rules), "the native method kept")
   }
 
   /**

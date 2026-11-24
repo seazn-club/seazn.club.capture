@@ -23,7 +23,7 @@ class StickyFailureTest {
   private val reported = mutableListOf<Input>()
   private var attempt = 1
   private val sticky = StickyFailure({ executed += it }, { attempt }) { reported += it }
-  private val connect = Command.Connect(4, Configs.srt, 1_500_000, null)
+  private val connect = Command.Connect(4, Configs.srt, 1_500_000, null, null)
 
   @Test
   fun `carry 18 after a permanent failure every later connect is answered PlatformFailed for its own attempt`() {

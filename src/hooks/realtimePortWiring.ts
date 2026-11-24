@@ -17,3 +17,18 @@ export function realtimePortFor(deps: { readonly logger: Logger }): RealtimePort
     createClient: (endpoint, options) => new RealtimeClient(endpoint, options),
   });
 }
+
+/** Match Day's nudge (phone design 2026-11-24 §4): the broadcast `nudge` is the ping, and the record says `matchday.realtime`. */
+export const MATCHDAY_REALTIME = { ping: 'nudge', line: 'matchday.realtime' } as const;
+
+/**
+ * Match Day's own Realtime port: a second instance, never Remote Scoring's, so each family has its own socket and its
+ * own `setAuth`, and a Match Day subscription never closes the focused match's (each port holds one subscription).
+ */
+export function matchDayRealtimePortFor(deps: { readonly logger: Logger }): RealtimePort {
+  return createSupabaseRealtimePort({
+    logger: deps.logger,
+    createClient: (endpoint, options) => new RealtimeClient(endpoint, options),
+    family: MATCHDAY_REALTIME,
+  });
+}

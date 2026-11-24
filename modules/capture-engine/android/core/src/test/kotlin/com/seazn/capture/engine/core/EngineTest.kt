@@ -1,5 +1,6 @@
 package com.seazn.capture.engine.core
 
+import org.json.JSONObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -155,6 +156,72 @@ class EngineTest {
     assertEquals(listOf(1_000L), published.map { it.first })
   }
 
+  /**
+   * S12: a snapshot that failed was counted and said nothing, so a projection that threw for an hour left no trace in the
+   * record. The first failure writes `snapshot-failed {error, count}` at once, then at most one line a minute with the
+   * failures since the last; the error is the class name only, never its message (CD30).
+   */
+  @Test
+  fun `S12 a snapshot that fails is a line at once, then at most one a minute with the count, and never its message`() {
+    var failing = true
+    val engine = engine(projection = { phase, now -> if (failing) throw IllegalStateException("secret-ish detail") else Projection.snapshot(phase, now) })
+    engine.start()
+    scheduler.advanceBy(150_000)
+    val said = lines.filter { """"kind":"snapshot-failed"""" in it }.map(::JSONObject)
+    // Ticks at 0.5 s, 1 s, ...: the first at 0.5 s, then at 60.5 s (120 since), then 120.5 s (120 since).
+    assertEquals(listOf(1, 120, 120), said.map { it.getInt("count") }, "$said")
+    assertEquals(setOf("IllegalStateException"), said.map { it.getString("error") }.toSet())
+    assertTrue(lines.none { "secret-ish" in it })
+    assertEquals(300, engine.snapshotFailures)
+    failing = false
+    scheduler.advanceBy(60_000)
+    // Review of batch 2, item 4: the first snapshot that goes up says the failures held back since the last line.
+    val all = lines.filter { """"kind":"snapshot-failed"""" in it }.map { JSONObject(it).getInt("count") }
+    assertEquals(listOf(1, 120, 120, 59), all, "then nothing more")
+    assertEquals(300, all.sum())
+  }
+
+  /** Review of batch 2, item 4: a session that ends while snapshots still fail says the failures held back. */
+  @Test
+  fun `S12 the session's end says the snapshot failures the minute held back`() {
+    val engine = engine(projection = { _, _ -> throw IllegalStateException("x") })
+    engine.start()
+    engine.live()
+    scheduler.advanceBy(10_000)
+    val before = lines.filter { """"kind":"snapshot-failed"""" in it }.map { JSONObject(it).getInt("count") }
+    engine.send(Input.Stop)
+    scheduler.advanceBy(0)
+    val after = lines.filter { """"kind":"snapshot-failed"""" in it }.map { JSONObject(it).getInt("count") }
+    assertEquals(before.size + 1, after.size, "$before then $after")
+    assertEquals(engine.snapshotFailures, after.sum(), "every failure said once")
+  }
+
+  /** Re-review of d006c2dd, item 1: a recovery says the held count only once a minute, so fail/ok never floods. */
+  @Test
+  fun `S12 snapshots that fail and recover by turns write at most three lines in two minutes`() {
+    var tick = 0
+    val engine = engine(projection = { phase, now -> if (++tick % 2 == 0) throw IllegalStateException("x") else Projection.snapshot(phase, now) })
+    engine.start()
+    scheduler.advanceBy(120_000)
+    val said = lines.filter { """"kind":"snapshot-failed"""" in it }.map { JSONObject(it).getInt("count") }
+    assertTrue(engine.snapshotFailures >= 100, "${engine.snapshotFailures} failures")
+    // The first failure at once, then the recovery a minute on; a recovery's line restarts the minute too, so the
+    // failure just after it waits (a third line here would mean it did not).
+    assertTrue(said.size <= 2, "$said")
+  }
+
+  /** A recovery's line restarts the minute, so a failure just after it is held, not said. */
+  @Test
+  fun `S12 a failure just after a recovery's line waits its minute`() {
+    var tick = 0
+    // Ticks 1 and 2 fail (0.5 s said, 1 s held), then good until tick 122 (61 s) fails.
+    val engine = engine(projection = { phase, now -> tick += 1; if (tick <= 2 || tick == 122) throw IllegalStateException("x") else Projection.snapshot(phase, now) })
+    engine.start()
+    scheduler.advanceBy(62_000)
+    val said = lines.filter { """"kind":"snapshot-failed"""" in it }.map { JSONObject(it).getInt("count") }
+    assertEquals(listOf(1, 1), said, "0.5 s, then the recovery at 60.5 s says the held one; 61 s's waits")
+  }
+
   @Test
   fun `a failure inside the machine ends fatal-error instead of escaping`() {
     val engine = engine { _, _, _ -> throw IllegalStateException("bug") }
@@ -239,6 +306,26 @@ class EngineTest {
     assertEquals(listOf("engine-error", "ended", "beats"), lines.map(::kindOf), lines.toString())
     assertEquals("""{"at":"2026-09-21T14:13:20.500Z","kind":"ended","reason":"fatal-error","wasLive":true}""", lines[1])
     assertEquals(listOf<Command>(Command.End(EndReason.FATAL_ERROR)), executed.filterIsInstance<Command.End>())
+  }
+
+  @Test
+  fun `N49 fix 5 a failure inside the machine on air says the session's unsaid floor cuts`() {
+    // Three floor cuts no line has said, under drops; then the machine throws.
+    val atFloor: (Phase, Input, Now) -> Step = { phase, input, now ->
+      if (input is Input.MicSilenced) {
+        val session = phase.session!!
+        Step(phase.withSession(session.copy(regulation = session.regulation.copy(floorCuts = 3, floorReason = BitrateMove.DROPS))))
+      } else failsOnSwitch(phase, input, now)
+    }
+    val engine = engine(reducer = atFloor)
+    engine.live()
+    engine.send(Input.MicSilenced(false))
+    scheduler.advanceBy(0)
+    lines.clear()
+    engine.send(Input.SwitchCamera)
+    scheduler.advanceBy(0)
+    assertEquals(listOf("engine-error", "ended", "bitrate-floor", "beats"), lines.map(::kindOf), lines.toString())
+    assertEquals("""{"at":"2026-09-21T14:13:20.500Z","kind":"bitrate-floor","reason":"drops","count":3}""", lines[2])
   }
 
   /**

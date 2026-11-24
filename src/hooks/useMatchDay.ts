@@ -11,6 +11,7 @@ import {
 import type { MatchDay, MatchDayRefusal } from '@/domain/matchday/matchDay';
 import { dayCodeOf, type SavedDayCode } from '@/domain/mode/dayCode';
 import type { SavedCode } from '@/domain/mode/savedCode';
+import { startMatchDayNudge } from '@/hooks/matchDayNudge';
 import { askDay, forgetWithCopy, keepCopy, type Verdict } from '@/hooks/useMatchDayHome';
 import { usePorts, type Ports } from '@/hooks/usePorts';
 
@@ -79,6 +80,7 @@ export function useMatchDay(): MatchDayList {
   const primed = useLastCopy(held, setShown);
   const { ask, refresh, reading } = useAsk(held, setShown);
   usePoll(primed && held !== null, ask);
+  useNudge(primed ? (held?.code ?? null) : null, refresh);
   return useMemo(() => ({ ...shown, refresh, reading }), [shown, refresh, reading]);
 }
 
@@ -199,6 +201,22 @@ function usePoll(on: boolean, ask: () => void): void {
       offLeave();
     };
   }, [on, ask, foreground]);
+}
+
+/**
+ * The day's nudge channel (phone design 2026-11-24 §4) under the poll's own gate: only while the list is mounted with a
+ * code to read and the app is in the foreground (`startMatchDayNudge` follows the foreground itself). A nudge reads as a
+ * refresh does, so one that lands while a read is out gets a trailing read, never lost. Exit forgets the code, which
+ * closes it, as unmounting does.
+ */
+function useNudge(code: SavedDayCode | null, refresh: () => void): void {
+  const ports = usePorts();
+  const latest = useRef(refresh);
+  latest.current = refresh;
+  useEffect(() => {
+    if (code === null) return;
+    return startMatchDayNudge(ports, code, () => latest.current());
+  }, [code, ports]);
 }
 
 async function readOnce(ports: Ports, code: SavedDayCode): Promise<Read> {

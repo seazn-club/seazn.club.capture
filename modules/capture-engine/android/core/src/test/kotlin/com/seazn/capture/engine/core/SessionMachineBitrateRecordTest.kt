@@ -150,8 +150,91 @@ class SessionMachineBitrateRecordTest {
     assertEquals(2, line.field("count"))
   }
 
+  /** 2 Mbps with 3 new sender drops on every reading, on a 40 ms send buffer. */
+  private fun dropping(): (Long) -> LinkCounters {
+    var bytes = 0L
+    var dropped = 0L
+    return { t ->
+      bytes += 250_000
+      dropped += 3
+      LinkCounters(bytes, t, 0, dropped, 0, 20, 40, null)
+    }
+  }
+
   @Test
-  fun `the bitrate and bitrate-held lines are the allow-list's, each key plain or a scalar`() {
+  fun `R-RTRF cuts at the floor write bitrate-floor once a minute on air, with the reading and the count`() {
+    // Drops on every reading, each cut one latency (2 s) after the last: 1500k → 750k → 500k (375k, held to the floor),
+    // two bitrate lines; then every cut lands on the floor. The first floor cut is said at once, the next a minute
+    // later with the 30 cuts since (one each 2 s), and no bitrate line says any of them.
+    val rig = MachineRig().live()
+    rig.link = dropping()
+    rig.advance(70_000)
+    assertEquals(listOf(750_000, 500_000), rig.records("bitrate").map { it.field("to") })
+    val floor = rig.records("bitrate-floor")
+    val reading = listOf("egressBps" to 2_000_000L, "dropped" to 3L, "lost" to 0L, "sendBufferMs" to 40)
+    assertEquals(
+      listOf(
+        listOf("reason" to BitrateMove.DROPS, "count" to 1) + reading,
+        listOf("reason" to BitrateMove.DROPS, "count" to 30) + reading,
+      ),
+      floor.map { it.fields },
+    )
+    assertEquals("drops", floor.first().word("reason"))
+    assertTrue(rig.sent<Command.SetBitrate>().map { it.bps } == listOf(750_000, 500_000), "the floor is never set again")
+  }
+
+  @Test
+  fun `N49 fix 5 floor cuts no line said yet are said when the session ends, under the last cut's rule`() {
+    // 70 s of drops: the floor lines at the first floor cut and a minute on, then cuts each 2 s that no line has said.
+    val rig = MachineRig().live()
+    rig.link = dropping()
+    rig.advance(70_000)
+    val unsaid = rig.session.regulation.floorCuts
+    assertTrue(unsaid > 0, "cuts after the last line")
+    assertEquals(2, rig.records("bitrate-floor").size)
+    rig.link = null
+    rig.advance(5_000)
+    assertEquals(2, rig.records("bitrate-floor").size, "the cuts stopped, and nothing says them yet")
+    rig.send(Input.Stop)
+    val last = rig.records("bitrate-floor")
+    assertEquals(3, last.size)
+    assertEquals(listOf("reason" to BitrateMove.DROPS, "count" to unsaid), last.last().fields)
+    rig.send(Input.Reset)
+    assertEquals(3, rig.records("bitrate-floor").size, "said once")
+  }
+
+  @Test
+  fun `N49 fix 5 a session that ends with every floor cut said writes no more, nor one never at the floor`() {
+    val never = MachineRig().live()
+    never.link = dropping()
+    never.advance(4_000)
+    assertEquals(0, never.session.regulation.floorCuts, "not at the floor yet")
+    never.send(Input.Stop)
+    assertEquals(emptyList(), never.records("bitrate-floor"))
+    // The first floor cut is said at once: nothing is left to say when the session ends right after it.
+    val said = MachineRig().live()
+    said.link = dropping()
+    while (said.records("bitrate-floor").isEmpty()) said.advance(500)
+    assertEquals(0, said.session.regulation.floorCuts)
+    said.send(Input.Stop)
+    assertEquals(1, said.records("bitrate-floor").size)
+  }
+
+  @Test
+  fun `N49 fix 5 a drop keeps the unsaid floor cuts, and a fatal end says them`() {
+    val rig = MachineRig().live()
+    rig.link = dropping()
+    rig.advance(70_000)
+    val unsaid = rig.session.regulation.floorCuts
+    rig.send(Input.Dropped(rig.attempt!!, DropReason.ENDPOINT_CLOSED, null))
+    assertEquals(unsaid, rig.session.regulation.floorCuts, "a drop keeps them")
+    rig.advance(SessionMachine.RETRY_MS)
+    rig.send(Input.PlatformFailed(rig.attempt!!, "made-up failure"))
+    assertEquals(listOf("reason" to BitrateMove.DROPS, "count" to unsaid), rig.records("bitrate-floor").last().fields)
+  }
+
+  @Test
+  fun `the bitrate, bitrate-held and bitrate-floor lines are the allow-list's, each key plain or a scalar`() {
     val cut = MachineRig().live()
     cut.send(Input.Link(1, LinkCounters(250_000, 400, 0, 3, 0, 20, 40, null)))
     // The raise line is the only bitrate line with `count`.
@@ -159,8 +242,11 @@ class SessionMachineBitrateRecordTest {
     raised.link = quietThenBusy(busyFromMs = 32_000)
     raised.live()
     raised.advance(42_000)
-    val lines = cut.records("bitrate") + raised.records("bitrate") + raised.records("bitrate-held")
-    assertEquals(listOf("bitrate", "bitrate", "bitrate-held"), lines.map { it.kind })
+    val floor = MachineRig().live()
+    floor.link = dropping()
+    floor.advance(10_000)
+    val lines = cut.records("bitrate") + raised.records("bitrate") + raised.records("bitrate-held") + floor.records("bitrate-floor")
+    assertEquals(listOf("bitrate", "bitrate", "bitrate-held", "bitrate-floor"), lines.map { it.kind })
     assertTrue(lines[1].fields.any { it.first == "count" }, "the raise line carries count: ${lines[1]}")
     val kinds = list.getJSONObject("kinds").keySet()
     val plain = list.getJSONArray("plain").let { a -> (0 until a.length()).map { a.getString(it) }.toSet() }

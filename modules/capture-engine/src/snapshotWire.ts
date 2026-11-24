@@ -14,7 +14,15 @@ import type {
   UnpairReason,
 } from '@/domain/session/Pairing';
 import type { EndReason, SessionState } from '@/domain/session/SessionState';
-import type { CameraState, EngineSnapshot, Telemetry } from './CaptureEnginePort';
+import type {
+  CameraState,
+  EngineSnapshot,
+  IngestState,
+  ProgrammePhase,
+  RelayOutput,
+  ServerFacts,
+  Telemetry,
+} from './CaptureEnginePort';
 import { IDLE_TELEMETRY } from './unreported';
 
 /** Every wire word native writes (`wire/snapshot-vectors.json`'s vocabulary), checked against that file. */
@@ -86,6 +94,10 @@ export const WIRE_VOCABULARY = {
     'competition_frozen',
     'match_stopped',
   ]),
+  // T46 (capture-beat.v1 at web edfff98171, PROVISIONAL until vendored).
+  relayOutput: new Set(['connecting', 'connected', 'backoff']),
+  programmePhase: new Set(['waiting', 'live', 'frozen', 'reconnecting', 'final']),
+  ingest: new Set(['connected', 'disconnected', 'errored']),
 } as const;
 
 type Vocabulary = keyof typeof WIRE_VOCABULARY;
@@ -119,8 +131,11 @@ function wordOrNull<T extends string>(key: Vocabulary, value: unknown): T | null
   return value === null ? null : word<T>(key, value);
 }
 
-/** Every key native's telemetry carries: IDLE_TELEMETRY's, which `unreported.test.ts` holds to native's. */
-const TELEMETRY_KEYS = Object.keys(IDLE_TELEMETRY);
+/**
+ * Every key native's telemetry carries: IDLE_TELEMETRY's, which `unreported.test.ts` holds to native's. `server` is read
+ * apart ([toServer]) and may be absent: a native build before T46 sends none, and still reads.
+ */
+const TELEMETRY_KEYS = Object.keys(IDLE_TELEMETRY).filter((key) => key !== 'server');
 
 /**
  * Review C4c M-9: the selectors read telemetry unguarded, so every key is
@@ -165,7 +180,7 @@ export function toEngineSnapshot(
     return null;
   return {
     state,
-    telemetry: wire.telemetry,
+    telemetry: { ...wire.telemetry, server: toServer(wire.telemetry.server) },
     pairing,
     broadcast,
     ready,
@@ -176,6 +191,31 @@ export function toEngineSnapshot(
     camera,
     reportedAtMs: wire.reportedAtMs,
     survivesBackground: wire.survivesBackground === true,
+  };
+}
+
+/** A whole number, 0 or more: what native writes for a count. */
+const isCount = (value: unknown): value is number =>
+  isNumber(value) && Number.isInteger(value) && value >= 0;
+
+/**
+ * T46's facts (design 2026-11-24 §3), member by member: a garbled word or number is not known (null) and the rest read.
+ * Anything but an object with a count for `ageS` is no facts. Never refuses the snapshot: Diagnostics shows them, and
+ * nothing acts on them.
+ */
+function toServer(value: unknown): ServerFacts | null {
+  if (!isObject(value) || !isCount(value.ageS)) return null;
+  const count = (member: unknown) => (isCount(member) ? member : null);
+  const known = <T extends string>(key: Vocabulary, member: unknown) =>
+    word<T>(key, member) ?? null;
+  return {
+    relayOutput: known<RelayOutput>('relayOutput', value.relayOutput),
+    programmePhase: known<ProgrammePhase>('programmePhase', value.programmePhase),
+    fps: count(value.fps),
+    kbps: count(value.kbps),
+    cameraIngest: known<IngestState>('ingest', value.cameraIngest),
+    programmeIngest: known<IngestState>('ingest', value.programmeIngest),
+    ageS: value.ageS,
   };
 }
 

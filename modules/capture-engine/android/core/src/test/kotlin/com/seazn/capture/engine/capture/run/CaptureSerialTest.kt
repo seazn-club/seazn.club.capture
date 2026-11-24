@@ -31,7 +31,7 @@ class CaptureSerialTest {
   private val left = EncoderKeys.surfaceRotation(Side.LEFT)
   private val right = EncoderKeys.surfaceRotation(Side.RIGHT)
 
-  private fun connect(id: Int) = Command.Connect(id, Configs.srt, startBitrateBps = 3_000_000, maxBwBytesPerSecond = 1_000_000)
+  private fun connect(id: Int) = Command.Connect(id, Configs.srt, startBitrateBps = 3_000_000, maxBwBytesPerSecond = 1_000_000, network = null)
 
   private fun TestScope.opened(parts: FakeParts, told: Told = Told()): CaptureRun {
     val run = CaptureRun(parts, AttemptSignals(), CameraAvailability(), told.calls(), { Side.LEFT }, queueScope())

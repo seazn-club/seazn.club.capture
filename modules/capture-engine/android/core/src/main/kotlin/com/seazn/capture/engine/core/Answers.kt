@@ -16,6 +16,13 @@ data class BeatReply(
   val endReason: String?,
   val waiting: WaitingFields?,
   val waitingUnreadable: String? = null,
+  /**
+   * Design 2026-11-24 §2.1: the nudge channel's grant, read only from a 2xx that is not `replaced` or `taken`; null when
+   * absent or unreadable, which never refuses the answer. A credential: [RealtimeGrant] prints no token.
+   */
+  val realtime: RealtimeGrant? = null,
+  /** T46 (design §3): what the relay and Cloudflare last said, from a 2xx `go-live` or `live` only; null when none is known. */
+  val delivery: ServerDelivery? = null,
 )
 
 /**
@@ -31,7 +38,6 @@ class BroadcastDescriptor(
   val label: String,
   val maxDurationMinutes: Int,
   val scoreUpdates: String,
-  val warmingDeadlineEpochS: Long,
 ) {
   /** A18: false when the server sent no SRT, so the engine publishes RTMPS with no fallback. */
   val srtOffered: Boolean
@@ -114,6 +120,17 @@ sealed interface StartAnswer {
    */
   data class Refused(val refusal: Refusal, val message: String? = null) : StartAnswer
 
-  /** No answer, 404, 422, 429, 5xx, or a body no rule can read. [detail] is a status or a reason, never a value. */
-  data class Failed(val detail: String) : StartAnswer
+  /**
+   * No answer, 404, 422, 429, 5xx, or a body no rule can read. [detail] is a status or a reason, never a value; no
+   * answer at all is [NO_ANSWER] and the client's word, which [noAnswer] reads (N48: pending, not failed).
+   */
+  data class Failed(val detail: String) : StartAnswer {
+    val noAnswer: Boolean
+      get() = detail.startsWith(NO_ANSWER)
+
+    companion object {
+      /** The detail's prefix when the request got no answer: a timeout, a reset, a host not resolved. */
+      const val NO_ANSWER = "no-answer:"
+    }
+  }
 }

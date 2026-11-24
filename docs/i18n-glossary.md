@@ -986,6 +986,16 @@ already called onto that court and not started, the same word as the court's own
 {court}_ (es _En cola en_, fr _En attente sur_, nl _In de wachtrij op_; the web desk's `matchDay.candidate.where.queuedOn`, verbatim) when it is a
 later match of another court's queue (F-T8-16). Called beats queued.
 
+## Diagnostics: the server's rows (T46)
+
+Added with the realtime nudge and delivery facts (design 2026-11-24 §3), four rows on air under `diag.section.server` _Server_ (es
+_Servidor_, fr _Serveur_, nl _Server_): `diag.relay` _Relay_ (es _Relé_, fr _Relais_, nl _Relay_), `diag.programme` _Programme_ (es
+_Programa_, fr _Programme_, nl _Programma_), and the two inputs Cloudflare receives, `diag.cameraIngest` _Camera feed_ and
+`diag.programmeIngest` _Programme feed_ (es _Señal cámara_, _Señal programa_, using _señal_ as the network row does; fr _Flux caméra_,
+_Flux programme_; nl _Camerafeed_, _Programmafeed_). An input that is not receiving is _No signal_ (es _Sin señal_, fr _Coupé_, nl
+_Verbroken_): fr _Sans signal_ and nl _Geen signaal_ left _Flux programme_ and _Programmafeed_ over the 188 dp line at 640
+(`settingsFit.test.ts`). A live programme reads as its rate, `diag.programme.rate` _{fps} fps {kbps}k_ (fr _i/s_, as `diag.unit.fps`).
+
 ## Translation review
 
 - **New or changed English copy.** Add the key to es, fr and nl in the same

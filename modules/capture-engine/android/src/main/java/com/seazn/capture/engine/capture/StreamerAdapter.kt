@@ -299,7 +299,7 @@ class StreamerAdapter(
         is SrtTarget -> {
           rtmps.end()
           val plan = SrtOptions.plan(target, connect.maxBwBytesPerSecond) ?: return false
-          sink.next(plan, connect.attemptId)
+          sink.next(plan, connect.attemptId, connect.network) // N49: bound to the network the attempt was asked on
           held.startStream(SrtMediaDescriptor(plan.host, plan.port, serviceInfo = SERVICE))
         }
         is RtmpsTarget -> {
@@ -430,7 +430,9 @@ class StreamerAdapter(
       startBitrate = Encode.START_BPS,
       resolution = Size(Encode.WIDTH, Encode.HEIGHT),
       fps = 30,
-      gopDurationInS = 2f,
+      // N47: 3 s, not 2 s. Cloudflare requires 2–10 s and a 60-frame GOP's timing jitter (1986–2012 ms) crossed the floor.
+      // S5: one constant, which the delivery watch's segment is too.
+      gopDurationInS = Encode.GOP_MS / 1_000f,
       customize = { _ -> EncoderKeys.VIDEO.forEach { (key, value) -> setInteger(key, value) } },
     )
 

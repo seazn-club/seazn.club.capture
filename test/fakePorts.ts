@@ -120,6 +120,8 @@ export type FakePorts = {
    * real one (`ports.matchDayStore`): the day's copy in `dayFiles`, the opened matches in `kv`.
    */
   readonly matchDay: FakeMatchDayPort;
+  /** Match Day's nudge channel on a laptop: the same fake as `realtime`, a separate instance (`ping()` is a nudge). */
+  readonly matchDayRealtime: FakeRealtimePort;
   /** S4: Match Day's own folder, in memory (`documentDirectory/matchday` on a phone): `failNext`, `ops`, `files`. */
   readonly dayFiles: MemoryQueueFiles;
   /** The battery mode (R5): Unrestricted until `set`; `opened` counts App info's opens. */
@@ -188,6 +190,7 @@ export function createFakePorts(overrides: FakePortsOverrides = {}): FakePorts {
     queueFiles,
     realtime: createFakeRealtimePort(),
     matchDay: createFakeMatchDayPort(),
+    matchDayRealtime: createFakeRealtimePort(),
     dayFiles,
     power: createFakePower(),
     uploadCredential: createFakeUploadCredential(),

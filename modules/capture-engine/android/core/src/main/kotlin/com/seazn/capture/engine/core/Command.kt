@@ -5,12 +5,17 @@ package com.seazn.capture.engine.core
  * [Input]; none of them decides anything.
  */
 sealed interface Command {
-  /** Open an ingest session. [maxBwBytesPerSecond] is `SRTO_MAXBW` for SRT, null for RTMPS (F-P5-11). */
+  /**
+   * Open an ingest session. [maxBwBytesPerSecond] is `SRTO_MAXBW` for SRT, null for RTMPS (F-P5-11). [network] is the
+   * handle of the default network the attempt was asked on ([Session.attemptNetwork], N49), which the glue binds an SRT
+   * socket to; null when none was known, and the socket connects unbound. No default: every Connect states its network.
+   */
   data class Connect(
     val attemptId: Int,
     val target: IngestTarget,
     val startBitrateBps: Int,
     val maxBwBytesPerSecond: Long?,
+    val network: Long?,
   ) : Command
 
   data class Disconnect(val attemptId: Int) : Command
@@ -96,6 +101,15 @@ sealed interface Command {
 
   /** The pairing is over: stop publishing and capture. The service goes with [Release]. */
   data class End(val reason: EndReason) : Command
+
+  /**
+   * Design 2026-11-24 §2.3: hold the pairing's nudge socket on [grant]'s channel: join it, or on a joined channel send
+   * the new token. Sent when the grant to hold changes ([Nudges.closed]); `toString` prints no token.
+   */
+  data class Nudges(val grant: RealtimeGrant) : Command
+
+  /** No grant to hold: close the nudge socket and do not reconnect. */
+  data object NudgesOff : Command
 
   /** A line for the session record. The engine routes it to [SessionRecord]; the platform never sees it. */
   data class Record(val entry: RecordEntry) : Command

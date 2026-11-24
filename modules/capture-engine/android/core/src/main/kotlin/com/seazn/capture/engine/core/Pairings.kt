@@ -48,16 +48,16 @@ internal object Pairings {
         starts = StartAsks(nextId = ids.start),
       )
     val asked = line("pair", "claim" to input.request.claim, "slot" to name.slot, "tokenTag" to name.tokenTag, "stopped" to (stopped != null))
-    return Step(Phase.Pairing(pairing, ids, phase.networkValidated, phase.micSilenced), left + asked + Command.AskPermissions)
+    return Step(Phase.Pairing(pairing, ids, phase.networkValidated, phase.micSilenced, phase.defaultNetwork), left + asked + Command.AskPermissions)
   }
 
   fun permissions(phase: Phase, granted: Boolean, now: Now): Step {
     if (phase !is Phase.Pairing) return Step(phase, listOf(line("permissions-late", "granted" to granted)))
     if (!granted) {
-      val idle = Phase.Idle(phase.ids, phase.networkValidated, phase.micSilenced, Unpaired(UnpairReason.PERMISSIONS, phase.pairing.name))
+      val idle = Phase.Idle(phase.ids, phase.networkValidated, phase.micSilenced, Unpaired(UnpairReason.PERMISSIONS, phase.pairing.name), phase.defaultNetwork)
       return Step(idle, listOf(line("unpaired", "reason" to UnpairReason.PERMISSIONS)))
     }
-    val paired = Phase.Paired(phase.pairing.copy(heartbeat = phase.pairing.heartbeat.soon(now.monoMs)), phase.ids, phase.networkValidated, phase.micSilenced)
+    val paired = Phase.Paired(phase.pairing.copy(heartbeat = phase.pairing.heartbeat.soon(now.monoMs)), phase.ids, phase.networkValidated, phase.micSilenced, phase.defaultNetwork)
     // The claim goes at once (A9): the first beat is due now.
     return Heartbeats.tick(Step(paired, listOf(Command.Hold, line("paired"))), now)
   }
@@ -65,13 +65,14 @@ internal object Pairings {
   /**
    * Home's Forget and the court's Leave (⋯). P3 review m4: the operator's own start in flight is guarded as Forget's
    * is (Batch 4 review M1): a start the server accepts after an unpair is a broadcast with no phone, so the unpair is
-   * ignored and recorded, and JS reads `held` once the start arms, or gives up and keeps the code.
+   * ignored and recorded, and JS reads `held` once the start arms, or gives up and keeps the code. A start pending a
+   * beat (N48) is guarded the same way: with no answer, the server may already have started it.
    */
   fun unpair(phase: Phase): Step =
     when {
-      phase is Phase.Paired && phase.pairing.starts.inFlightId != null -> SessionMachine.ignored(phase, "unpair")
-      phase is Phase.Paired -> Step(Phase.Idle(phase.ids, phase.networkValidated, phase.micSilenced), listOf(Command.Release, line("unpaired", "reason" to "operator")))
-      phase is Phase.Pairing -> Step(Phase.Idle(phase.ids, phase.networkValidated, phase.micSilenced), listOf(line("unpaired", "reason" to "operator")))
+      phase is Phase.Paired && phase.pairing.starts.awaited -> SessionMachine.ignored(phase, "unpair")
+      phase is Phase.Paired -> Step(Phase.Idle(phase.ids, phase.networkValidated, phase.micSilenced, defaultNetwork = phase.defaultNetwork), listOf(Command.Release, line("unpaired", "reason" to "operator")))
+      phase is Phase.Pairing -> Step(Phase.Idle(phase.ids, phase.networkValidated, phase.micSilenced, defaultNetwork = phase.defaultNetwork), listOf(line("unpaired", "reason" to "operator")))
       else -> SessionMachine.ignored(phase, "unpair")
     }
 
@@ -83,7 +84,8 @@ internal object Pairings {
    *
    * Batch 4 review M1, the controller's ruling (2026-10-12): the operator's own start in flight is not waiting either.
    * The shade and the screen can be touched at once, and a start the server accepts after an unpair is a broadcast
-   * with no phone, so that tap is ignored too. `unpair` has the same guard (P3 review m4).
+   * with no phone, so that tap is ignored too. `unpair` has the same guard (P3 review m4), and both hold while a start
+   * with no answer is pending a beat (N48): the server may already have started it.
    *
    * O12 (owner, 2026-11-15): a court's notification carries no Forget, so a tap that lands on a court pairing anyway
    * (posted before the court was known, or late) is ignored and recorded, naming the court: Exit, which asks first, is
@@ -92,9 +94,9 @@ internal object Pairings {
   fun forget(phase: Phase): Step {
     // The court is named first (P2 review m1): a court tap while a start is in flight is still a court tap.
     if (phase is Phase.Paired && phase.pairing.isCourt) return Step(phase, listOf(line("intent-ignored", "intent" to "forget", "phase" to phase.name, "court" to true)))
-    if (phase !is Phase.Paired || phase.pairing.starts.inFlightId != null) return SessionMachine.ignored(phase, "forget")
+    if (phase !is Phase.Paired || phase.pairing.starts.awaited) return SessionMachine.ignored(phase, "forget")
     val pairing = phase.pairing
-    val idle = Phase.Idle(phase.ids, phase.networkValidated, phase.micSilenced, Unpaired(UnpairReason.FORGOTTEN, pairing.name))
+    val idle = Phase.Idle(phase.ids, phase.networkValidated, phase.micSilenced, Unpaired(UnpairReason.FORGOTTEN, pairing.name), phase.defaultNetwork)
     // The one definition, as every unpair line reads it; never true here, as Paired holds no broadcast.
     val wasLive = "wasLive" to (phase.firstLiveEpochMs != null)
     val commands = listOf(Command.Release, Command.WriteForgotten(pairing.name), line("unpaired", "reason" to UnpairReason.FORGOTTEN, wasLive))
@@ -110,7 +112,7 @@ internal object Pairings {
     if (reason == UnpairReason.CODE_ENDED && pairing.stopped != null) commands += Command.DeleteStopped(pairing.name.code, pairing.name.slot)
     commands += line("unpaired", "reason" to reason, "wasLive" to (phase.firstLiveEpochMs != null))
     // Plan D §3.4: Idle holds no pairing, so the log goes out with the step, the answer that unpaired the phone in it.
-    return Step(Phase.Idle(phase.ids, phase.networkValidated, phase.micSilenced, Unpaired(reason, pairing.name)), commands, leftLog = pairing.beatLog)
+    return Step(Phase.Idle(phase.ids, phase.networkValidated, phase.micSilenced, Unpaired(reason, pairing.name), phase.defaultNetwork), commands, leftLog = pairing.beatLog)
   }
 
   fun automatic(phase: Phase, on: Boolean): Step {
@@ -153,10 +155,11 @@ internal object Starts {
   fun arm(phase: Phase, pairing: PairingState, sid: String, cause: Cause, now: Now): Step {
     val ids = phase.ids
     val waiting = if (pairing.isCourt) pairing.waiting.copy(stageLabel = null, stageFor = null) else pairing.waiting
-    // I1: whatever arms the broadcast retires the hold's POST start, so its answer, arriving after, is late.
-    val cleared = pairing.copy(waiting = waiting, refusal = null, startFailed = null, lastEnd = null, starts = pairing.starts.copy(inFlightId = null))
+    // I1: whatever arms the broadcast retires the hold's POST start, so its answer, arriving after, is late. A start
+    // pending a beat (N48) is confirmed here: whatever arms the broadcast ends it.
+    val cleared = pairing.copy(waiting = waiting, refusal = null, startFailed = null, lastEnd = null, starts = pairing.starts.copy(inFlightId = null, pending = false))
     val (asks, id) = DescriptorAsks(nextId = ids.descriptor).asked(now.monoMs)
-    val arming = Phase.Arming(cleared, sid, cause, ids, phase.networkValidated, phase.micSilenced, asks)
+    val arming = Phase.Arming(cleared, sid, cause, ids, phase.networkValidated, phase.micSilenced, asks, defaultNetwork = phase.defaultNetwork)
     return Step(arming, listOf(line("broadcast-start", "sid" to sid, "cause" to cause), fetchCode(pairing, id)))
   }
 
@@ -183,6 +186,7 @@ internal object Starts {
         nextAttemptId = ids.attempt,
         descriptor = arming.asks,
         networkValidated = arming.networkValidated,
+        defaultNetwork = arming.defaultNetwork,
         micSilenced = arming.micSilenced,
       )
     val armed = line("armed", "sid" to arming.sid, "transport" to config.primary.transport, "srtOffered" to descriptor.srtOffered, "playbackUrl" to config.playbackUrl)
@@ -245,7 +249,7 @@ internal object Starts {
         heartbeat = arming.pairing.heartbeat.copy(lastSentAtMonoMs = null),
       )
     val noted = line("start-failed", "sid" to arming.sid, "failure" to failure)
-    val step = Step(Phase.Paired(pairing, arming.ids, arming.networkValidated, arming.micSilenced), extra.toList() + noted + Command.WriteStopped(stopped))
+    val step = Step(Phase.Paired(pairing, arming.ids, arming.networkValidated, arming.micSilenced, arming.defaultNetwork), extra.toList() + noted + Command.WriteStopped(stopped))
     return Heartbeats.tick(step, now)
   }
 
@@ -328,7 +332,7 @@ internal object Verdicts {
     val publishing = phase is Phase.Connecting || phase is Phase.OnAir
     val ended = line("broadcast-ended", "sid" to phase.heldSid, "lastEnd" to lastEnd, "wasLive" to (phase.firstLiveEpochMs != null))
     val camera = phase.camera?.afterSession ?: CameraState.OWN
-    val paired = Phase.Paired(pairing.copy(lastEnd = lastEnd, camera = camera), phase.ids, phase.networkValidated, phase.micSilenced)
+    val paired = Phase.Paired(pairing.copy(lastEnd = lastEnd, camera = camera), phase.ids, phase.networkValidated, phase.micSilenced, phase.defaultNetwork)
     return Step(paired, listOfNotNull(if (publishing) Command.StopBroadcast else null, ended))
   }
 
@@ -355,14 +359,14 @@ internal object Verdicts {
     return Step(answered, listOf(line("code", "answer" to input.answer::class.simpleName, "message" to message)))
   }
 
-  /** The operator's hold: `POST start` from Paired when ready (A11); one in flight at a time. */
+  /** The operator's hold: `POST start` from Paired when ready (A11); one in flight, or pending a beat (N48), at a time. */
   fun postStart(phase: Phase, now: Now): Step {
     if (phase !is Phase.Paired) return SessionMachine.ignored(phase, "start")
     val pairing = phase.pairing
     val notReady = pairing.readiness.notReady(pairing.camera, phase.networkValidated)
-    if (notReady != null || pairing.starts.inFlightId != null) return SessionMachine.ignored(phase, "start")
+    if (notReady != null || pairing.starts.awaited) return SessionMachine.ignored(phase, "start")
     val id = pairing.starts.nextId
-    val asked = pairing.copy(starts = StartAsks(id + 1, id), refusal = null, startFailed = null, lastEnd = null)
+    val asked = pairing.copy(starts = StartAsks(id + 1, id, askedAtMs = now.monoMs), refusal = null, startFailed = null, lastEnd = null)
     val post = Command.PostStart(id, pairing.request.startUrl, pairing.token, Beats.startBody(pairing.phone.phoneId))
     return Step(phase.withPairing(asked), listOf(post, line("start-asked")))
   }
@@ -376,11 +380,15 @@ internal object Verdicts {
   fun started(phase: Phase, input: Input.StartAnswered, now: Now): Step {
     val pairing = phase.pairing ?: return Step(phase, listOf(line("start-answered", "answer" to input.answer::class.simpleName, "late" to true)))
     if (input.answer == StartAnswer.CodeEnded) return codeEnded(phase, input.requestId, now)
+    // N48: a real answer after the bridge's backstop answered no-answer is late too, even one naming a sid while the
+    // start is pending: the beats confirm a pending start (the owner's ruling), never a second answer to one request.
     if (pairing.starts.inFlightId != input.requestId) {
       return Step(phase, listOf(line("start-answered", "answer" to input.answer::class.simpleName, "late" to true)))
     }
     val answered = phase.withPairing(pairing.copy(starts = pairing.starts.copy(inFlightId = null)))
-    val noted = line("start-answered", "answer" to input.answer::class.simpleName)
+    // N47: a failure's detail is a plain word, a status or no-answer: and a class name, never a value (StartAnswer.Failed).
+    val failure = (input.answer as? StartAnswer.Failed)?.let { listOf("error" to it.detail) }.orEmpty()
+    val noted = line("start-answered", "answer" to input.answer::class.simpleName, *failure.toTypedArray())
     if (answered !is Phase.Paired) return Step(answered, listOf(noted))
     val p = answered.pairing
     val named = (input.answer as? StartAnswer.Started)?.sid ?: (input.answer as? StartAnswer.AlreadyLive)?.sid
@@ -391,11 +399,29 @@ internal object Verdicts {
         is StartAnswer.AlreadyLive -> Starts.arm(answered, p, answer.sid, Cause.startedBy(answer.startedBy), now)
         StartAnswer.Replaced -> Pairings.unpaired(answered, UnpairReason.REPLACED, now)
         is StartAnswer.Refused -> Step(answered.withPairing(p.copy(refusal = answer.refusal)), listOf(line("start-refused", "refusal" to answer.refusal, "message" to answer.message)))
-        is StartAnswer.Failed -> Step(answered.withPairing(p.copy(refusal = Refusal.START_FAILED, startFailed = StartFailure.START_ERROR)))
+        // N48: no answer is not a failure but pending, and the beats confirm it (unconfirmed): one at once, then at the
+        // poll floor until it clears (BeatCadence.intervalMs). An answer that fails is one at once.
+        is StartAnswer.Failed ->
+          if (answer.noAnswer) {
+            val pending = answered.withPairing(p.copy(starts = p.starts.copy(pending = true)))
+            Heartbeats.atOnce(Step(pending, listOf(line("start-pending"))), now)
+          } else Step(answered.withPairing(p.copy(refusal = Refusal.START_FAILED, startFailed = StartFailure.START_ERROR)))
         // Read before this `when`, whenever it lands (codeEnded).
         StartAnswer.CodeEnded -> Step(answered)
       }
     return step.copy(commands = listOf(noted) + step.commands)
+  }
+
+  /**
+   * The tick in Paired (N48; owner, 2026-11-23, "Pending until beat"): a start with no answer that no beat has armed
+   * within [StartAsks.START_CONFIRM_MS] of `start-asked` is the start failure a failed answer is, said once. A beat that
+   * arms ends the pending first ([Starts.arm]), and leaving the pairing drops it with the pairing.
+   */
+  fun unconfirmed(phase: Phase.Paired, now: Now): Step {
+    val pairing = phase.pairing
+    if (!pairing.starts.unconfirmed(now.monoMs)) return Step(phase)
+    val failed = pairing.copy(starts = pairing.starts.copy(pending = false), refusal = Refusal.START_FAILED, startFailed = StartFailure.START_ERROR)
+    return Step(phase.withPairing(failed), listOf(line("start-unconfirmed")))
   }
 
   /**

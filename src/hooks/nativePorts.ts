@@ -4,7 +4,7 @@ import { router } from 'expo-router';
 import { Linking, Platform } from 'react-native';
 import { loadCaptureEngineNative } from '@/engine/nativeModule';
 import { appVersionOf } from '@/hooks/appVersion';
-import { realtimePortFor } from '@/hooks/realtimePortWiring';
+import { matchDayRealtimePortFor, realtimePortFor } from '@/hooks/realtimePortWiring';
 import { chooseCodePort } from '@/hooks/codePortWiring';
 import { chooseEngine, routedRecordFor } from '@/hooks/engineWiring';
 import { matchDayPortFor } from '@/hooks/matchDayPortWiring';
@@ -161,6 +161,9 @@ export function createNativePorts(
     realtime: realtimePortFor({ logger }),
     // S4: plain fetch (AGENTS §8), the code's token to the build's host only. Home's tile and Match Day's list call it.
     matchDay: matchDayPortFor({ fetch: (url, init) => fetch(url, init), logger, hosts }),
+    // Match Day's nudge: a second Realtime port, its own socket and token, never Remote Scoring's (`setAuth` is
+    // socket-wide). The day list's nudge owner (`matchDayNudge.ts`) subscribes.
+    matchDayRealtime: matchDayRealtimePortFor({ logger }),
     // S4: the day's last good copy is a file in documentDirectory/matchday, never the tap queue's scoring/; the opened
     // list is in the secure store, beside the mode store's `code.matchday`.
     matchDayStore: matchDayStoreFor({ kv, logger }),

@@ -92,7 +92,8 @@ export type PermissionAnswer = 'grant' | 'hold' | 'refuse';
 
 /**
  * How native's `POST start` answers the operator's hold (court stream Task 13, P2): at once and started (the default),
- * held in flight (Paired with `pairing.starting`, as native waits up to 8 s), or failed (Paired with `start-failed`).
+ * held in flight (Paired with `pairing.starting`, as native waits up to 8 s for an answer, and up to
+ * 20 s from the ask for a beat to confirm a start that got none, N48), or failed (Paired with `start-failed`).
  */
 export type StartAnswer = 'started' | 'hold' | 'failed';
 

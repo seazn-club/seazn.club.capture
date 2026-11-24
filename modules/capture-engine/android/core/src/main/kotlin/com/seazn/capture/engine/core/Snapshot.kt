@@ -116,6 +116,11 @@ data class Snapshot(
   val codeEndedPending: Boolean = false,
   /** The pairing's language, for the notification. */
   val language: String? = null,
+  /**
+   * T46 (design 2026-11-24 §3): what the relay and Cloudflare last said about the held broadcast, and when; null with
+   * no broadcast held or nothing known. Crosses under `telemetry`, with its age at the snapshot's own clock.
+   */
+  val server: ServerFacts? = null,
 )
 
 /**
@@ -139,6 +144,7 @@ fun Snapshot.shown(): Snapshot =
     heartbeat = NO_BEAT,
     shed = null,
     device = null,
+    server = null,
   )
 
 private val NO_BEAT = HeartbeatStatus(lastSentAtEpochMs = null, lastResult = null, consecutiveFailures = 0, failures = 0)

@@ -27,9 +27,16 @@ data class FallbackPolicy(
    * count, even on a network that is not validated now, and whatever the reason.
    */
   fun dropped(reason: DropReason, networkValidated: Boolean, publishedMs: Long): FallbackDecision {
-    if (publishedMs >= SHORT_ATTEMPT_MS) return FallbackDecision(copy(count = 0), counted = false, fellBack = false)
+    if (publishedMs >= SHORT_ATTEMPT_MS) return FallbackDecision(proved(publishedMs), counted = false, fellBack = false)
     return counted(countable && networkValidated && reason == DropReason.ENDPOINT_CLOSED)
   }
+
+  /**
+   * S4: an attempt that published [publishedMs] proves the path once that is [SHORT_ATTEMPT_MS] or more, however it
+   * ended: a drop, or a rebuild, a new ingest session or a switch, none of which is a [dropped]. The count is cleared,
+   * so failures hours apart never add up to a fallback. A shorter one leaves it as it was.
+   */
+  fun proved(publishedMs: Long): FallbackPolicy = if (publishedMs >= SHORT_ATTEMPT_MS) copy(count = 0) else this
 
   private val countable: Boolean
     get() = fallback != null && current == primary

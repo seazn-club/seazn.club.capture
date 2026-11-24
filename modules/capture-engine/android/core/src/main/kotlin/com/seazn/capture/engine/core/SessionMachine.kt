@@ -39,8 +39,10 @@ object SessionMachine {
    * would end it the same way. A stop in that gap reads operator-stopped.
    *
    * Plan D §3.4: whatever the input, a pairing that stops beating writes its open minute of beats ([BeatLogs.closed]).
+   * N49 fix round 1: a session that ends writes its floor cuts no line has said yet ([FloorCuts.closed]).
    */
-  fun reduce(phase: Phase, input: Input, now: Now): Step = BeatLogs.closed(phase, reduced(phase, input, now))
+  fun reduce(phase: Phase, input: Input, now: Now): Step =
+    Nudges.closed(phase, BeatLogs.closed(phase, NeverLiveRetries.closed(phase, FloorCuts.closed(phase, reduced(phase, input, now)))), now)
 
   private fun reduced(phase: Phase, input: Input, now: Now): Step {
     if (input == Input.Tick || input == Input.Stop) return apply(phase, input, now)
@@ -71,7 +73,7 @@ object SessionMachine {
       is Input.Dropped -> Transports.dropped(phase, input, now)
       is Input.Frames -> Transports.frames(phase, input, now)
       is Input.Link -> Transports.link(phase, input, now)
-      is Input.Network -> network(phase, input.validated, now)
+      is Input.Network -> network(phase, input, now)
       Input.CameraContended -> Devices.contended(phase)
       Input.CameraReleased -> Devices.released(phase)
       is Input.CameraReopened -> Devices.reopened(phase, input.ok, now)
@@ -79,6 +81,8 @@ object SessionMachine {
       is Input.Device -> Devices.sampled(phase, input.sample)
       is Input.PlaylistFetched -> Deliveries.fetched(phase, input, now)
       is Input.HeartbeatAnswered -> Heartbeats.answered(phase, input, now)
+      is Input.Nudge -> Nudges.heard(phase, input, now)
+      is Input.NudgeLink -> Nudges.reported(phase, input, now)
       is Input.CodeAnswered -> Verdicts.code(phase, input, now)
       is Input.StartAnswered -> Verdicts.started(phase, input, now)
       is Input.PlatformFailed -> platformFailed(phase, input, now)
@@ -100,7 +104,7 @@ object SessionMachine {
   /** Back to Idle; a final beat still pending is let go, and the service with it. */
   private fun reset(ended: Phase.Ended): Step {
     val release = if (ended.finalBeatId != null) listOf(Command.Release) else emptyList()
-    return Step(Phase.Idle(ended.ids, ended.networkValidated, ended.micSilenced), release + record("reset"))
+    return Step(Phase.Idle(ended.ids, ended.networkValidated, ended.micSilenced, defaultNetwork = ended.defaultNetwork), release + record("reset"))
   }
 
   internal fun ignored(phase: Phase, intent: String): Step =
@@ -198,8 +202,22 @@ object SessionMachine {
    * Paired with A17's record undelivered sends the stopped sid at once (N37, fix round 1): the server holds that session
    * open until it hears it, and Go live is offered from this step, so a beat at the cadence would lose the race to the
    * operator's hold. A held beat never carries it (RR3), so a return while held keeps the cadence.
+   *
+   * N49: then the default network it names is held, and a validated one is judged against the attempt in hand
+   * ([Transports.network]), against the default before it only while that one was validated. A validated report that
+   * names none leaves it as it was. Review of 98c12ffa (c): a not-validated report's network is held too, unjudged, so an
+   * attempt asked on it keeps its true network ([Session.attemptNetwork]); a loss names none and forgets it.
    */
-  private fun network(phase: Phase, validated: Boolean, now: Now): Step {
+  private fun network(phase: Phase, input: Input.Network, now: Now): Step {
+    val handle = input.handle ?: if (input.validated) phase.defaultNetwork else null
+    val told = validatedFact(phase, input.validated, now)
+    if (!input.validated) return told.copy(phase = told.phase.withDefaultNetwork(handle))
+    val previous = if (phase.networkValidated) phase.defaultNetwork else null
+    val judged = Transports.network(told.phase, previous, handle, now)
+    return judged.copy(commands = told.commands + judged.commands)
+  }
+
+  private fun validatedFact(phase: Phase, validated: Boolean, now: Now): Step {
     if (phase.networkValidated == validated) return Step(phase)
     val step = Step(phase.withNetwork(validated), listOf(record("network", "validated" to validated)))
     val pending = validated && phase is Phase.Paired && phase.pairing.stopped != null
@@ -226,30 +244,49 @@ internal object Transports {
   private val CONNECT_COUNTERS = LinkCounters(0, 0, 0, 0, 0, null, null, null)
 
   fun connect(session: Session, transport: Transport, outage: Outage?, now: Now): Step {
-    val (next, connect) = connectCommand(session, transport) ?: return missingTarget(session, transport, now)
+    val (asked, connect) = connectCommand(session, transport, now) ?: return missingTarget(session, transport, now)
+    // S6: a retry whose failure line was held back is asked with no line of its own either.
+    val quiet = asked.retries.quiet
+    val next = if (quiet) asked.copy(retries = asked.retries.copy(quiet = false)) else asked
     val phase = Phase.Connecting(next, transport, ConnectStep.Requested(connect.attemptId, now.monoMs), outage)
-    return Step(phase, listOf(connect, record("connecting", "transport" to transport, "attempt" to connect.attemptId)))
+    return Step(phase, listOfNotNull(connect, record("connecting", "transport" to transport, "attempt" to connect.attemptId).takeIf { !quiet }))
   }
 
   /**
    * A new attempt that replaces a live one: a [Command.Rebuild] or a [Command.StartNewSession]. Both
    * reconnect the link, so both ask the descriptor again (spec §1: on every reconnect), spaced as a
-   * refusal's asks are (B6 ruling C1, B7).
+   * refusal's asks are (B6 ruling C1, B7). S4: the attempt replaced proved the path if it published
+   * [FallbackPolicy.SHORT_ATTEMPT_MS], as a drop after that long does ([FallbackPolicy.proved]).
    */
   fun replace(onAir: Phase.OnAir, session: Session, outage: Outage?, now: Now, wrap: (Command.Connect) -> Command): Step {
-    val (connected, connect) = connectCommand(session, onAir.transport) ?: return missingTarget(session, onAir.transport, now)
+    val proved = session.copy(fallback = session.fallback.proved(onAir.framesAtMs?.let { now.monoMs - it } ?: 0))
+    val (connected, connect) = connectCommand(proved, onAir.transport, now) ?: return missingTarget(proved, onAir.transport, now)
     val (next, fetch) = if (connected.descriptor.mayAsk(now.monoMs)) askDescriptor(connected, now) else connected to null
     val phase = Phase.Connecting(next, onAir.transport, ConnectStep.Requested(connect.attemptId, now.monoMs), outage)
     val connecting = record("connecting", "transport" to onAir.transport, "attempt" to connect.attemptId)
     return Step(phase, listOfNotNull(wrap(connect), connecting, fetch))
   }
 
-  private fun connectCommand(session: Session, transport: Transport): Pair<Session, Command.Connect>? {
+  private fun connectCommand(session: Session, transport: Transport, now: Now): Pair<Session, Command.Connect>? {
     val target = session.config.target(transport) ?: return null
     val bps = session.regulation.targetBps
     val maxBw = if (transport == Transport.SRT) SrtBandwidth.maxBwBytesPerSecond(bps) else null
     val id = session.nextAttemptId
-    return session.copy(nextAttemptId = id + 1) to Command.Connect(id, target, bps, maxBw)
+    // N49: the attempt is asked on the default network the machine holds, and keeps it until the next is asked.
+    val asked = session.copy(nextAttemptId = id + 1, attemptNetwork = session.defaultNetwork)
+    return graced(asked, now) to Command.Connect(id, target, bps, maxBw, asked.attemptNetwork)
+  }
+
+  /**
+   * Review of 98c12ffa (b), N49: Cloudflare is read to hold the last publisher as the input's source until its read
+   * timeout, so an attempt asked on another network than the last one that connected ([Session.publisherNetwork]) gets
+   * the switch's grace: the watch starts its session again with no verdict for [DeliveryWatch.SWITCH_GRACE_MS]. After a
+   * drop, a stall, a stuck link or a switch alike; an attempt asked on no known network gets none.
+   */
+  private fun graced(session: Session, now: Now): Session {
+    val publisher = session.publisherNetwork ?: return session
+    val asked = session.attemptNetwork ?: return session
+    return if (asked == publisher) session else session.copy(delivery = session.delivery.switched(now.monoMs))
   }
 
   /** Unreachable after arm's checks; kept total so a bug ends the session visibly rather than throwing. */
@@ -259,11 +296,20 @@ internal object Transports {
   fun connected(phase: Phase, attemptId: Int, now: Now): Step {
     val step = (phase as? Phase.Connecting)?.step
     if (phase is Phase.Connecting && step is ConnectStep.Requested && step.attemptId == attemptId) {
-      val session = phase.session.copy(regulation = BitrateRegulator.attemptStarted(phase.session.regulation))
+      // Review of 98c12ffa (b): the publisher is now this attempt, on the network it was asked on.
+      val started = phase.session.copy(regulation = BitrateRegulator.attemptStarted(phase.session.regulation))
+      val session = started.copy(publisherNetwork = started.attemptNetwork)
       // Seeded at the connect (carry 13): the first reading's bytes, drops and egress count from here.
       val meter = LinkMeter(CONNECT_COUNTERS, now.monoMs)
       val onAir = Phase.OnAir(session, attemptId, phase.transport, now.monoMs, StallWatchdog(now.monoMs), meter, outage = phase.outage)
-      return Step(onAir, listOf(record("connected", "transport" to phase.transport, "attempt" to attemptId)))
+      val connected = record("connected", "transport" to phase.transport, "attempt" to attemptId)
+      // N49 fix 2: asked on a network that is no longer the default (a switch while it connected): replaced now.
+      val asked = session.attemptNetwork
+      val default = session.defaultNetwork
+      // One asked with none validated adopted the next default ([network]), so a null asked network has a null default.
+      if (default == null || asked == default) return Step(onAir, listOf(connected))
+      val step = switchedOver(onAir, onAir.outage ?: outageFor(session, phase.transport, now, ReconnectCause.UPLINK_LOST), now)
+      return step.copy(commands = listOf(connected) + step.commands)
     }
     if (phase is Phase.OnAir && phase.attemptId == attemptId) return Step(phase)
     // A stream this machine no longer wants: close it, so nothing publishes behind the session's back.
@@ -284,25 +330,33 @@ internal object Transports {
    * A failed connect: counted or not by the fallback policy, then a retry [SessionMachine.RETRY_MS]
    * later. A [drop] before the connect answered is judged by the policy's drop rule with nothing
    * published: the far end closing counts (F-P5-2's collapse), a local stop does not (B6 review m5).
+   * S6: before live and past its first minute of failing, the retry backs off ([NeverLiveRetries.waitMs]) and the line is
+   * said at most once a minute, with the failures it stands for (`count`); a fall-back is always said.
    */
   fun failed(phase: Phase.Connecting, failure: ConnectFailure, message: String?, now: Now, drop: DropReason? = null): Step {
     val session = phase.session
     val validated = session.networkValidated
     val decision = if (drop == null) session.fallback.connectFailed(failure, validated) else session.fallback.dropped(drop, validated, publishedMs = 0)
-    val commands = mutableListOf(failedRecord(phase.transport, failure, drop, validated, decision.counted, message))
+    val neverLive = session.liveSinceEpochMs == null
+    val (retries, said) = if (neverLive) session.retries.failed(now.monoMs) else session.retries to null
+    val commands = mutableListOf<Command>()
+    if (!neverLive || said != null) commands += failedRecord(phase.transport, failure, drop, validated, decision.counted, message, said?.count)
     if (decision.fellBack) commands += record("fell-back", "from" to phase.transport, "to" to decision.policy.current)
-    var next = session.copy(fallback = decision.policy)
+    var next = session.copy(fallback = decision.policy, retries = retries)
     // Ruling 15: refused ingest may mean the organiser stopped the session. B6 ruling C1 spaces them.
     if (failure == ConnectFailure.REFUSED && next.descriptor.mayAsk(now.monoMs)) {
       val (asked, fetch) = askDescriptor(next, now)
       next = asked
       commands += fetch
     }
-    val waiting = ConnectStep.Waiting(now.monoMs + SessionMachine.RETRY_MS)
+    val waiting = ConnectStep.Waiting(now.monoMs + retryWaitMs(next))
     return Step(phase.copy(session = next, transport = decision.policy.current, step = waiting), commands)
   }
 
-  private fun failedRecord(transport: Transport, failure: ConnectFailure, drop: DropReason?, validated: Boolean, counted: Boolean, message: String?): Command {
+  /** S6: before live the ladder's wait for the failures so far; after, [SessionMachine.RETRY_MS], the hold bounding it. */
+  private fun retryWaitMs(session: Session): Long = if (session.liveSinceEpochMs == null) session.retries.waitMs() else SessionMachine.RETRY_MS
+
+  private fun failedRecord(transport: Transport, failure: ConnectFailure, drop: DropReason?, validated: Boolean, counted: Boolean, message: String?, count: Int?): Command {
     val fields =
       listOfNotNull(
         "transport" to transport,
@@ -311,6 +365,7 @@ internal object Transports {
         "validated" to validated,
         "counted" to counted,
         "message" to message,
+        count?.let { "count" to it },
       )
     return record("connect-failed", *fields.toTypedArray())
   }
@@ -345,9 +400,60 @@ internal object Transports {
         fetch,
       )
     if (decision.fellBack) commands += record("fell-back", "from" to phase.transport, "to" to decision.policy.current)
-    val next = session.copy(fallback = decision.policy, regulation = BitrateRegulator.afterDrop(session.regulation, now.monoMs))
-    val waiting = ConnectStep.Waiting(now.monoMs + SessionMachine.RETRY_MS)
+    val retries = if (session.liveSinceEpochMs == null) session.retries.dropped(now.monoMs) else session.retries
+    val regulation = BitrateRegulator.afterDrop(session.regulation, now.monoMs)
+    dropMoved(session.regulation.targetBps, regulation.targetBps)?.let { commands += it }
+    val next = session.copy(fallback = decision.policy, regulation = regulation, retries = retries)
+    val waiting = ConnectStep.Waiting(now.monoMs + retryWaitMs(next))
     return Step(Phase.Connecting(next, decision.policy.current, waiting, outage), commands)
+  }
+
+  /**
+   * N49: the validated default network is now [handle], [previous] before; the phase already holds [handle]. A socket
+   * stays on the network it was opened on, and the stall verdict that found it on 2026-11-24 took 22 s, so an attempt
+   * asked on another network than the default ([Session.attemptNetwork]) is replaced, as a new ingest session is, on the
+   * transport in hand, RTMPS after a fallback included; the new socket opens on the new default.
+   *
+   * It is judged against the attempt's network, never the last default (fix round 1, item 1): a loss and then a new
+   * network inside SRT's peer-idle timeout (about 5 s) leave the old socket alive through the new route. Connected, it is
+   * replaced at once, keeping the outage it is in or opening one ([switchedOver]). Still connecting, it is replaced once
+   * it connects ([connected]; item 2), and one that ends up back on its own network is not. Between attempts the next is
+   * asked on the new default. An attempt asked while none was validated adopts the next one. Every switch with a network
+   * before it writes `network-switched` with its result; a switch away from no network (the first, or after a loss) only
+   * a replace's.
+   *
+   * Its outage's cause is [ReconnectCause.UPLINK_LOST]: the snapshot's word for an uplink being replaced, which JS
+   * already reads. It is no failure: the fallback policy never hears it.
+   */
+  fun network(phase: Phase, previous: Long?, handle: Long?, now: Now): Step {
+    val next = phase.withDefaultNetwork(handle)
+    if (handle == null || handle == previous) return Step(next)
+    val session = next.session
+    val asked = next is Phase.OnAir || (next as? Phase.Connecting)?.step is ConnectStep.Requested
+    if (session == null || !asked) {
+      if (previous == null) return Step(next)
+      return Step(next, listOf(switchLine(if (next is Phase.Connecting) NetworkSwitch.BETWEEN_ATTEMPTS else NetworkSwitch.NOT_ON_AIR, next)))
+    }
+    val on = session.attemptNetwork ?: return Step(next.withSession(session.copy(attemptNetwork = handle)))
+    if (on == handle) return Step(next, listOfNotNull(switchLine(NetworkSwitch.SAME, next).takeIf { previous != null }))
+    if (next !is Phase.OnAir) return Step(next, listOf(switchLine(NetworkSwitch.PENDING, next)))
+    return switchedOver(next, next.outage ?: outageFor(session, next.transport, now, ReconnectCause.UPLINK_LOST), now)
+  }
+
+  private fun switchLine(result: NetworkSwitch, phase: Phase): Command =
+    record("network-switched", "result" to result, "attempt" to phase.attemptInHand, "phase" to phase.name)
+
+  /**
+   * N49: the attempt replaced for a switch, a new link on another network (fix round 1, items 3 and 4). The regulator
+   * forgets the rate the old link failed ([BitrateRegulator.newLink]), and the delivery watch starts its session again,
+   * with no verdict for [DeliveryWatch.SWITCH_GRACE_MS] ([DeliveryWatch.switched]).
+   */
+  private fun switchedOver(onAir: Phase.OnAir, outage: Outage?, now: Now): Step {
+    val line = switchLine(NetworkSwitch.REPLACED, onAir)
+    val old = onAir.session
+    val session = old.copy(regulation = BitrateRegulator.newLink(old.regulation), delivery = old.delivery.switched(now.monoMs))
+    val step = replace(onAir, session, outage, now) { Command.StartNewSession(onAir.attemptId, it) }
+    return step.copy(commands = listOf(line) + step.commands)
   }
 
   /** An outage only exists for a session that has been live: before that, there is nothing to hold. */
@@ -363,11 +469,17 @@ internal object Transports {
     val (watchdog, verdict) =
       phase.watchdog.frames(input.videoFrames, input.audioFrames, now.monoMs, session.camera.slateOnAir, session.micSilenced, session.device?.shed)
     var next = phase.copy(watchdog = watchdog)
+    // S1: a window at the floors starts the below-floor count again.
+    if (watchdog.ratedHealthy && session.belowFloor.count > 0) next = next.copy(session = session.copy(belowFloor = BelowFloorRebuilds()))
     val commands = mutableListOf<Command>()
     if (watchdog.advancing(now.monoMs)) {
+      if (next.framesAtMs == null) next = next.copy(framesAtMs = now.monoMs)
       if (next.session.liveSinceEpochMs == null) {
-        next = next.copy(session = next.session.copy(liveSinceEpochMs = now.wallMs))
+        // Re-review of d006c2dd, item 3: going live says the start's failures the minute held back.
+        val (retries, held) = next.session.retries.said(phase.transport)
+        next = next.copy(session = next.session.copy(liveSinceEpochMs = now.wallMs, retries = retries))
         commands += record("live", "transport" to phase.transport)
+        held?.let { commands += it }
       }
       // A reopened or switched camera is ours again once it delivers a frame.
       if (next.session.camera == CameraState.RESUMING || next.session.camera == CameraState.SWITCHING) {
@@ -380,6 +492,11 @@ internal object Transports {
       }
     }
     if (verdict !is StallVerdict.Rebuild) return Step(next, commands)
+    // S1: a frames reading rebuilds only below the floor (the time rules are the tick's), and past three in a row it
+    // waits its turn, the slow picture publishing meanwhile.
+    val floor = next.session.belowFloor
+    if (!floor.mayRebuild(now.monoMs)) return Step(next, commands)
+    next = next.copy(session = next.session.copy(belowFloor = floor.rebuilt(now.monoMs)))
     val rebuilt = Timers.rebuild(next, verdict, now)
     return rebuilt.copy(commands = commands + rebuilt.commands)
   }
@@ -400,15 +517,65 @@ internal object Transports {
         srt = srt,
         egressBps = sample.egressBps ?: phase.egressBps,
       )
-    val before = session.regulation.targetBps
+    val commands = regulatedCommands(phase, session.regulation.targetBps, regulated, sample)
+    val (stuckWatch, stuck) = phase.stuck.read(sample, regulation.targetBps, phase.transport, latency, now.monoMs)
+    val advancing = session.delivery.sinceAdvanceMs < StuckReplaces.STUCK_UNDELIVERED_MS
+    val replaces = session.stuckReplaces.read(stuckWatch.readings > 0 || stuck != null, advancing, now.monoMs)
+    val watched = next.copy(stuck = stuckWatch, session = next.session.copy(stuckReplaces = replaces))
+    if (stuck == null) return Step(watched, commands)
+    // Review of batch 2, item 1: a picture the playlist still delivers is never replaced, and replaces back off. A
+    // verdict refused here keeps its run (re-review of d006c2dd, item 4): it acts at the first reading the gate allows.
+    if (advancing || !replaces.mayReplace(now.monoMs)) return Step(watched.copy(stuck = phase.stuck.refused(stuck, now.monoMs)), commands)
+    val replaced = linkStuck(watched, stuck, sample, now)
+    return replaced.copy(commands = commands + replaced.commands)
+  }
+
+  /** The regulator's move, its held raise and its floor cut, as commands and lines. */
+  private fun regulatedCommands(phase: Phase.OnAir, before: Int, regulated: Regulated, sample: LinkSample): MutableList<Command> {
+    val target = regulated.state.targetBps
     val commands = mutableListOf<Command>()
-    if (regulation.targetBps != before) {
-      commands += Command.SetBitrate(phase.attemptId, regulation.targetBps)
-      if (phase.transport == Transport.SRT) commands += Command.SetMaxBw(phase.attemptId, SrtBandwidth.maxBwBytesPerSecond(regulation.targetBps))
+    if (target != before) {
+      commands += Command.SetBitrate(phase.attemptId, target)
+      if (phase.transport == Transport.SRT) commands += Command.SetMaxBw(phase.attemptId, SrtBandwidth.maxBwBytesPerSecond(target))
       commands += bitrateLine(before, regulated, sample)
     }
     regulated.held?.let { commands += heldLine(it, phase.watchdog.videoFps) }
-    return Step(next, commands)
+    regulated.floor?.let { commands += floorLine(it, sample) }
+    return commands
+  }
+
+  /**
+   * The cause split (owner, 2026-11-24): the phone's own link is stuck ([StuckWatch]), so it is replaced at once, as a new
+   * ingest session, on the transport in hand, with no backoff and before the playlist's verdict. The outage it is in is
+   * kept, or one opens now: the hold bounds it as any reconnect. It is no failure: the fallback policy never hears it.
+   * Its outage's cause is [ReconnectCause.UPLINK_LOST], the snapshot's word for an uplink being replaced.
+   */
+  private fun linkStuck(onAir: Phase.OnAir, stuck: Stuck, sample: LinkSample, now: Now): Step {
+    // Review of batch 2, item 2: the new ingest session proves itself from zero, as a not-delivered restart's does.
+    val replaces = onAir.session.stuckReplaces.replaced(now.monoMs)
+    val session = onAir.session.copy(delivery = onAir.session.delivery.newSession(), stuckReplaces = replaces)
+    val line =
+      record(
+        "link-stuck",
+        "attempt" to onAir.attemptId,
+        "count" to stuck.readings,
+        "retryMs" to StuckReplaces.waitMs(replaces.count + 1),
+        "target" to session.regulation.targetBps,
+        "sendBufferMs" to sample.sendBufferMs,
+        "egressBps" to sample.egressBps,
+        "dropped" to sample.droppedPackets,
+        "lost" to sample.lostPackets,
+      )
+    val outage = onAir.outage ?: outageFor(session, onAir.transport, now, ReconnectCause.UPLINK_LOST)
+    val step = replace(onAir, session, outage, now) { Command.StartNewSession(onAir.attemptId, it) }
+    return step.copy(commands = listOf(line) + step.commands)
+  }
+
+  /** S3: a drop that moved the target says so, as a reading's move does, with no reading to cite. */
+  private fun dropMoved(before: Int, after: Int): Command? {
+    if (after == before) return null
+    val move = if (after < before) BitrateMove.DROP_HALVED else BitrateMove.DROP_RESTORED
+    return record("bitrate", "from" to before, "to" to after, "reason" to move)
   }
 
   /**
@@ -431,6 +598,18 @@ internal object Transports {
     return Command.Record(RecordEntry("bitrate", fields + listOfNotNull(tested?.let { "count" to it.heldBefore })))
   }
 
+  /** R-RTRF (N49): cuts that found the target at the floor, which no `bitrate` line says, and the reading said on. */
+  private fun floorLine(floor: FloorCut, sample: LinkSample): Command =
+    record(
+      "bitrate-floor",
+      "reason" to floor.reason,
+      "count" to floor.count,
+      "egressBps" to sample.egressBps,
+      "dropped" to sample.droppedPackets,
+      "lost" to sample.lostPackets,
+      "sendBufferMs" to sample.sendBufferMs,
+    )
+
   /** R-990P: F-P5-7's gate held due raises, and the encoded frame rate while it did (r2's question). */
   private fun heldLine(held: HeldRaise, videoFps: Double?): Command =
     record(
@@ -443,6 +622,22 @@ internal object Transports {
     )
 }
 
+/**
+ * N49 fix round 1, item 5: cuts at the floor since the last `bitrate-floor` line ([Regulation.floorCuts]) are said by the
+ * next one, a minute on, and a session that ends before it would never say them. So the step that ends a session (no
+ * session after it, or another sid's) writes them, under the last such cut's rule, with no reading: none was said on.
+ * Called on every step the machine takes, and by the [Engine] on the fatal step it builds when the machine throws.
+ */
+internal object FloorCuts {
+  fun closed(before: Phase, step: Step): Step {
+    val session = before.session ?: return step
+    val regulation = session.regulation
+    val reason = regulation.floorReason
+    if (regulation.floorCuts == 0 || reason == null || step.phase.session?.sid == session.sid) return step
+    return step.copy(commands = step.commands + record("bitrate-floor", "reason" to reason, "count" to regulation.floorCuts))
+  }
+}
+
 /** Everything the tick decides: retries, connect timeouts, hold expiry, the stall watchdog, playlist polls. */
 internal object Timers {
   fun tick(phase: Phase, now: Now): Step =
@@ -450,7 +645,8 @@ internal object Timers {
       is Phase.Connecting -> connecting(phase, now)
       is Phase.OnAir -> onAir(phase, now)
       is Phase.Arming -> Starts.tick(phase, now)
-      is Phase.Idle, is Phase.Pairing, is Phase.Paired, is Phase.Armed, is Phase.Ended -> Step(phase)
+      is Phase.Paired -> Verdicts.unconfirmed(phase, now)
+      is Phase.Idle, is Phase.Pairing, is Phase.Armed, is Phase.Ended -> Step(phase)
     }
 
   private fun connecting(connecting: Phase.Connecting, now: Now): Step {
@@ -497,6 +693,12 @@ internal object Timers {
     val (watchdog, verdict) = phase.watchdog.tick(now.monoMs, phase.session.camera.slateOnAir)
     val watched = phase.copy(watchdog = watchdog)
     if (verdict is StallVerdict.Rebuild) return rebuild(watched, verdict, now)
+    // S2: a not-delivered restart whose backoff is over.
+    // Review of batch 2, item 5: a link that turned poor inside the wait is the phone's, so it goes at once.
+    if (watched.restartAtMs?.let { now.monoMs >= it || Deliveries.poorLinkDue(watched, now) } == true) {
+      return Deliveries.restart(watched.copy(restartAtMs = null, recoveredAtMs = null), now)
+    }
+    Deliveries.recovered(watched, now)?.let { return it }
     // Publishing time counts only while frames advance: our own reopen or switch pauses it until the
     // camera's first frame, so a pause of ours never reads as Cloudflare falling behind.
     val (delivery, requests) = watched.session.delivery.tick(now.monoMs, watchdog.advancing(now.monoMs))
@@ -520,20 +722,22 @@ internal object Timers {
    * The stall watchdog asked for a rebuild (F-P5-6, F-P5-9). The record's `msSinceAdvance` counts
    * from the last frame; for `no-first-frame`, from the connect; and when `rebaselined` is true, from
    * our own camera reopen, which is not a frame (carry 7), or for a switch from the tap or the last
-   * frame before it ([Devices.switched]).
+   * frame before it ([Devices.switched]). S1: a below-floor rebuild also says how many in a row it is (`count`) and how
+   * long the next must wait (`retryMs`, [BelowFloorRebuilds.waitMs]).
    */
   fun rebuild(onAir: Phase.OnAir, verdict: StallVerdict.Rebuild, now: Now): Step {
     val outage = onAir.outage ?: Transports.outageFor(onAir.session, onAir.transport, now, ReconnectCause.VIDEO_STALLED)
     val watchdog = onAir.watchdog
-    val stalled =
-      record(
-        "video-stalled",
+    val floor = onAir.session.belowFloor.takeIf { verdict.cause == StallCause.BELOW_FLOOR }
+    val fields =
+      listOf(
         "cause" to verdict.cause,
         "msSinceAdvance" to verdict.msSinceAdvance,
         "rebaselined" to (watchdog.lastAdvanceAtMs == null && watchdog.stallFromMs != null),
         "videoFps" to verdict.videoFps,
         "audioFps" to verdict.audioFps,
-      )
+      ) + listOfNotNull(floor?.let { "count" to it.count }, floor?.let { "retryMs" to BelowFloorRebuilds.waitMs(it.count + 1) })
+    val stalled = Command.Record(RecordEntry("video-stalled", fields))
     val step = Transports.replace(onAir, onAir.session, outage, now) { Command.Rebuild(onAir.attemptId, it) }
     return step.copy(commands = listOf(stalled) + step.commands)
   }
@@ -646,23 +850,77 @@ internal object Deliveries {
     // Re-review 6: a rendition refused off the playback host leaves delivery unknown; the record says why, once.
     if (watch.refusedOffHost && !session.delivery.refusedOffHost) commands += record("rendition-refused", "reason" to DeliveryWatch.OFF_HOST)
     var next = session.copy(delivery = watch)
+    var waiting = phase.restartAtMs
     if (next.notDelivered && watch.delivery == Delivery.OK) {
-      next = next.copy(notDelivered = false)
+      // S2: delivered again, so the backoff starts over, and a restart waiting for it never goes.
+      next = next.copy(notDelivered = false, deliveryRestarts = 0)
+      waiting = null
       commands += record("delivered")
     }
-    val updated = phase.copy(session = next)
-    if (verdict == null) return Step(updated, commands)
-    val restarted = newSession(updated, verdict, now)
-    return restarted.copy(commands = commands + restarted.commands)
+    val updated = phase.copy(session = next, restartAtMs = waiting, recoveredAtMs = phase.recoveredAtMs?.takeIf { waiting != null })
+    // A restart already waits: the looks inside its wait say nothing more.
+    if (verdict == null || waiting != null) return Step(updated, commands)
+    val judged = notDelivered(updated, verdict, now)
+    return judged.copy(commands = commands + judged.commands)
   }
 
-  /** Not delivered: force a new ingest session, and say so until the playlist moves again. */
-  private fun newSession(onAir: Phase.OnAir, verdict: NotDelivered, now: Now): Step {
-    val session = onAir.session.copy(notDelivered = true, delivery = onAir.session.delivery.newSession())
-    val outage = onAir.outage ?: Transports.outageFor(session, onAir.transport, now, ReconnectCause.NOT_DELIVERED)
-    val noted = record("not-delivered", "cause" to verdict.cause, "stalledMs" to verdict.stalledMs, "lagGrowthMs" to verdict.lagGrowthMs)
-    val step = Transports.replace(onAir, session, outage, now) { Command.StartNewSession(onAir.attemptId, it) }
+  /**
+   * Not delivered: say so until the playlist moves again, and force a new ingest session. S2, the owner's ruling
+   * (2026-11-24, "Back off, never stop"): with the phone's own link healthy the fault is past it, so the restart waits
+   * [DeliveryWatch.restartWaitMs], 0 for the first verdict since `delivered` and doubling to 64 s, and the stream
+   * publishes meanwhile. The cause split: a link that failed lately, what the operator sees as Weak signal (a cut in the
+   * last [SessionMachine.POOR_UPLINK_MS], [DegradeReason.POOR_UPLINK]), is the phone's, so it restarts at once. The line
+   * carries the verdict's number since `delivered` (`count`) and its wait (`retryMs`).
+   */
+  private fun notDelivered(onAir: Phase.OnAir, verdict: NotDelivered, now: Now): Step {
+    val ownLinkFailing = ownLinkFailing(onAir, now)
+    // Review of batch 2, item 5: a restart for a poor link is not a step of the delivery ladder. One fault, one ladder
+    // (re-review of d006c2dd, item 2, the controller's ruling): it waits out the stuck ladder instead, as its step.
+    val restarts = if (ownLinkFailing) onAir.session.deliveryRestarts else onAir.session.deliveryRestarts + 1
+    val waitMs = if (ownLinkFailing) onAir.session.stuckReplaces.waitLeftMs(now.monoMs) else DeliveryWatch.restartWaitMs(restarts)
+    val noted =
+      record(
+        "not-delivered",
+        "cause" to verdict.cause,
+        "stalledMs" to verdict.stalledMs,
+        "lagGrowthMs" to verdict.lagGrowthMs,
+        "count" to restarts,
+        "retryMs" to waitMs,
+      )
+    val counted = onAir.copy(session = onAir.session.copy(notDelivered = true, deliveryRestarts = restarts))
+    if (waitMs > 0) {
+      // A healthy wait is the delivery ladder's already, never later than this, so it is only ever a poor wait's.
+      val recoveredAt = now.monoMs + DeliveryWatch.restartWaitMs(restarts + 1)
+      return Step(counted.copy(restartAtMs = now.monoMs + waitMs, recoveredAtMs = recoveredAt), listOf(noted))
+    }
+    val step = restart(counted, now)
     return step.copy(commands = listOf(noted) + step.commands)
+  }
+
+  /** The cause split: the phone's own link failed lately, what the operator sees as Weak signal. */
+  fun ownLinkFailing(onAir: Phase.OnAir, now: Now): Boolean = DegradeReason.POOR_UPLINK in Projection.reasons(onAir.session, now)
+
+  /**
+   * Re-review of 28f46d54: a restart waiting out the stuck ladder whose link is no longer poor goes at the delivery
+   * ladder's time when that is sooner, as that ladder's step. Null while it waits on.
+   */
+  fun recovered(onAir: Phase.OnAir, now: Now): Step? {
+    val at = onAir.recoveredAtMs ?: return null
+    if (onAir.restartAtMs == null || now.monoMs < at || ownLinkFailing(onAir, now)) return null
+    val stepped = onAir.session.copy(deliveryRestarts = onAir.session.deliveryRestarts + 1)
+    return restart(onAir.copy(session = stepped, restartAtMs = null, recoveredAtMs = null), now)
+  }
+
+  /** A waiting restart whose link turned poor goes once the stuck ladder allows it, not at the delivery ladder's time. */
+  fun poorLinkDue(onAir: Phase.OnAir, now: Now): Boolean = ownLinkFailing(onAir, now) && onAir.session.stuckReplaces.mayReplace(now.monoMs)
+
+  /** The restart a not-delivered verdict asked for: a new ingest session, which the watch follows from zero. */
+  fun restart(onAir: Phase.OnAir, now: Now): Step {
+    // One fault, one ladder: a restart for a poor link is a step of the stuck ladder.
+    val replaces = onAir.session.stuckReplaces.let { if (ownLinkFailing(onAir, now)) it.replaced(now.monoMs) else it }
+    val session = onAir.session.copy(delivery = onAir.session.delivery.newSession(), stuckReplaces = replaces)
+    val outage = onAir.outage ?: Transports.outageFor(session, onAir.transport, now, ReconnectCause.NOT_DELIVERED)
+    return Transports.replace(onAir, session, outage, now) { Command.StartNewSession(onAir.attemptId, it) }
   }
 }
 
@@ -682,7 +940,7 @@ internal object Heartbeats {
     val phase = step.phase
     val pairing = phase.beating ?: return step
     val held = phase.heldSid
-    val interval = BeatCadence.intervalMs(pairing.waiting.pollSeconds, held = held != null)
+    val interval = BeatCadence.intervalMs(pairing.waiting.pollSeconds, held = held != null, confirming = pairing.starts.pending)
     val (heartbeat, id) = Heartbeat.due(pairing.heartbeat, now.monoMs, now.wallMs, interval)
     val commands = step.commands.toMutableList()
     val timedOut = heartbeat.failures > pairing.heartbeat.failures
@@ -741,7 +999,9 @@ internal object Heartbeats {
     val deletes = if (delivered || codeDead) listOf(Command.DeleteStopped(pairing.name.code, pairing.name.slot), record("stopped-delivered", "status" to status)) else emptyList()
     // The refused set keeps the sid for the pairing's life (A17): a server that names it later is still ignored.
     val kept = (if (delivered || codeDead) refreshed.copy(stopped = null) else refreshed).copy(lastBeatLine = compared)
-    val decided = Verdicts.beat(phase.withPairing(kept), word, now)
-    return decided.copy(commands = noted + listOfNotNull(unreadable) + deletes + decided.commands)
+    // Design 2026-11-24 §2.2, §3: a 2xx's grant and T46's facts, before the word moves the phase.
+    val (heard, facts) = Nudges.answered(phase, kept, response?.reply?.takeIf { ok }, now)
+    val decided = Verdicts.beat(phase.withPairing(heard), word, now)
+    return decided.copy(commands = noted + listOfNotNull(unreadable) + deletes + facts + decided.commands)
   }
 }

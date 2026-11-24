@@ -124,7 +124,7 @@ object HttpAnswers {
     Input.StartAnswered(
       requestId,
       when (outcome) {
-        is HttpOutcome.Failed -> StartAnswer.Failed("no answer: ${outcome.message}")
+        is HttpOutcome.Failed -> StartAnswer.Failed(StartAnswer.Failed.NO_ANSWER + outcome.message)
         is HttpOutcome.Answered -> Bodies.start(outcome.status, outcome.body)
       },
     )

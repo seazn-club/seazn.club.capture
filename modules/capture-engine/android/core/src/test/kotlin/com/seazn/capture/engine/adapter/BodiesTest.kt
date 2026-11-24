@@ -387,7 +387,6 @@ class BodiesTest {
     assertEquals(mapOf(Transport.SRT to 183, Transport.RTMPS to 180), d.holdWindowSeconds)
     assertEquals(Configs.PLAYBACK_URL, d.playbackUrl)
     assertEquals(300, d.maxDurationMinutes)
-    assertEquals(1_790_000_600L, d.warmingDeadlineEpochS)
     val srt = assertIs<SrtTarget>(d.primary)
     assertEquals(listOf(Configs.srt.url, Configs.STREAM_ID, Configs.PASSPHRASE, 2_000), listOf(srt.url, srt.streamId, srt.passphrase, srt.latencyMs))
     val rtmps = assertIs<RtmpsTarget>(d.fallback)

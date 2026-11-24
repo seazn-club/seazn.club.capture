@@ -27,6 +27,12 @@ data class Regulation(
   val untestedRaises: Int = 0,
   /** When the last `bitrate-held` line was due; null before the first. A drop and a new attempt keep it. */
   val heldSaidAtMs: Long? = null,
+  /** R-RTRF: cuts at the floor since the last `bitrate-floor` line. A drop and a new attempt keep it. */
+  val floorCuts: Int = 0,
+  /** When the last `bitrate-floor` line was due; null before the first. A drop and a new attempt keep it. */
+  val floorSaidAtMs: Long? = null,
+  /** The rule of the last cut at the floor: what the session's end says [floorCuts] under (N49 fix round 1, item 5). */
+  val floorReason: BitrateMove? = null,
 )
 
 /** Why a reading moved the target: the `bitrate` line's `reason` (R-990P). */
@@ -42,6 +48,12 @@ enum class BitrateMove(override val wire: String) : Wire {
 
   /** It was outside the floor and the ceiling, and nothing else moved it. */
   CLAMP("clamp"),
+
+  /** S3: a drop after a failing link halved it ([BitrateRegulator.afterDrop]). */
+  DROP_HALVED("drop-halved"),
+
+  /** S3: a drop after a clean link put back the last healthy target ([BitrateRegulator.afterDrop]). */
+  DROP_RESTORED("drop-restored"),
 }
 
 /**
@@ -62,7 +74,20 @@ data class Tested(val egressBps: Long, val heldBefore: Int)
  * One reading's outcome: the next state, the rule that moved the target (null when it is where it was), a held line due,
  * and what a raise was decided on.
  */
-data class Regulated(val state: Regulation, val move: BitrateMove? = null, val held: HeldRaise? = null, val tested: Tested? = null)
+data class Regulated(
+  val state: Regulation,
+  val move: BitrateMove? = null,
+  val held: HeldRaise? = null,
+  val tested: Tested? = null,
+  val floor: FloorCut? = null,
+)
+
+/**
+ * R-RTRF: cuts that found the target already at the floor, where nothing moves and no `bitrate` line is written: the
+ * `bitrate-floor` line. [reason] is the rule of the cut it is said on; [count] the floor cuts since the last line, that
+ * one included.
+ */
+data class FloorCut(val reason: BitrateMove, val count: Int)
 
 /**
  * F-P5-5: nothing regulated the encoder, so a VBR burst the uplink could not carry was delivered as
@@ -94,6 +119,9 @@ object BitrateRegulator {
   /** At most one `bitrate-held` line in this long: R-990P's 18 min hold reads as 18 lines, not 108. */
   const val HELD_LINE_MS = 60_000L
 
+  /** At most one `bitrate-floor` line in this long, as for [HELD_LINE_MS]. */
+  const val FLOOR_LINE_MS = HELD_LINE_MS
+
   /** A drop within this long of the link failing restarts at half; later, at the healthy target. */
   const val FAILING_LOOKBACK_MS = 10_000L
 
@@ -108,6 +136,13 @@ object BitrateRegulator {
   private const val CLEAN_BUFFER_DIVISOR = 10
 
   fun sessionStarted(): Regulation = Regulation(Encode.START_BPS)
+
+  /**
+   * N49 fix round 1: a socket replaced for a switch of the default network is a new link, on another network. The rate
+   * the old one failed says nothing of it, so it is forgotten, and Weak signal (`poor-uplink`, which needs one) with it.
+   * The target and the cut stand, so the climb starts where it was and F-P5-7's tested raise still gates it.
+   */
+  fun newLink(state: Regulation): Regulation = state.copy(failed = null)
 
   /** A new attempt keeps the target, the cut and the failed rate. Only the clean interval restarts. */
   fun attemptStarted(state: Regulation): Regulation = state.cleanWaitRestarted(null)
@@ -126,7 +161,7 @@ object BitrateRegulator {
     if (failing) {
       val halved = (state.targetBps / 2).coerceAtLeast(Encode.FLOOR_BPS)
       return state
-        .copy(targetBps = halved, lastCutAtMs = nowMs, failed = FailedRate(state.targetBps, nowMs))
+        .copy(targetBps = halved, lastCutAtMs = nowMs, failed = failedAt(state, halved, nowMs))
         .cleanWaitRestarted(null)
     }
     val healthySince = state.healthyAtMs ?: Long.MIN_VALUE
@@ -165,8 +200,8 @@ object BitrateRegulator {
     val backlogged = sendBufferMs >= windowMs / 2
     val clean = !dropping && link.lostPackets <= 0 && sendBufferMs < windowMs / CLEAN_BUFFER_DIVISOR
     return when {
-      dropping && !draining -> Regulated(cut(marked, link, nowMs, CUT_ON_DROPS_PERCENT), BitrateMove.DROPS)
-      backlogged && !draining -> Regulated(cut(marked, link, nowMs, CUT_ON_BACKLOG_PERCENT), BitrateMove.BACKLOG)
+      dropping && !draining -> cut(marked, link, nowMs, CUT_ON_DROPS_PERCENT, BitrateMove.DROPS)
+      backlogged && !draining -> cut(marked, link, nowMs, CUT_ON_BACKLOG_PERCENT, BitrateMove.BACKLOG)
       !clean -> Regulated(marked.cleanWaitRestarted(nowMs))
       else -> raiseIfDue(carriedCleanly(marked, link, nowMs), nowMs)
     }
@@ -196,7 +231,7 @@ object BitrateRegulator {
    */
   private fun withoutBuffer(state: Regulation, link: LinkSample, nowMs: Long, cutDue: Boolean): Regulated =
     when {
-      cutDue -> Regulated(cut(state, link, nowMs, CUT_ON_DROPS_PERCENT), BitrateMove.DROPS)
+      cutDue -> cut(state, link, nowMs, CUT_ON_DROPS_PERCENT, BitrateMove.DROPS)
       link.droppedPackets > 0 || link.lostPackets > 0 -> Regulated(state.cleanWaitRestarted(nowMs))
       else -> Regulated(state)
     }
@@ -205,7 +240,7 @@ object BitrateRegulator {
   private fun failing(link: LinkSample, transport: Transport): Boolean =
     if (transport == Transport.SRT) link.lostPackets > 0 else link.droppedPackets > 0
 
-  private fun cut(state: Regulation, link: LinkSample, nowMs: Long, percent: Long): Regulation {
+  private fun cut(state: Regulation, link: LinkSample, nowMs: Long, percent: Long, move: BitrateMove): Regulated {
     val byFactor = state.targetBps.toLong() * percent / 100
     val byEstimate =
       link.bandwidthBps?.takeIf { it > 0 }?.let { it * ESTIMATE_HEADROOM_PERCENT / 100 - Encode.AUDIO_BPS }
@@ -215,10 +250,30 @@ object BitrateRegulator {
         .takeIf { it.isNotEmpty() }
         ?.let { it.sum() / it.size * EGRESS_HEADROOM_PERCENT / Encode.EGRESS_OVERHEAD_PERCENT - Encode.AUDIO_BPS }
         ?: Long.MAX_VALUE
-    val target = minOf(byFactor, byEstimate, byEgress).coerceIn(Encode.FLOOR_BPS.toLong(), state.targetBps.toLong())
-    return state
-      .copy(targetBps = target.toInt(), lastCutAtMs = nowMs, failed = FailedRate(state.targetBps, nowMs))
-      .cleanWaitRestarted(nowMs)
+    val target = minOf(byFactor, byEstimate, byEgress).coerceIn(Encode.FLOOR_BPS.toLong(), state.targetBps.toLong()).toInt()
+    val next = state.copy(targetBps = target, lastCutAtMs = nowMs, failed = failedAt(state, target, nowMs)).cleanWaitRestarted(nowMs)
+    return if (target == state.targetBps) atFloor(next, nowMs, move) else Regulated(next, move)
+  }
+
+  /**
+   * The rate a cut to [target] failed. R-RTRF (N49): a cut that cannot lower the target, which is already at the floor,
+   * failed no new rate, so it keeps the one it had. Recording the floor itself capped raises at 80% of it, under the
+   * floor, for [FAILED_RATE_MEMORY_MS] after the last such cut: the link came back and the target stayed at 500k. A cut
+   * that lowers the target names the rate it left, a clamp onto the floor included.
+   */
+  private fun failedAt(state: Regulation, target: Int, nowMs: Long): FailedRate? =
+    if (target == state.targetBps) state.failed else FailedRate(state.targetBps, nowMs)
+
+  /**
+   * R-RTRF: a cut that found the target at the floor. It is still a cut, so it moves [Regulation.lastCutAtMs]: a backlog
+   * or drops at 500k are a real poor uplink, the one the phone is sending on, so Weak signal (`poor-uplink`) stays true
+   * and the raise waits [RAISE_AFTER_CUT_MS] from it. Nothing moves, so no `bitrate` line says it: the first such cut
+   * since [FLOOR_LINE_MS] is said as `bitrate-floor`, with the count since the last line.
+   */
+  private fun atFloor(state: Regulation, nowMs: Long, move: BitrateMove): Regulated {
+    val count = state.floorCuts + 1
+    if (since(state.floorSaidAtMs, nowMs) < FLOOR_LINE_MS) return Regulated(state.copy(floorCuts = count, floorReason = move), move)
+    return Regulated(state.copy(floorCuts = 0, floorSaidAtMs = nowMs, floorReason = move), move, floor = FloorCut(move, count))
   }
 
   private fun carriedCleanly(state: Regulation, link: LinkSample, nowMs: Long): Regulation {

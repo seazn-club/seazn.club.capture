@@ -28,7 +28,7 @@ class AttemptPollersTest {
   private var video = 0L
   private val counters = LinkCounters(1_000, 10, 0, 0, 0, 40, 120, 3_000_000)
   private val pollers = AttemptPollers(scheduler, frames = { FrameCount(video, video) }, link = { counters }, send = { sent += it })
-  private val rebuild = Command.Rebuild(1, Command.Connect(2, Configs.srt, 1_500_000, null))
+  private val rebuild = Command.Rebuild(1, Command.Connect(2, Configs.srt, 1_500_000, null, null))
 
   private fun frames() = sent.filterIsInstance<Input.Frames>()
 
@@ -95,7 +95,7 @@ class AttemptPollersTest {
       listOf<(AttemptPollers) -> Unit>(
         { it.onInput(Input.Dropped(1, DropReason.ENDPOINT_CLOSED, null)) },
         { it.onCommand(Command.Disconnect(1)) },
-        { it.onCommand(Command.StartNewSession(1, Command.Connect(2, Configs.srt, 1_500_000, null))) },
+        { it.onCommand(Command.StartNewSession(1, Command.Connect(2, Configs.srt, 1_500_000, null, null))) },
         { it.onCommand(Command.End(EndReason.OPERATOR_STOPPED)) },
         // A broadcast that ends without the operator returns to Paired: its attempt is over too.
         { it.onCommand(Command.StopBroadcast) },

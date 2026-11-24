@@ -2,6 +2,10 @@ import type {
   CameraState,
   EngineSnapshot,
   HeartbeatResult,
+  IngestState,
+  ProgrammePhase,
+  RelayOutput,
+  ServerFacts,
   Telemetry,
   ThermalStatus,
 } from '@/engine/CaptureEnginePort';
@@ -44,9 +48,13 @@ export function diagnosticsSections(
     title: t(title),
     rows: pairs.map(([key, value]) => ({ key, label: t(key), value })),
   });
+  const server = ON_AIR.has(snapshot.state.kind)
+    ? [section('diag.section.server', serverRows(tel.server, say))]
+    : [];
   return [
     section('diag.section.link', linkRows(snapshot, say)),
     section('diag.section.delivery', deliveryRows(tel, nowMs, say)),
+    ...server,
     section('diag.section.device', deviceRows(snapshot, say)),
     section('diag.section.heartbeat', heartbeatRows(tel, nowMs, say)),
     section('diag.section.engine', engineRows(snapshot, nowMs, say)),
@@ -110,6 +118,59 @@ function deliveryRows(tel: Telemetry, nowMs: number, say: Say): Pair[] {
     ['diag.lag', unit(say, 'diag.unit.seconds', lag)],
     ['diag.checked', secondsAgo(say, nowMs, tel.deliveryCheckedAtMs)],
     ['diag.data', unit(say, 'diag.unit.mb', Math.round(tel.dataUsedBytes / 1_000_000))],
+  ];
+}
+
+/** T46 (design 2026-11-24 §3): the server's rows show on air only, a broadcast in trouble included. */
+const ON_AIR: ReadonlySet<EngineSnapshot['state']['kind']> = new Set([
+  'publishing',
+  'degraded',
+  'reconnecting',
+]);
+
+const RELAY: Readonly<Record<RelayOutput, MessageKey>> = {
+  connecting: 'diag.relay.connecting',
+  connected: 'diag.relay.connected',
+  backoff: 'diag.relay.backoff',
+};
+
+const PROGRAMME: Readonly<Record<ProgrammePhase, MessageKey>> = {
+  waiting: 'diag.programme.waiting',
+  live: 'diag.programme.live',
+  frozen: 'diag.programme.frozen',
+  reconnecting: 'diag.programme.reconnecting',
+  final: 'diag.programme.final',
+};
+
+const INGEST: Readonly<Record<IngestState, MessageKey>> = {
+  connected: 'diag.ingest.connected',
+  disconnected: 'diag.ingest.disconnected',
+  errored: 'diag.ingest.errored',
+};
+
+/**
+ * What the relay and Cloudflare last said (T46). Diagnostics only: the phone's own Viewers receiving stays the truth.
+ * A programme that is live, or whose phase is not known, reads as its rate when both numbers are known: the rate is
+ * what a live programme has to say, and its word with the rate does not fit the row at 640 (settingsFit.test.ts). Any
+ * other phase is its word, which is the news.
+ */
+function serverRows(facts: ServerFacts | null, { t, num }: Say): Pair[] {
+  const word = <K extends string>(
+    table: Readonly<Record<K, MessageKey>>,
+    key: K | null | undefined,
+  ) => (key === null || key === undefined ? t('diag.none') : t(table[key]));
+  const phase = facts?.programmePhase ?? null;
+  const fps = facts?.fps ?? null;
+  const kbps = facts?.kbps ?? null;
+  const rated = (phase === null || phase === 'live') && fps !== null && kbps !== null;
+  const programme = rated
+    ? t('diag.programme.rate', { fps: num(fps), kbps: num(kbps) })
+    : word(PROGRAMME, phase);
+  return [
+    ['diag.relay', word(RELAY, facts?.relayOutput)],
+    ['diag.programme', programme],
+    ['diag.cameraIngest', word(INGEST, facts?.cameraIngest)],
+    ['diag.programmeIngest', word(INGEST, facts?.programmeIngest)],
   ];
 }
 

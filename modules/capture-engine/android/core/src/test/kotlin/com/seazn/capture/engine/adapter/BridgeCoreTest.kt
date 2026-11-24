@@ -91,6 +91,31 @@ class BridgeCoreTest {
     assertEquals(listOf("ack:1", "ack:2"), events.filter { it.startsWith("ack:") })
   }
 
+  /** S8: while nothing shown changes, JS hears about once a second, not every tick; a change goes up at once. */
+  @Test
+  fun `S8 the snapshot goes up to JS once a second while nothing shown changes`() {
+    core.start()
+    core.report(Input.Network(true))
+    ready()
+    pair()
+    scheduler.advanceBy(2_000)
+    val before = platform.snapshots.size
+    scheduler.advanceBy(10_000)
+    assertEquals(10, platform.snapshots.size - before, "paired and waiting: 20 ticks, 10 sent")
+    assertEquals(1_000L, BridgeCore.EMIT_MS)
+  }
+
+  @Test
+  fun `S8 a change goes up to JS at once, between the once-a-second sends`() {
+    live()
+    scheduler.advanceBy(Engine.TICK_MS / 2)
+    val sent = platform.snapshots.size
+    core.send(mapOf("kind" to "stop"))
+    scheduler.advanceBy(0)
+    assertEquals(sent + 1, platform.snapshots.size, "a stop shows at once")
+    assertEquals("ended", (platform.snapshots.last()["state"] as Map<*, *>)["kind"])
+  }
+
   @Test
   fun `carry 27 native answers a stop within one tick`() {
     live()
@@ -715,15 +740,16 @@ class BridgeCoreTest {
     val before = platform.snapshots.size
     scheduler.advanceBy(20 * Engine.TICK_MS)
     val sent = platform.snapshots.size - before
-    assertTrue(sent >= 20, "a snapshot each tick at least, still: $sent")
-    assertEquals(sent.toDouble(), telemetry()["snapshotFailures"], "each one sent over the last good facts is counted")
+    assertTrue(sent >= 10, "a snapshot a second at least, still (S8): $sent")
+    val counted = telemetry()["snapshotFailures"] as Double
+    assertTrue(counted >= 20, "each one built over the last good facts is counted, sent or not: $counted")
     assertEquals(0.5, telemetry()["audioLevel"], "the last good facts, never the defaults")
     val written = lines().filter { it.getString("kind") == "engine-error" }
     assertEquals(listOf("facts: IllegalStateException: thermal"), written.map { it.getString("message") }, "one line a minute (G3)")
     assertTrue(lines().none { it.getString("kind") == "ended" }, "a facts read that throws ends nothing, so writes no ended (Batch 13, I1)")
     platform.throwOnFacts = null
     scheduler.advanceBy(Engine.TICK_MS)
-    assertEquals(sent.toDouble(), telemetry()["snapshotFailures"], "a good read again counts nothing")
+    assertEquals(counted, telemetry()["snapshotFailures"], "a good read again counts nothing")
   }
 
   @Test
@@ -746,7 +772,7 @@ class BridgeCoreTest {
     assertTrue(lines().none { it.getString("kind") == "ended" }, "a failure at the task boundary that is not permanent ends nothing (Batch 13, I1)")
     val before = platform.snapshots.size
     scheduler.advanceBy(Engine.TICK_MS * 4)
-    assertEquals(before + 4, platform.snapshots.size, "every later tick still publishes")
+    assertEquals(before + 2, platform.snapshots.size, "the later ticks still publish, once a second (S8)")
     assertEquals(1.0, telemetry()["taskFailures"], "the guard's count crosses to Diagnostics")
   }
 
@@ -922,7 +948,7 @@ class BridgeCoreTest {
   }
 
   @Test
-  fun `C0b every POST start is answered - a throw at the send, or no answer at all, frees the next hold`() {
+  fun `C0b every POST start is answered - a throw at the send, or no answer at all, frees the next hold once no beat armed it`() {
     core.start()
     core.report(Input.Network(true))
     ready()
@@ -930,19 +956,30 @@ class BridgeCoreTest {
     platform.throwOnHttp = { if (it.url.endsWith("/start")) java.io.IOException("reset") else null }
     core.send(mapOf("kind" to "start"))
     scheduler.advanceBy(Engine.TICK_MS)
-    assertEquals("start-failed", core.current()["refusal"], "a throw at the send is the start's failure")
+    // N48 (owner, 2026-11-23, "Pending until beat"): a throw at the send is no answer, pending until a beat or 20 s.
+    assertEquals(null, core.current()["refusal"], "a throw at the send is pending, not yet failed")
+    scheduler.advanceBy(StartAsks.START_CONFIRM_MS)
+    assertEquals("start-failed", core.current()["refusal"], "no beat armed it in 20 s: the start's failure")
     platform.throwOnHttp = { null }
     platform.unanswered = { it.url.endsWith("/start") }
+    val pendingBefore = lines().count { it.getString("kind") == "start-pending" }
     core.send(mapOf("kind" to "start"))
     scheduler.advanceBy(0)
     core.send(mapOf("kind" to "start"))
     // Review C4a I-4: the spec's 16 s, typed here: a backstop of ten minutes would hold every start that long.
     scheduler.advanceBy(BACKSTOP_MS - 1)
     assertEquals(2, platform.http.count { it.url.endsWith("/start") }, "a start in flight holds the next")
+    assertEquals(pendingBefore, lines().count { it.getString("kind") == "start-pending" }, "no answer yet before the backstop")
     scheduler.advanceBy(1)
+    // Only the backstop's no-answer makes a start pending, so its line pins the 16 s.
+    assertEquals(pendingBefore + 1, lines().count { it.getString("kind") == "start-pending" }, "the backstop answered at 16 s")
     core.send(mapOf("kind" to "start"))
     scheduler.advanceBy(0)
-    assertEquals(3, platform.http.count { it.url.endsWith("/start") }, "the lost answer is answered, so the hold is free")
+    assertEquals(2, platform.http.count { it.url.endsWith("/start") }, "the backstop's no-answer is pending a beat, and holds the next")
+    scheduler.advanceBy(StartAsks.START_CONFIRM_MS - BACKSTOP_MS)
+    core.send(mapOf("kind" to "start"))
+    scheduler.advanceBy(0)
+    assertEquals(3, platform.http.count { it.url.endsWith("/start") }, "20 s after its ask the pending is the failure, so the hold is free")
   }
 
   @Test

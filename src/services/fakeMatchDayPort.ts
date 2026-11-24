@@ -2,6 +2,7 @@ import type { ApprovalReview, Approved } from '@/domain/matchday/approvalWire';
 import type { Called, CallPreview, Candidates, Uncalled } from '@/domain/matchday/callWire';
 import type { ApprovalKind, MatchDay, Row } from '@/domain/matchday/matchDay';
 import type { OpenAnswer } from '@/domain/matchday/openWire';
+import type { MatchDayTokenAnswer } from '@/domain/matchday/realtimeWire';
 import type { SavedDayCode } from '@/domain/mode/dayCode';
 import type { CallAnswer, MatchDayPort, PortAnswer } from '@/services/matchDayPort';
 
@@ -129,8 +130,17 @@ export type FakeMatchDayPort = MatchDayPort & {
   release(): void;
   /** The next call throws instead of answering, once: a port broken in a way its own code never says. */
   throwNext(): void;
-  /** Every call, in order, with the code it carried. */
+  /** Every call, in order, with the code it carried. The realtime door's are in `tokenCalls` instead. */
   readonly calls: readonly FakeMatchDayCall[];
+  /**
+   * What the next realtime door calls answer, in order; the last one stands. With none given, offline: the list polls
+   * only, as a phone whose door fails does. The door is never held by `hold()` nor thrown by `throwNext()`.
+   */
+  answerRealtime(...answers: MatchDayTokenAnswer[]): void;
+  /** The next door call rejects, once: a port broken in a way its own code never says. */
+  throwNextRealtime(): void;
+  /** Every realtime door call, in order, by the code it carried. */
+  readonly tokenCalls: readonly SavedDayCode[];
 };
 
 const OFFLINE = { ok: false, offline: true } as const;
@@ -166,6 +176,9 @@ export function createFakeMatchDayPort(): FakeMatchDayPort {
   const callAnswers = sequence<CallAnswer<Called>>(OFFLINE);
   const undos = sequence<CallAnswer<Uncalled>>(OFFLINE);
   const calls: FakeMatchDayCall[] = [];
+  const tokens = sequence<MatchDayTokenAnswer>(OFFLINE);
+  const tokenCalls: SavedDayCode[] = [];
+  let tokenThrows = false;
   const answer = async <T>(call: FakeMatchDayCall, read: () => T): Promise<T> => {
     calls.push(call);
     if (gate !== null) await gate;
@@ -212,5 +225,18 @@ export function createFakeMatchDayPort(): FakeMatchDayPort {
       throwing = true;
     },
     calls,
+    realtimeToken: async (code) => {
+      tokenCalls.push(code);
+      if (tokenThrows) {
+        tokenThrows = false;
+        throw new Error('the realtime door threw');
+      }
+      return tokens.next();
+    },
+    answerRealtime: (...answers) => tokens.say(answers),
+    throwNextRealtime: () => {
+      tokenThrows = true;
+    },
+    tokenCalls,
   };
 }

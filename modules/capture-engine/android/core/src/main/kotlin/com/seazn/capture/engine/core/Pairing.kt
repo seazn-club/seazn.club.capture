@@ -276,5 +276,26 @@ class PairRequest(
   }
 }
 
-/** The pairing's `POST start` asks: only the answer to the ask in flight is acted on. Ids carry across pairings ([Ids.start]). */
-data class StartAsks(val nextId: Int = 1, val inFlightId: Int? = null)
+/**
+ * The pairing's `POST start` asks: only the answer to the ask in flight is acted on. Ids carry across pairings ([Ids.start]).
+ * [askedAtMs] is when the last ask was sent (`start-asked`, monotonic). [pending]: that ask got no answer and waits for a
+ * beat to confirm it ([START_CONFIRM_MS], N48).
+ */
+data class StartAsks(val nextId: Int = 1, val inFlightId: Int? = null, val askedAtMs: Long? = null, val pending: Boolean = false) {
+  /** The hold's start is not yet decided: in flight, or pending a beat (N48). Go live says starting and holds once. */
+  val awaited: Boolean
+    get() = inFlightId != null || pending
+
+  /** A pending start that no beat armed within [START_CONFIRM_MS] of its ask. */
+  fun unconfirmed(nowMs: Long): Boolean = pending && askedAtMs != null && nowMs - askedAtMs >= START_CONFIRM_MS
+
+  companion object {
+    /**
+     * N48 (`_FINDINGS.device.md`): the Seazn-hosted start answered ~10.6 s after the phone sent it, past the client's 8 s
+     * (`Http.TIMEOUT_MS`), and had started the broadcast. The owner's ruling (2026-11-23, "Pending until beat"): a start
+     * with no answer is not a failure; it stays pending and the beats confirm it. It is the start failure only when no
+     * beat has armed the phone this long after `start-asked`.
+     */
+    const val START_CONFIRM_MS = 20_000L
+  }
+}

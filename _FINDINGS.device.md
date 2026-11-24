@@ -861,3 +861,302 @@ since the operator reading it holds the phone.
 **Open, for the device:** the 426 panel. To see it on this build, staging's `COURT_MIN_APP_VERSION` must be above this
 build's commit count (its build number, `appVersion` `1.0.0-<count>`; AGENTS §11), and a court code claimed again; the
 stopped line after the court phone's own Stop and after the desk's, and the hold starting the latched match.
+
+---
+
+### N47 — A 2 s GOP sat on Cloudflare's floor, and its jitter set off `ERR_GOP_OUT_OF_RANGE`
+
+**Seen:** staging, 2026-11-23, a Seazn-hosted stream of about 9 min over SRT (camera input
+`36083d622acb214b4e13556847c61161`, session `9fc5acc1-8d6a-4910-84c7-99d1b252b246`, 22:25:24Z to 22:34:39Z).
+Cloudflare's live-input alerts reported `live_input.errored` with `ERR_GOP_OUT_OF_RANGE` twice, at 22:27:26Z and
+22:30:18Z (the Seazn-hosted session's webhook rows). The stream played on; nothing a viewer saw.
+
+**Measured, three ways:**
+
+- Cloudflare's ingest analytics (`liveInputEventsAdaptiveGroups`, sampled, the phone's own GOPs before any re-encode):
+  243 stored segments, `gopDuration` min 1986 ms, avg 1999.7 ms, max 2012 ms. `liveInputEventsAdaptive` (sampled) holds
+  `INPUT_GOP_OUT_OF_RANGE` at 22:27:26Z.
+- The recording's 240p rendition (Cloudflare's transcode), every keyframe: 276 gaps, 225 of them under 2.000 s, from
+  1.986 to 2.012 s, one 2.098 s outlier near 284 s.
+- The same rendition, every frame (16 620 decoded): every GOP is exactly 60 frames; three frame gaps over 50 ms, the
+  longest 100 ms.
+
+**Cause:** the encoder (`gopDurationInS = 2f` at 30 fps, `StreamerAdapter.kt`) makes a GOP of 60 frames, and the
+frames' timestamps jitter by a few milliseconds, so a GOP lands either side of 2000 ms. Cloudflare's requirement
+(Start Stream Live, re-read 2026-11-23) is a keyframe interval "between 2 and 10 seconds"; 2 s is the floor, and about
+half the GOPs were under it. INFERRED: the alert fires on some of those, not all (two alerts for ~225 short GOPs; the
+rule is not documented), so the trigger is the floor, not a long or variable GOP. Cloudflare's troubleshooting page
+suggests starting at 4 s.
+
+**Fix:** `gopDurationInS = 3f` (owner, 2026-11-23: "Ok 3s"). 3 s is a second from the floor whatever the jitter, inside
+2–10 s, and costs the relay about 1 s more wait for a keyframe at a start or a reconnect (the reconnect note under
+Cloudflare's input recommendations above, which named 2 s). 4 s, Cloudflare's suggested start, was not chosen: it
+doubles that wait for no gain the floor needs.
+
+**Rejected:** a peer session's first recommendation, a fixed 2 s GOP "with 1–2 s recommended", was from memory and was
+withdrawn; the phone was already at a fixed 2 s.
+
+**Verified on the device** (NE2211, build 1322, staging, 2026-11-23, session `622904ac-7e5d-4beb-8cd6-9154b1f79b02`,
+camera input `97a92a152f07602a891edccb4709527f`, about 6 min, 23:10:35Z to 23:16:23Z): Cloudflare's ingest analytics
+held 71 sampled GOPs at min 2995 ms, avg 2998.5 ms, max 3001 ms, with no `INPUT_GOP_OUT_OF_RANGE`; the Seazn-hosted
+session's webhook rows for the stream (four `ingest_status` rows) held no `live_input.errored`. The sampled events also
+held two `INPUT_DISCONNECTED` at 23:11:08Z and 23:11:15Z with no webhook alert and no gap in the relay's view (live at
+23:11:12.8Z, 30 fps throughout). Not the phone's publish: its record of the run (R-310M) holds one `connecting`/`connected` pair (SRT, attempt
+1, 23:10:33.5Z), `live` at 23:10:34.5Z and no reconnect until `broadcast-ended` at 23:16:22.3Z. INFERRED, the peer
+session's read: the relay's first SRT pulls of the camera input while it booted (23:10:50Z to 23:11:12Z).
+
+---
+
+### N48 — A start that took over 8 s read Failed, and the record could not say why
+
+**Seen:** N47's verification run (NE2211, build 1322, staging, session `622904ac…`, record R-310M). The operator's Go
+live hold was asked at 23:10:20.649Z and read `start-answered answer=Failed` at 23:10:28.660Z, 8.01 s later: the start
+POST's own timeout (`Http.TIMEOUT_MS`, 8 s). The server started the broadcast anyway: the next beat (23:10:32.5Z) said
+`Open`, and the phone armed and went live from it (`cause=operator`), as designed. The record said only `Failed`, so a
+timeout and a 503 read the same.
+
+**Fixed (phone):** `start-answered` now carries a failed answer's detail under `error`, a plain word the scrub keeps:
+the status (`503`, `not-json`, `401-not-refusal`) or `no-answer:` and the client's exception class name, which was
+`no answer: <class>` with a space and would have been masked (`StartTest`, `HttpTest`; the allow-list's `error` reason
+says so).
+
+**Not the phone's alone:** the Seazn-hosted start answering after 8 s. Measured by the Seazn-hosted session from its
+server rows (2026-11-23): the POST arrived 23:10:22.78Z (about 2.1 s after the phone sent it: network and TLS), and the
+server answered only after provisioning, at 23:10:31.25Z: two Cloudflare `create_live_input` calls in series (1.83 s,
+then 0.96 s for the programme input) and the Fly machine create (5.0 s), about 8.5 s on the server and 10.6 s from the
+phone's send. Not the relay booting, which follows the answer (an earlier inference here, wrong). Over 30 days on
+staging, YouTube operator starts averaged 5.0 s on the server (max 6.5 s) and organiser starts reached 12.4 s, so 8 s
+with the network was already marginal; the second input pushes it over. The web's side is queued (its Phase 4: create
+the inputs and the machine at once, or answer 202 before provisioning). The phone's timeout (`Http.TIMEOUT_MS`, 8 s, one
+client for every request, under the core's 10 s give-ups) is unchanged.
+
+**Fixed (phone), the owner's ruling (2026-11-23, "Pending until beat"):** a start that gets no answer (a timeout, a
+reset, a host not resolved: `no-answer:`) is not a failure. It stays pending in the pairing's `StartAsks`, the snapshot
+keeps `pairing.starting`, a second hold is ignored as one in flight is, and `waiting` beats do not end it; a beat that
+arms the phone does, with the beat's cause. Only when no beat has armed it 20 s after `start-asked`
+(`StartAsks.START_CONFIRM_MS`) is it the start failure it was (`START_FAILED`, `START_ERROR`). The record keeps
+`start-answered answer=Failed error=no-answer:…` and adds `start-pending`, then `start-unconfirmed` at the deadline. An
+answer that is a failure (a 503, a 404, a 429, a body no rule reads) still fails at once: the server answered, so it
+did not start. Leaving the pairing drops the pending with it (`StartPendingTest`). While it is pending the beats confirm it: one goes
+at once with the no-answer, then every 5 s (`BeatCadence.RETRY_MS`, the poll floor) until it clears, so a 60 s poll
+cannot leave the 20 s without a beat.
+
+**No fix, two more lines in the same record:**
+
+- One beat answered 503 at 23:11:14Z, while the relay booted; the next, at 23:11:22Z, was 200. A beat's 5xx is no
+  evidence (`NoEvidence`) and one is counted and passed over, as designed.
+- The bitrate regulator cut 3000k to 1210k for backlog between 23:13:51Z and 23:14:44Z (lost 224, 164 and 69 packets,
+  send buffer 1.2–1.7 s) and climbed again from 23:15:41Z. Not the 3 s GOP: Cloudflare's per-minute upload time, as a
+  share of the GOP's duration, peaked at 1.25 in this run and at 1.37 in N47's 2 s run, so both runs' uplinks fell
+  behind at times; the largest GOP was 1401 KB (3 s at about 3.7 Mb/s). INFERRED: the phone was on Wi-Fi (adb reached it on
+  the LAN); the record names no network.
+
+---
+
+### N49 — A switch from 4G to Wi-Fi on air waited 22 s for a stall, and the regulator then held the floor unseen
+
+**Seen:** staging, 2026-11-24, record R-RTRF, session `5e5403ce…`. The operator moved the phone from 4G to Wi-Fi at
+about 09:55, on air over SRT. The record, verbatim:
+
+```
+09:55:08.980 bitrate from 3000000 to 1354464 reason backlog egressBps 3362272 dropped 0 lost 0 sendBufferMs 1131
+09:55:10.982 bitrate from 1354464 to 677232 reason drops dropped 378 sendBufferMs 2049
+09:55:12.983 bitrate from 677232 to 500000 reason drops dropped 240 sendBufferMs 1902
+09:55:30.373 not-delivered cause stalled stalledMs 21615 lagGrowthMs 21883
+09:55:30.373 connecting srt attempt 17
+09:55:31.131 connected srt attempt 17
+09:55:32.134 resumed srt cause not-delivered outageMs 1761
+09:55:39.412 delivered
+```
+
+No `bitrate` line follows, to the auto-stop at 10:04:24. The phone showed "Weak signal. Still live." around 09:57 to
+09:59 on clean 5 GHz Wi-Fi with 0% ping loss. There is no `network` line. Cloudflare showed the input at 0.55–1.35 Mb/s
+from 09:55 to the end, against 2–3.3 Mb/s before. Cloudflare's input events: `INPUT_GOP_OUT_OF_RANGE` and
+`INPUT_DISCONNECTED` at 09:55:37–38, then `TIMEOUT_READING_FROM_INPUT` and `INPUT_DISCONNECTED` at 09:56:07 and
+09:56:15. INFERRED: all of them were the old 4G connection's, dying with a group of frames cut off; the new connection
+(attempt 17, 09:55:31) was never dropped, since the camera input's `statusEnteredAt` stayed at 09:55:31.659 until
+10:04:25.
+
+**The viewers' gap:** about 22 s on the phone (the switch to the stall verdict), then about 45 s more. INFERRED (fix
+round 1, 2026-11-24): Cloudflare held the old 4G publisher as the input's source until its read timeout
+(`TIMEOUT_READING_FROM_INPUT` at 09:56:07), so the playlist did not move although the new connection was up. Meanwhile
+the relay retried every few seconds and read 0 B (the seaznstream session's evidence). The relay's part is the web's.
+
+**Two causes on the phone:**
+
+- **The switch was never told.** `NetworkWatch` reported only a change of `NET_CAPABILITY_VALIDATED`, and the default
+  network was validated before and after, so the machine heard nothing. The SRT socket stayed on 4G until the delivery
+  watch's stall verdict (`stalledMs 21615`) started a new ingest session; that reconnect took 0.76 s.
+- **The floor poisoned the raise cap, silently.** From 09:55:12 the target sat at the 500k floor. Each later backlog or
+  drops cut recorded 500k as the rate that failed, so the raise cap was 80% of it, 400k, under the floor, for 5 min
+  after the last such cut, and no raise could happen. A cut that does not move the target wrote no line, while it still
+  moved the last-cut time that shows Weak signal. INFERRED, from the regulator's rule (only a cut in the last 30 s shows
+  Weak signal): the cuts went on at the floor to about 09:59, and the cap held the target at 500k after them. Why the
+  link backlogged on clean Wi-Fi is not known: the record names no network, and no floor cut wrote a line.
+
+**Fixed (phone), the owner's go-ahead (2026-11-24, "do both A and B"):**
+
+- **A.** A cut that cannot lower the target (it is at the floor already) keeps the rate that failed before it, and so
+  does a failing drop's halving at the floor (`BitrateRegulator.failedAt`). It still moves the last-cut time: a backlog
+  at 500k is a real poor uplink on the path the phone sends on, so Weak signal stays true and a raise waits 30 s after
+  it. A cut that lowers the target, a clamp onto the floor included, names the rate it left, as before, and that rate
+  still caps raises for 5 min. Cuts at the floor are now said as `bitrate-floor`, at most once a minute
+  (`FLOOR_LINE_MS`), with the rule of the cut, the count since the last line, and the reading's `egressBps`, `dropped`,
+  `lost` and `sendBufferMs` (`BitrateRegulatorFloorTest`, `SessionMachineBitrateRecordTest`).
+- **B.** The core's `DefaultNetwork` tells a validated report from another network than the last validated default as
+  `Input.NetworkSwitched`, stamped with the attempt in hand; `NetworkWatch` only feeds it the network's handle. The
+  first network is not a switch, nor one validated after the last was lost (its socket dies with it). The validated
+  fact is told exactly as before. On air, on the attempt in hand, with no outage, the machine replaces the attempt at
+  once as a new ingest session does (`StartNewSession`, on the transport in hand, RTMPS after a fallback included),
+  with a hold from the switch. Every switch writes `network-switched` with its `result`: `replaced`, `in-outage` (an
+  outage or its hold is in progress, so no second replace starts), `stale` (an attempt replaced since) or `not-on-air`
+  (`DefaultNetworkTest`, `NetworkSwitchTest`). The snapshot's cause while it reconnects is `uplink-lost`: a new word
+  would have to be taught to JS's snapshot reader and status line, which this fix leaves alone. The delivery watch's
+  thresholds are unchanged.
+
+**Fix round 1 (review of B, 2026-11-24):**
+
+- **Judged against the attempt's network.** B judged a switch against the last validated default, which a loss
+  forgot, so a fast hand-off (`onLost(4G)`, then Wi-Fi validated under SRT's peer-idle timeout of about 5 s, while the
+  4G socket lives on through the new route) was told as no switch. `Input.Network` now carries the validated network's
+  handle (`DefaultNetwork` tells it whenever validated is new or the network is another), the machine keeps the default
+  between phases as it keeps the validated fact, and each attempt keeps the default it was asked on
+  (`Session.attemptNetwork`), which a loss never forgets. `Input.NetworkSwitched` and the glue's attempt stamp are gone.
+- **A switch while an attempt connects.** B only recorded a switch during a replace in flight (`in-outage`), so 4G to
+  Wi-Fi to 4G inside a ~1 s connect left the new socket on Wi-Fi. A connecting attempt asked on another network is now
+  replaced once it connects, never torn down mid-connect; one that ends up back on its own network is not. Connected
+  and before its first frames, it is replaced at once, keeping its outage.
+- **A replaced switch is a new link.** The regulator forgets the rate the old link failed (`BitrateRegulator.newLink`),
+  which clears Weak signal; the target and the last cut stand, so the tested raise still gates the climb.
+- **The delivery watch.** A replaced switch starts the watch's ingest session again, as a not-delivered verdict does,
+  and no verdict comes for `SWITCH_GRACE_MS`, 45 s, after it (INFERRED, from the gap above: a verdict at ~20 s would
+  replace the good new socket too). A look inside the grace keeps no lag history but its own, so the lag the held
+  publisher built up is not read as growth after it.
+- **Unsaid floor cuts.** Cuts at the floor after the last `bitrate-floor` line are said when the session ends, under
+  the last cut's rule, with no reading (`FloorCuts.closed`).
+- The `network-switched` words are now `replaced`, `pending`, `same`, `between-attempts` and `not-on-air`; a switch
+  away from no network (the first, or after a loss) writes a line only when it replaces.
+
+**Not built: binding the SRT socket to a network.** No SRT socket is bound to an Android `Network`, so after a switch
+the old socket's packets, its shutdown included, are INFERRED to leave over the new network from a new address, which
+Cloudflare ignores. srtdroid 1.10.1 exposes no file descriptor and no `srt_bind_acquire` wrapper (its libsrt 1.5.7
+exports the C symbol only), and its libsrt carries the "SRTO_BINDTODEVICE is not supported on that platform" branch.
+`bindProcessToNetwork` would pin every socket of the process, the beats' and JS's HTTP included. Recorded for later;
+built since, under **Binding** below.
+
+**Device-only, not yet seen:** that Android tells a default switch as the new network's `onCapabilitiesChanged` with
+no `onLost` of the old one (INFERRED from the missing `network` line), and that the new socket opens on the new
+default.
+
+**Not the phone's:** two Go live holds at 09:42:43 and 09:42:49 failed `AlreadyLive refusedSid` for the session the
+phone had already ended; the web's to fix.
+
+**Batch 2 (the engine scan S1–S12 and the reviews of 98c12ffa, 2026-11-24).** Owner rulings of the day: one PR for
+all; S2 "Back off, never stop", doubling; the cause split below. Numbers marked DEVICE-UNVERIFIED are worked from the
+records and the code, not seen on a phone.
+
+- **The cause split, the own link (built).** `StuckWatch` (`LinkStuck.kt`) reads the regulator's link samples: on SRT,
+  at the 500k floor, with the send buffer at 75% of the latency or more (1500 ms at Cloudflare's 2000, the
+  descriptor's `cred.srt.latencyMs`), for 5 readings over at least 5 s, the attempt is replaced at once as a new ingest
+  session, keeping or opening the outage's hold, with a `link-stuck` line (new kind). R-RTRF's 4G death (1131, 2049,
+  then 1902 at the floor) reads stuck 13 s before its playlist verdict, if the buffer stayed high after the record's
+  last reading (INFERRED); the 2.4 GHz Wi-Fi run (1020, then 627) never does. DEVICE-UNVERIFIED. RTMPS reports no
+  buffer, so only the playlist verdict covers it.
+- **S2, the cause split, past the phone (built).** A not-delivered verdict with the own link healthy waits 0, 4, 8,
+  16, 32, then 64 s before its restart, staying at 64, and publishes meanwhile; `delivered` resets it and cancels a
+  waiting restart. A link cut in the last 30 s (Weak signal) restarts at once. The line carries `count` and `retryMs`.
+  The 20 s verdict stays as the safety net.
+- **S1 (built).** Below-floor rebuilds: three in a row go at once, then each waits 30, 60, 120, then 240 s from the
+  last, publishing the slow picture meanwhile; one window at both floors starts the count again. Session 8's 54 in
+  19 min would have been about 8. The shed and silenced-mic waivers stand. `video-stalled` carries `count` and
+  `retryMs` on a below-floor rebuild.
+- **S3 (built).** A drop that halves or restores the target writes `bitrate {from, to, reason}`, with `drop-halved`
+  or `drop-restored`.
+- **S4 (built).** An attempt that published 25 s clears the fallback count however it ends: a rebuild, a new ingest
+  session or a switch, not a drop alone.
+- **S5 (built).** The delivery watch's configured segment is the GOP, 3 s (`Encode.GOP_MS`, which the glue's
+  `gopDurationInS` reads), so stalled shows after 9 s; the not-delivered verdict stays at 20 s, its own constant.
+- **S6 (built).** Before the first frame no hold bounds the retries. The first minute of failures is as before; then
+  the retry waits 4, 8, 16, then 30 s, and `connect-failed` is said at most once a minute with `count`, its retry's
+  `connecting` line held back with it. After live nothing changes. `warmingDeadline` was parsed and never read:
+  deleted, since the server ends a warming session itself and says so on a beat.
+- **S8 (built).** Snapshots go up to JS at once when what they show changes, and otherwise about once a second, not
+  every tick (`BridgeCore.EMIT_MS`). JS reads a silent engine only after 3 s (`ENGINE_SILENT_MS`).
+- **S12 (built).** A failed snapshot writes `snapshot-failed {error, count}` (new kind): the first at once, then at
+  most one a minute, the class name only.
+- **Review minors (built).** (a) The switch grace ends once the playlist advances in the new session. (b) A reconnect
+  after a drop or a stuck link on another network than the publisher's gets the grace too. (c) `DefaultNetwork` carries
+  the handle in reports that are not validated. (d) A look inside the grace shows no lag (null, not 0).
+- **S7 (built, the small part).** A `LinkageError` from the facts read (an OEM API missing) is counted and said as a
+  facts failure, never held against the process, so it no longer ends a pairing. Stickiness for the capture stack's
+  own tasks is unchanged; no live trigger was seen.
+- **S10 (rejected).** `DescriptorAsks.GIVE_UP_MS` is not unreachable by the tests: `DescriptorAsksTest` ("an ask in
+  flight blocks the next until it is given up at 30 s") kills the mutation `sinceMs >= GIVE_UP_MS` → `false`.
+- **Backlog.** S9: a hung RTMPS connect holding the capture queue needs a read of komuxer's connect (cancellable or
+  blocking) before any change. S11: the two test files near 1500 lines (BridgeCoreTest is 1406 now; S7's test went to
+  a file of its own).
+
+**Batch 2, review fixes (2026-11-24).**
+
+- **Stuck replaces back off, and only an undelivered picture is replaced.** A stuck verdict acts only once the playlist
+  has not moved for 6 s, two 3 s segments (`StuckReplaces.STUCK_UNDELIVERED_MS`): a choppy picture still delivered is
+  never replaced; R-RTRF's 4G death had not moved for about 7 s, so it still fires. Stuck replaces in a row
+  (`StuckReplaces`, across attempts): two at once, then 15, 30, 60, then 120 s from the last; 30 s of readings not
+  stuck while the playlist moves starts the count again. `link-stuck` carries `retryMs`. DEVICE-UNVERIFIED.
+- **A stuck replace starts the delivery watch's ingest session again**, as a not-delivered restart does, so the old
+  attempt's stall no longer brings a second replace about 13 s into the new one.
+- **The meter keeps every peak.** Each facts read takes the meter's peak and resets it, and S8 sends every other
+  tick's snapshot, so the bridge carries the loudest peak read since the last send into the next one. The facts are
+  still read at every publish, and tick-late still observes every publish.
+- **Held lines are said.** A session that ends writes `connect-failed {transport, count}` for the failures its minute
+  held back; `snapshot-failed` says its held failures when a snapshot goes up again or the session ends.
+- **The cause split is judged again while a restart waits**: a link that turns poor goes at once, and a restart at once
+  for a poor link is no step of the ladder (`count` stays).
+- **What proves a path is publishing from the attempt's first frame**, not the connect (`FallbackPolicy.proved`).
+- `Transports.link` gives the regulator's commands to `regulatedCommands`.
+
+**Binding (2026-11-24).** Each SRT socket is bound to the network its attempt was asked on, before its connect, so
+after a switch the old socket's packets, its shutdown included, are meant to leave over 4G while 4G lingers, and the new
+socket is pinned to Wi-Fi. DEVICE-UNVERIFIED.
+
+- **The network.** `Command.Connect.network` (no default: every Connect states it) carries `Session.attemptNetwork`, the handle `NetworkWatch` reports
+  (`Network.getNetworkHandle()`). The NDK's `android_setsocknetwork` takes that handle as it is, so no `android.net.Network`
+  object is needed and core holds no platform type.
+- **The call.** srtdroid 1.10.1 has no fd getter and no `srt_bind_acquire` wrapper, and libsrt 1.5.7 exports the C
+  symbol. A JNI shim of our own (`src/main/cpp/srt_bind.c`, `libseazn_srt_bind.so`, C only, no new dependency) finds
+  `srt_bind_acquire` with `dlsym` in the libsrtdroid.so srtdroid already loaded (`RTLD_NOLOAD`), once for the process
+  (`pthread_once`). It makes a UDP socket
+  of the ingest address's family, binds it to the network, binds it to a wildcard address, and hands it to libsrt, after
+  every socket option and before the connect. The SRT socket's id is read by reflection (`CoroutineSrtSocket.socket`,
+  then `SrtSocket.srtsocket`, kept for an app that minifies).
+- **Never fatal.** Every outcome is one `srt-bind` line (new kind): `bound`, `no-network`, `unavailable` (the shim, the
+  socket id, libsrtdroid or the symbol, with `op` and a class name) or `failed` (`op` socket, network, bind or acquire,
+  with `errno-<n>` or libsrt's `srt-<n>`). Anything short of `bound` connects unbound, as before.
+- **A failed acquire** (review of 002dec1e): libsrt's state for that SRT socket is unknown, so the sink closes it and
+  connects a fresh one, made with the same options (`fresh`), unbound; the line adds `action: fresh-socket`, and the
+  close's class as `rootError` if it threw. The UDP socket is left open, since libsrt may have closed it already, and
+  binding then stops for the process, every sink included (`AcquireStop.PROCESS`, `op: disabled`), so at most one is
+  left.
+- **The switch.** `BIND_SRT_TO_NETWORK` (`srt/connect/SrtBind.kt`) ships on; off, nothing is bound or said.
+- **Close order.** A replace runs `disconnect(previous)`, which stops and closes the old endpoint and its socket, before
+  the new `connect` (`CaptureRun.reconnect`), so the old socket's shutdown goes out before the new socket opens, on the
+  old socket's own network. That the shutdown reaches Cloudflare, and that Cloudflare then lets the new connection take
+  the input at once, is INFERRED and device-only, as is everything the shim does.
+
+**Batch 2, re-review of d006c2dd (2026-11-24).**
+
+- **`snapshot-failed` keeps its minute on recovery.** A snapshot that goes up again says the held failures only once a
+  minute has passed since the last line, and every line restarts the minute; the rest wait for the next such
+  recovery or the session's end. Failures and recoveries by turns write at most three lines in two minutes.
+- **One fault, one ladder (the controller's ruling, applying the recommendation).** A not-delivered restart for a poor
+  link waits out the stuck ladder's wait (`StuckReplaces.waitLeftMs`) instead of going at once, and counts as its step;
+  the first two still go at once. A waiting restart whose link turns poor goes once that ladder allows it. A link that
+  stays poor restarts on 15, 30, 60, 120 s, not every 20 s.
+- **Going live says the start's held failures** (`connect-failed {transport, count}`), as the session's end does.
+- **A stuck verdict refused** by the 6 s gate or a replace's wait keeps its run (`StuckWatch.refused`), so it acts at the
+  first reading the gate allows.
+
+**Batch 2, re-review of 28f46d54 (2026-11-24).** A poor link's restart waits out the stuck ladder, judged at the
+verdict; while it waits, once the link is no longer poor (Weak signal lapses 30 s after the last cut), it goes at the
+sooner of that wait and the delivery ladder's time from the verdict, as the delivery ladder's step
+(`Deliveries.recovered`, `OnAir.recoveredAtMs`). A link still poor keeps the stuck wait.

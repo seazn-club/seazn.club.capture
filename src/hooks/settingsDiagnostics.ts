@@ -12,6 +12,8 @@ export type DiagRow = {
  * Owner, Q1 (2026-10-07): the Settings card shows these nine rows, in the board's order. The rest of
  * Diagnostics (target, fps, audio, resent, dropped, data, camera, drain, charging, the last result,
  * failures) and the Engine section stay out of the card. Share record still sends the whole record.
+ * T46 (design 2026-11-24 §3): on air, the server's four rows follow Delivery's (diagnostics.ts offers them on air only),
+ * so the card is 13 rows there and its half scrolls.
  */
 export const SETTINGS_DIAG_ROWS: readonly MessageKey[] = [
   'diag.transport',
@@ -20,6 +22,10 @@ export const SETTINGS_DIAG_ROWS: readonly MessageKey[] = [
   'diag.delivery',
   'diag.lag',
   'diag.checked',
+  'diag.relay',
+  'diag.programme',
+  'diag.cameraIngest',
+  'diag.programmeIngest',
   'diag.battery',
   'diag.thermal',
   'diag.hbSent',

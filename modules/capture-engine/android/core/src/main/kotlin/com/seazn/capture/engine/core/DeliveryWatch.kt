@@ -90,6 +90,8 @@ data class DeliveryWatch(
    * ([onPlaybackHost] refused it). Never cleared, by [newSession] either: the machine records it once a session.
    */
   val refusedOffHost: Boolean = false,
+  /** N49: no not-delivered verdict before this (monotonic) time, [SWITCH_GRACE_MS] after a network switch ([switched]). */
+  val verdictNotBeforeMs: Long? = null,
 ) {
   /** What is polled: the master, restricted to one rendition. */
   val pollUrl: String = hinted(playbackUrl)
@@ -118,12 +120,26 @@ data class DeliveryWatch(
     if (pending?.id != requestId) return Triple(this, emptyList(), null)
     val cleared = copy(pending = null)
     val playlist = (result as? FetchResult.Body)?.let { PlaylistParser.parse(it.text) }
-    return when {
-      result == FetchResult.NoContent && pendingIsMaster -> cleared.nothingLive()
-      playlist is Playlist.Master && pendingIsMaster -> cleared.fetchVariant(playlist, nowMs)
-      playlist is Playlist.Media -> cleared.observed(pending.url, playlist)
-      else -> Triple(cleared.withoutEvidence(), emptyList(), null)
-    }
+    val answered =
+      when {
+        result == FetchResult.NoContent && pendingIsMaster -> cleared.nothingLive()
+        playlist is Playlist.Master && pendingIsMaster -> cleared.fetchVariant(playlist, nowMs)
+        playlist is Playlist.Media -> cleared.observed(pending.url, playlist)
+        else -> Triple(cleared.withoutEvidence(), emptyList(), null)
+      }
+    // Review of 98c12ffa (a): the grace ends once the playlist moves in the new session; a stall after that is judged.
+    val quiet = !answered.first.advancedInSession && verdictNotBeforeMs?.let { nowMs < it } ?: false
+    return if (quiet) answered.copy(first = answered.first.quietLook(), third = null) else answered
+  }
+
+  /**
+   * N49: a look inside the switch's grace keeps no lag history but its own, so the lag the held old publisher built up
+   * is never read as growth once the grace is over: the lag rule judges from the last look in it. It shows no lag (review
+   * of 98c12ffa (d)), as a look with no evidence shows none: 0 would claim a lag measured.
+   */
+  private fun quietLook(): DeliveryWatch {
+    val last = lags.lastOrNull() ?: return this
+    return copy(lags = listOf(last), minLagMs = last.lagMs, deliveredLagMs = null)
   }
 
   /** After a forced new session: the new session proves itself from zero. */
@@ -142,6 +158,15 @@ data class DeliveryWatch(
       delivery = Delivery.UNKNOWN,
       deliveredLagMs = null,
     )
+
+  /**
+   * N49: the phone's socket was replaced for a switch of the default network. The new socket proves itself from zero, as
+   * after a forced new session, and no verdict comes for [SWITCH_GRACE_MS] from [nowMs]: Cloudflare is read to keep
+   * the old publisher as the input's source until its read timeout, so the playlist may not move for that long. A stall
+   * that outlasts it is said at the first look after it; the lag it built up is not ([quietLook]). The grace ends early
+   * at the new session's first advance: the new publisher is the source then, and a stall after it is its own.
+   */
+  fun switched(nowMs: Long): DeliveryWatch = newSession().copy(verdictNotBeforeMs = nowMs + SWITCH_GRACE_MS)
 
   private fun fetchVariant(master: Playlist.Master, nowMs: Long): Triple<DeliveryWatch, List<PlaylistRequest>, NotDelivered?> {
     val resolved = PlaylistParser.resolve(pollUrl, master.variants.first()) ?: return Triple(withoutEvidence(), emptyList(), null)
@@ -254,17 +279,51 @@ data class DeliveryWatch(
     /** "Polls the variant playlist every ~2 s" (spec §3). */
     const val POLL_MS = 2_000L
 
-    /** The segment we configure: Cloudflare's ~2 s segments (P5 Run A: 996 of 998 at ~2 s). */
-    const val CONFIGURED_SEGMENT_MS = 2_000L
+    /**
+     * The segment we configure: Cloudflare cuts a segment at a keyframe, so it is the encoder's GOP ([Encode.GOP_MS]),
+     * 3 s since N47 (S5). It was 2 s, matching the old 2 s GOP (P5 Run A: 996 of 998 segments at ~2 s). That Cloudflare
+     * now cuts 3 s segments, and not 6 s, is DEVICE-UNVERIFIED: read one live playlist's `EXTINF` to settle it.
+     */
+    const val CONFIGURED_SEGMENT_MS = Encode.GOP_MS
 
     /**
-     * Three configured segments (F-P5-4's fix, 6 s). Healthy cells never went 4.63 s between advances.
-     * The same for LL-HLS: a part target (~0.3 s) would call every hiccup a stall.
+     * Three configured segments (F-P5-4's fix), 9 s at the 3 s GOP. Healthy cells never went 4.63 s between advances
+     * with 2 s segments; 3 s segments, or 6 s ones, listed late, are seen further apart (S5). The same for LL-HLS: a part
+     * target (~0.3 s) would call every hiccup a stall.
      */
     const val STALLED_AFTER_MS = 3 * CONFIGURED_SEGMENT_MS
 
-    /** "A stall of about 20 s … means not-delivered" (spec §3; F-P5-13's "~20 s"). */
-    const val NOT_DELIVERED_MS = 10 * CONFIGURED_SEGMENT_MS
+    /**
+     * "A stall of about 20 s … means not-delivered" (spec §3; F-P5-13's "~20 s"). Its own number, never derived from the
+     * segment (S5): it was ten 2 s segments, and the owner wants the gap viewers see shorter, not longer (2026-11-24).
+     */
+    const val NOT_DELIVERED_MS = 20_000L
+
+    /**
+     * N49 (stg, 2026-11-24), INFERRED: after a 4G to Wi-Fi switch the viewers' playlist did not move for about 45 s, though
+     * the new connection was never dropped (the camera input's `statusEnteredAt` stayed at 09:55:31.659 until 10:04:25).
+     * Read as Cloudflare holding the old 4G publisher as the input's source until its read timeout. So no not-delivered
+     * verdict for this long after a switch replaced the socket: one at ~20 s would replace the good new socket too.
+     */
+    const val SWITCH_GRACE_MS = 45_000L
+
+    /**
+     * S2, the owner's ruling (2026-11-24, "Back off, never stop"): the extra wait before the restart a not-delivered
+     * verdict asks for, doubling from [FIRST_BACKOFF_MS] after the first verdict, which restarts at once, to
+     * [MAX_BACKOFF_MS], where it stays. Counted since `delivered` ([Session.deliveryRestarts]).
+     */
+    const val FIRST_BACKOFF_MS = 4_000L
+    const val MAX_BACKOFF_MS = 64_000L
+
+    /** The wait before the restart of verdict [restart] (1 for the first since `delivered`): 0, 4, 8, 16, 32, then 64 s. */
+    fun restartWaitMs(restart: Int): Long {
+      if (restart <= 1) return 0
+      val doublings = (restart - 2).coerceAtMost(MAX_DOUBLINGS)
+      return minOf(FIRST_BACKOFF_MS shl doublings, MAX_BACKOFF_MS)
+    }
+
+    /** 4 s doubled four times is 64 s; the cap also keeps the shift from overflowing. */
+    private const val MAX_DOUBLINGS = 4
 
     /** Delivered media falling 20 s further behind publishing within one minute. */
     const val LAG_GROWTH_LIMIT_MS = 20_000L

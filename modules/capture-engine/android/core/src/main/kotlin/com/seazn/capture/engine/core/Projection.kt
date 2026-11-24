@@ -30,7 +30,8 @@ object Projection {
       device = session?.device,
       camera = phase.camera,
       // Court stream Task 13 (P2): only Paired posts the hold's start, and an end keeps the pairing with it unanswered.
-      pairing = phase.pairing?.let { PairingView(it.name, it.automatic, it.waiting, starting = phase is Phase.Paired && it.starts.inFlightId != null) },
+      // N48: a start with no answer, pending a beat, is still starting.
+      pairing = phase.pairing?.let { PairingView(it.name, it.automatic, it.waiting, starting = phase is Phase.Paired && it.starts.awaited) },
       broadcast = session?.let { broadcastView(it) },
       ready = ready(phase),
       refusal = phase.pairing?.refusal,
@@ -38,6 +39,7 @@ object Projection {
       unpaired = (phase as? Phase.Idle)?.unpaired,
       codeEndedPending = phase.pairing?.codeEndedPending ?: false,
       language = phase.pairing?.language,
+      server = phase.session?.pairing?.server,
     )
   }
 
@@ -108,7 +110,8 @@ object Projection {
    * In [DegradeReason]'s declared order. Thermal is never one (AGENTS §8).
    *
    * Poor uplink is a cut in the last [SessionMachine.POOR_UPLINK_MS] that still stands (carry 16).
-   * Every cut records the rate it failed; a clean far-end restart that undoes a cut of its own
+   * Every cut that lowers the target records the rate it failed, and one at the floor keeps the last (R-RTRF), so a
+   * backlog at 500k still shows; a clean far-end restart that undoes a cut of its own
    * episode forgets that rate ([BitrateRegulator.afterDrop]) and restarts at the healthy target, so
    * the link it judged healthy is not shown as poor.
    */

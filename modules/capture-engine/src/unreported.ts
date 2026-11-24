@@ -24,6 +24,7 @@ export const IDLE_TELEMETRY: Telemetry = {
   thermalHeadroom: null,
   captureTimestampMs: null,
   shed: null,
+  server: null,
   heartbeat: { lastSentAtEpochMs: null, lastResult: null, consecutiveFailures: 0, failures: 0 },
   recordSinkFailures: 0,
   recordReentrantDropped: 0,

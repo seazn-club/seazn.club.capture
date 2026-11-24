@@ -8,6 +8,7 @@ import type {
 } from '@/domain/matchday/callWire';
 import type { ApprovalKind, MatchDay, MatchDayRefusal } from '@/domain/matchday/matchDay';
 import type { OpenAnswer } from '@/domain/matchday/openWire';
+import type { MatchDayTokenAnswer } from '@/domain/matchday/realtimeWire';
 import type { SavedDayCode } from '@/domain/mode/dayCode';
 
 /**
@@ -75,4 +76,10 @@ export interface MatchDayPort {
   call(code: SavedDayCode, fixtureId: string, courtId: string): Promise<CallAnswer<Called>>;
   /** `DELETE .../fixtures/{id}/call`: takes the call back, with no body; refused once the match has started. */
   undoCall(code: SavedDayCode, fixtureId: string): Promise<CallAnswer<Uncalled>>;
+  /**
+   * `GET /api/v1/match-day-code/realtime-token` (phone design 2026-11-24 §4): a grant to hear the day's nudges by, or why
+   * not. A 429 carries its Retry-After. Any failure means the list polls only; none is shown to the operator. The
+   * grant's token is the caller's to hold in memory, and nothing here keeps or says it.
+   */
+  realtimeToken(code: SavedDayCode): Promise<MatchDayTokenAnswer>;
 }

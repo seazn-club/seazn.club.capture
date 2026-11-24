@@ -18,6 +18,7 @@ import com.seazn.capture.engine.core.Scheduler
 import com.seazn.capture.engine.core.SessionRecord
 import com.seazn.capture.engine.core.Snapshot
 import com.seazn.capture.engine.core.SnapshotSink
+import com.seazn.capture.engine.core.shown
 import com.seazn.capture.engine.core.UnpairReason
 import com.seazn.capture.engine.core.Unpaired
 import com.seazn.capture.engine.core.attemptInHand
@@ -111,6 +112,16 @@ class BridgeCore(
 
   /** The phase the last snapshot was published in, by name (review C4a m-1). Scheduler thread. */
   private var publishedPhase: String? = null
+
+  /** S8: the last snapshot sent up to JS, as [shown] reads it, and when. Scheduler thread. */
+  private var sentShown: Snapshot? = null
+  private var sentAtMs: Long? = null
+
+  /**
+   * Review of batch 2, item 3: the loudest peak read since the last send. Each facts read takes the meter's peak and
+   * resets it (`PeakMeter.take`), so a peak read on a tick that is not sent rides on the next send, never lost.
+   */
+  private var heldPeak = 0.0
 
   /** The last published snapshot's language (P3), for the glue's notification. */
   @Volatile private var language: String? = null
@@ -498,7 +509,9 @@ class BridgeCore(
   private fun published(snapshot: Snapshot) {
     // PV22: Phase.holdsService is Paired or a broadcast held, the wake lock's span: one definition.
     ticks.observe(clock.monotonicMs(), wakeHeld = engine.phase.holdsService)?.let(engine::log)
-    val wire = wire(snapshot, read().copy(deliveryCheckedAtMs = checkedAtMs))
+    val facts = read()
+    val peak = maxOf(heldPeak, facts.audioLevel.takeIf { it.isFinite() } ?: 0.0)
+    val wire = wire(snapshot, facts.copy(audioLevel = peak, deliveryCheckedAtMs = checkedAtMs))
     language = snapshot.language
     current = wire
     // Review C4a m-1: a tick can move the phase with no input behind it, such as an outage hold that ran
@@ -511,22 +524,47 @@ class BridgeCore(
     // Review C4a N-1 (ruling C4a-N1): a minute that held lines back ends with the state the machine
     // heard, written by the first publish after it runs out, so a state that then stays is on the record.
     sent?.let { heard -> readinessLines.flush(clock.monotonicMs()) { readinessFields(heard) } }?.let(engine::log)
+    heldPeak = peak
+    if (emit(snapshot, wire)) heldPeak = 0.0
+  }
+
+  /**
+   * S8: up to JS at once when what it shows changed, and otherwise about once a second ([EMIT_MS]): every other tick.
+   * JS reads a silent engine only after 3 s, and its clocks count from instants, not snapshots, so 2 Hz bought nothing
+   * but bridge traffic. [current] stays fresh at every publish, for a pull. A send that throws is not counted as sent.
+   */
+  private fun emit(snapshot: Snapshot, wire: Map<String, Any?>): Boolean {
+    val shown = snapshot.shown()
+    val now = clock.monotonicMs()
+    val due = shown != sentShown || sentAtMs?.let { now - it >= EMIT_MS - Engine.TICK_MS / 2 } ?: true
+    if (!due) return false
     platform.snapshot(wire)
+    sentShown = shown
+    sentAtMs = now
+    return true
   }
 
   /**
    * Review C4a I-2: facts that throw never stop the snapshots. The last good facts stand in, the
    * snapshot is counted as not whole, and the failure is an `engine-error` line, at most one a minute
-   * ([ErrorLines]). An `Error` is not caught here: it reaches the task boundary (carry 15).
+   * ([ErrorLines]). An `Error` other than a `LinkageError` (S7) is not caught here: it reaches the task boundary (carry 15).
    */
   private fun read(): PlatformFacts =
     try {
       platform.facts().also { lastFacts = it }
     } catch (failure: Exception) {
-      factsFailures += 1
-      errors.line(clock.monotonicMs(), "facts: ${Failures.describe(failure)}")?.let(engine::log)
-      lastFacts
+      factFailed(failure)
+    } catch (failure: LinkageError) {
+      // S7: an OEM API missing from a facts read is no part of the capture stack, so it is never held against the
+      // process (Failures.permanent) and never ends a pairing: it is counted and said as any facts failure is.
+      factFailed(failure)
     }
+
+  private fun factFailed(failure: Throwable): PlatformFacts {
+    factsFailures += 1
+    errors.line(clock.monotonicMs(), "facts: ${Failures.describe(failure)}")?.let(engine::log)
+    return lastFacts
+  }
 
   /** The record's counters, the scheduler guard's (review 13, I3), and the engine's and the bridge's (review C4a I-2, m-8), for Diagnostics. */
   private fun wire(snapshot: Snapshot, facts: PlatformFacts): Map<String, Any?> =
@@ -565,6 +603,9 @@ class BridgeCore(
   private fun whole(value: Any?): Any? = if (value is Double && value % 1.0 == 0.0 && abs(value) <= MAX_EXACT) value.toLong() else value
 
   companion object {
+    /** S8: a snapshot that shows nothing new goes up to JS about once a second, AGENTS §2's ~1 Hz. */
+    const val EMIT_MS = 1_000L
+
     /**
      * C0b's backstop: twice the client's own timeout ([HttpRequests.TIMEOUT_MS]), so past it and past
      * every give-up of the core's (10 s): a real answer, or the core's own, always comes first.

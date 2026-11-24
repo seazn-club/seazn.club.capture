@@ -64,8 +64,16 @@ class DefaultNetworkTest {
   }
 
   @Test
-  fun `a new default not yet validated tells not validated, and its validation then tells its handle`() {
-    assertEquals(listOf(on(cellular), notValidated, on(wifi)), heard(caps(cellular), caps(wifi, validated = false), caps(wifi)))
+  fun `a new default not yet validated tells not validated with its handle, and its validation then tells it again`() {
+    // Review of 98c12ffa (c): the handle rides a not-validated report too, so an attempt asked then keeps its network.
+    val unvalidatedWifi = listOf(Input.Network(false, wifi))
+    assertEquals(listOf(on(cellular), unvalidatedWifi, on(wifi)), heard(caps(cellular), caps(wifi, validated = false), caps(wifi)))
+  }
+
+  @Test
+  fun `an unvalidated default is told once, and again only when it names another network`() {
+    val told = heard(caps(cellular, validated = false), caps(cellular, validated = false), caps(wifi, validated = false))
+    assertEquals(listOf(listOf(Input.Network(false, cellular)), emptyList(), listOf(Input.Network(false, wifi))), told)
   }
 
   @Test
@@ -74,7 +82,12 @@ class DefaultNetworkTest {
   }
 
   @Test
-  fun `a loss with nothing validated tells nothing, and an unvalidated first network tells nothing`() {
-    assertEquals(listOf(emptyList<Input>(), emptyList()), heard(lost(cellular), caps(cellular, validated = false)))
+  fun `a loss with no network tells nothing, and an unvalidated first network tells its handle`() {
+    assertEquals(listOf(emptyList(), listOf(Input.Network(false, cellular))), heard(lost(cellular), caps(cellular, validated = false)))
+  }
+
+  @Test
+  fun `a loss of an unvalidated default tells not validated with no handle, so the machine forgets it`() {
+    assertEquals(listOf(listOf(Input.Network(false, cellular)), notValidated), heard(caps(cellular, validated = false), lost(cellular)))
   }
 }

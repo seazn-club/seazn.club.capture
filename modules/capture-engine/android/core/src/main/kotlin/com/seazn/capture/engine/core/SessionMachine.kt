@@ -200,13 +200,17 @@ object SessionMachine {
    * open until it hears it, and Go live is offered from this step, so a beat at the cadence would lose the race to the
    * operator's hold. A held beat never carries it (RR3), so a return while held keeps the cadence.
    *
-   * N49: then the default network it names, held while validated and forgotten when not, is judged against the attempt
-   * in hand ([Transports.network]). A validated report that names none leaves it as it was.
+   * N49: then the default network it names is held, and a validated one is judged against the attempt in hand
+   * ([Transports.network]), against the default before it only while that one was validated. A validated report that
+   * names none leaves it as it was. Review of 98c12ffa (c): a not-validated report's network is held too, unjudged, so an
+   * attempt asked on it keeps its true network ([Session.attemptNetwork]); a loss names none and forgets it.
    */
   private fun network(phase: Phase, input: Input.Network, now: Now): Step {
-    val handle = if (input.validated) input.handle ?: phase.defaultNetwork else null
+    val handle = input.handle ?: if (input.validated) phase.defaultNetwork else null
     val told = validatedFact(phase, input.validated, now)
-    val judged = Transports.network(told.phase, phase.defaultNetwork, handle, now)
+    if (!input.validated) return told.copy(phase = told.phase.withDefaultNetwork(handle))
+    val previous = if (phase.networkValidated) phase.defaultNetwork else null
+    val judged = Transports.network(told.phase, previous, handle, now)
     return judged.copy(commands = told.commands + judged.commands)
   }
 
@@ -237,7 +241,7 @@ internal object Transports {
   private val CONNECT_COUNTERS = LinkCounters(0, 0, 0, 0, 0, null, null, null)
 
   fun connect(session: Session, transport: Transport, outage: Outage?, now: Now): Step {
-    val (next, connect) = connectCommand(session, transport) ?: return missingTarget(session, transport, now)
+    val (next, connect) = connectCommand(session, transport, now) ?: return missingTarget(session, transport, now)
     val phase = Phase.Connecting(next, transport, ConnectStep.Requested(connect.attemptId, now.monoMs), outage)
     return Step(phase, listOf(connect, record("connecting", "transport" to transport, "attempt" to connect.attemptId)))
   }
@@ -248,20 +252,33 @@ internal object Transports {
    * refusal's asks are (B6 ruling C1, B7).
    */
   fun replace(onAir: Phase.OnAir, session: Session, outage: Outage?, now: Now, wrap: (Command.Connect) -> Command): Step {
-    val (connected, connect) = connectCommand(session, onAir.transport) ?: return missingTarget(session, onAir.transport, now)
+    val (connected, connect) = connectCommand(session, onAir.transport, now) ?: return missingTarget(session, onAir.transport, now)
     val (next, fetch) = if (connected.descriptor.mayAsk(now.monoMs)) askDescriptor(connected, now) else connected to null
     val phase = Phase.Connecting(next, onAir.transport, ConnectStep.Requested(connect.attemptId, now.monoMs), outage)
     val connecting = record("connecting", "transport" to onAir.transport, "attempt" to connect.attemptId)
     return Step(phase, listOfNotNull(wrap(connect), connecting, fetch))
   }
 
-  private fun connectCommand(session: Session, transport: Transport): Pair<Session, Command.Connect>? {
+  private fun connectCommand(session: Session, transport: Transport, now: Now): Pair<Session, Command.Connect>? {
     val target = session.config.target(transport) ?: return null
     val bps = session.regulation.targetBps
     val maxBw = if (transport == Transport.SRT) SrtBandwidth.maxBwBytesPerSecond(bps) else null
     val id = session.nextAttemptId
     // N49: the attempt is asked on the default network the machine holds, and keeps it until the next is asked.
-    return session.copy(nextAttemptId = id + 1, attemptNetwork = session.defaultNetwork) to Command.Connect(id, target, bps, maxBw)
+    val asked = session.copy(nextAttemptId = id + 1, attemptNetwork = session.defaultNetwork)
+    return graced(asked, now) to Command.Connect(id, target, bps, maxBw)
+  }
+
+  /**
+   * Review of 98c12ffa (b), N49: Cloudflare is read to hold the last publisher as the input's source until its read
+   * timeout, so an attempt asked on another network than the last one that connected ([Session.publisherNetwork]) gets
+   * the switch's grace: the watch starts its session again with no verdict for [DeliveryWatch.SWITCH_GRACE_MS]. After a
+   * drop, a stall, a stuck link or a switch alike; an attempt asked on no known network gets none.
+   */
+  private fun graced(session: Session, now: Now): Session {
+    val publisher = session.publisherNetwork ?: return session
+    val asked = session.attemptNetwork ?: return session
+    return if (asked == publisher) session else session.copy(delivery = session.delivery.switched(now.monoMs))
   }
 
   /** Unreachable after arm's checks; kept total so a bug ends the session visibly rather than throwing. */
@@ -271,7 +288,9 @@ internal object Transports {
   fun connected(phase: Phase, attemptId: Int, now: Now): Step {
     val step = (phase as? Phase.Connecting)?.step
     if (phase is Phase.Connecting && step is ConnectStep.Requested && step.attemptId == attemptId) {
-      val session = phase.session.copy(regulation = BitrateRegulator.attemptStarted(phase.session.regulation))
+      // Review of 98c12ffa (b): the publisher is now this attempt, on the network it was asked on.
+      val started = phase.session.copy(regulation = BitrateRegulator.attemptStarted(phase.session.regulation))
+      val session = started.copy(publisherNetwork = started.attemptNetwork)
       // Seeded at the connect (carry 13): the first reading's bytes, drops and egress count from here.
       val meter = LinkMeter(CONNECT_COUNTERS, now.monoMs)
       val onAir = Phase.OnAir(session, attemptId, phase.transport, now.monoMs, StallWatchdog(now.monoMs), meter, outage = phase.outage)

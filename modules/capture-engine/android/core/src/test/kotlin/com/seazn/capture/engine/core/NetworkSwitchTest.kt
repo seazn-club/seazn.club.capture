@@ -468,4 +468,70 @@ class NetworkSwitchTest {
     val at = verdictAt ?: error("no verdict")
     assertTrue(at - frozeAt < DeliveryWatch.SWITCH_GRACE_MS)
   }
+
+  /**
+   * Review of 98c12ffa (c): a not-validated report carries its network too, so an attempt asked while the default is
+   * not validated yet keeps the network it opened on, never adopting the next one validated. Here the default moved
+   * to Wi-Fi, not validated yet, and the drop's retry opened there; then 4G validates as the default again.
+   */
+  @Test
+  fun `an attempt asked on an unvalidated default keeps its true network, and another validated replaces it`() {
+    val rig = liveOnCellular()
+    rig.send(Input.Network(false, wifi))
+    assertEquals(wifi, rig.phase.defaultNetwork, "held, though not validated")
+    rig.send(Input.Dropped(1, DropReason.ENDPOINT_CLOSED, null))
+    rig.advance(2_000)
+    assertEquals(wifi, rig.session.attemptNetwork, "the retry opened on Wi-Fi")
+    rig.resumedOn(2)
+    val renewed = rig.on(cellular).replaces().single()
+    assertEquals(2, renewed.previousAttemptId)
+    assertEquals(listOf("replaced"), rig.switchLines())
+  }
+
+  @Test
+  fun `an attempt asked on an unvalidated default is not replaced when that network validates`() {
+    val rig = liveOnCellular()
+    rig.send(Input.Network(false, wifi))
+    rig.send(Input.Dropped(1, DropReason.ENDPOINT_CLOSED, null))
+    rig.advance(2_000)
+    rig.resumedOn(2)
+    assertFalse(rig.on(wifi).opens())
+    assertEquals(wifi, rig.session.attemptNetwork)
+    assertEquals(emptyList(), rig.switchLines(), "validated where it was opened: no switch, and no network before it to say same against")
+  }
+
+  /**
+   * Review of 98c12ffa (b), N49: Cloudflare is read to hold the old publisher as the input's source for about 45 s. A
+   * reconnect after a drop that opens on another network than the last attempt that published gets the switch's grace,
+   * as a replaced switch does: no not-delivered verdict for [DeliveryWatch.SWITCH_GRACE_MS] from its ask.
+   */
+  @Test
+  fun `a reconnect after a drop on another network than the publisher's gets the switch grace`() {
+    var frozen = false
+    val rig = deliveredThenHeld { frozen }
+    frozen = true
+    rig.lost()
+    rig.send(Input.Dropped(1, DropReason.ENDPOINT_CLOSED, null))
+    rig.on(wifi)
+    rig.advance(2_000)
+    val askedAt = rig.mono
+    assertEquals(wifi, rig.session.attemptNetwork)
+    assertEquals(askedAt + DeliveryWatch.SWITCH_GRACE_MS, rig.session.delivery.verdictNotBeforeMs)
+    rig.resumedOn(2)
+    var verdictAt: Long? = null
+    rig.advance(DeliveryWatch.SWITCH_GRACE_MS + 4_000) { if (verdictAt == null && rig.records("not-delivered").isNotEmpty()) verdictAt = rig.mono }
+    val at = verdictAt ?: error("no verdict after the grace")
+    assertTrue(at - askedAt >= DeliveryWatch.SWITCH_GRACE_MS, "verdict ${at - askedAt} ms after the reconnect was asked")
+  }
+
+  @Test
+  fun `a reconnect after a drop on the publisher's own network gets no grace`() {
+    var frozen = false
+    val rig = deliveredThenHeld { frozen }
+    frozen = true
+    rig.send(Input.Dropped(1, DropReason.ENDPOINT_CLOSED, null))
+    rig.advance(2_000)
+    assertEquals(cellular, rig.session.attemptNetwork)
+    assertNull(rig.session.delivery.verdictNotBeforeMs)
+  }
 }

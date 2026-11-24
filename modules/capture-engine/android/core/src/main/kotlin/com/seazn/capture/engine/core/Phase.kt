@@ -131,6 +131,11 @@ data class Session(
    * forgotten on a loss: its socket was opened there. Null when none was validated then; the next one validated is adopted.
    */
   val attemptNetwork: Long? = null,
+  /**
+   * Review of 98c12ffa (b): [attemptNetwork] of the last attempt that connected, the publisher Cloudflare may still hold
+   * as the input's source; null before the first ([Transports.connected]).
+   */
+  val publisherNetwork: Long? = null,
   /** Set by the first encoded frame, and kept across drops: the HUD's elapsed time never resets. */
   val liveSinceEpochMs: Long? = null,
   val notDelivered: Boolean = false,

@@ -270,6 +270,7 @@ class CaptureRunAttemptTest : CaptureRunTestKit() {
   @Test
   fun `S9 an abandoned start's late end after an unpair, or after a re-pair, closes nothing`() =
     runTest {
+      var checked = 0
       for (repair in listOf(false, true)) {
         val pool = Executors.newFixedThreadPool(2)
         val freed = CountDownLatch(1)
@@ -281,7 +282,7 @@ class CaptureRunAttemptTest : CaptureRunTestKit() {
           runCurrent()
           s.run.close()
           advanceUntilIdle() // the abandoned start's thread is held; nothing else is in flight
-          assertTrue("release done" in s.parts.log, "repair=$repair: the unpair is not held by the abandoned start: ${s.parts.log}")
+          assertTrue("release done" in s.parts.log, "repair=$repair: the fake's release takes no lock (N50: on a device the unpair waits): ${s.parts.log}")
           if (repair) {
             s.run.open(request)
             advanceUntilIdle()
@@ -293,11 +294,13 @@ class CaptureRunAttemptTest : CaptureRunTestKit() {
           advanceUntilIdle()
           assertEquals(emptyList(), s.parts.log, "repair=$repair: the late end touches nothing")
           assertEquals(repair, s.parts.held, "repair=$repair: the capture held is as the operator left it")
+          checked += 1
         } finally {
           freed.countDown()
           pool.shutdownNow()
         }
       }
+      assertEquals(2, checked, "both cases ran")
     }
 
   // --- The broadcast's end, and the commands passed through ---

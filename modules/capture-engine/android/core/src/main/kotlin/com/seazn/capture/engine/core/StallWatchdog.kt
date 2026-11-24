@@ -39,6 +39,10 @@ data class StallWatchdog(
   val videoFps: Double? = null,
   val audioFps: Double? = null,
 ) {
+  /** S1: the last window judged met both floors ([BelowFloorRebuilds] starts its count again). */
+  val ratedHealthy: Boolean
+    get() = (videoFps ?: -1.0) >= VIDEO_FLOOR_FPS && (audioFps ?: -1.0) >= AUDIO_FLOOR_FPS
+
   /** The LIVE gate: an encoded video frame arrived within the last [STALL_MS]. */
   fun advancing(nowMs: Long): Boolean = lastAdvanceAtMs?.let { nowMs - it < STALL_MS } ?: false
 
@@ -152,5 +156,38 @@ data class StallWatchdog(
     /** F-P5-9: "fewer than 10 video frames/s or 20 audio frames/s over 3 s". */
     const val VIDEO_FLOOR_FPS = 10.0
     const val AUDIO_FLOOR_FPS = 20.0
+  }
+}
+
+/**
+ * S1: the session's below-floor rebuilds in a row. Each rebuild opened a fresh hold, so the 60 s hold never bounded a
+ * picture that stayed under the floor: session 8 rebuilt 54 times in 19 min (before the shed waiver), a reconnect every
+ * ~21 s, and a slow but continuous picture became a broken one. The first [FREE_REBUILDS] in a row go at once, as before;
+ * each one after waits [waitMs] from the last, and the picture publishes meanwhile. One window that meets both floors
+ * starts the count again ([StallWatchdog.ratedHealthy]). The waivers (a shed, a silenced mic) stand: they judge no floor.
+ */
+data class BelowFloorRebuilds(val count: Int = 0, val lastAtMs: Long? = null) {
+  /** Whether a below-floor verdict may rebuild now. */
+  fun mayRebuild(nowMs: Long): Boolean = lastAtMs?.let { nowMs - it >= waitMs(count + 1) } ?: true
+
+  fun rebuilt(nowMs: Long): BelowFloorRebuilds = BelowFloorRebuilds(count + 1, nowMs)
+
+  companion object {
+    /** A rebuild fixes a pipeline that stalled once; three in a row did not. */
+    const val FREE_REBUILDS = 3
+
+    /** Then 30 s, doubling to [MAX_WAIT_MS]: session 8's 19 min would have rebuilt about 8 times, not 54. */
+    const val FIRST_WAIT_MS = 30_000L
+    const val MAX_WAIT_MS = 240_000L
+
+    /** 30 s doubled three times is 240 s; the cap also keeps the shift from overflowing. */
+    private const val MAX_DOUBLINGS = 3
+
+    /** The wait after the rebuild before it for rebuild [rebuild] in a row (1 for the first): 0 three times, then 30 s on. */
+    fun waitMs(rebuild: Int): Long {
+      if (rebuild <= FREE_REBUILDS) return 0
+      val doublings = (rebuild - FREE_REBUILDS - 1).coerceAtMost(MAX_DOUBLINGS)
+      return minOf(FIRST_WAIT_MS shl doublings, MAX_WAIT_MS)
+    }
   }
 }

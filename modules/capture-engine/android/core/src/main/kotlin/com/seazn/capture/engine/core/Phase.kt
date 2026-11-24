@@ -139,6 +139,8 @@ data class Session(
   /** Set by the first encoded frame, and kept across drops: the HUD's elapsed time never resets. */
   val liveSinceEpochMs: Long? = null,
   val notDelivered: Boolean = false,
+  /** S1: below-floor rebuilds in a row, across attempts, and when the last went. */
+  val belowFloor: BelowFloorRebuilds = BelowFloorRebuilds(),
   /** S2: not-delivered verdicts since the playlist last showed delivery (`delivered`), the backoff's step. */
   val deliveryRestarts: Int = 0,
   val camera: CameraState = CameraState.OWN,

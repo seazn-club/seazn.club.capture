@@ -449,6 +449,8 @@ internal object Transports {
     val (watchdog, verdict) =
       phase.watchdog.frames(input.videoFrames, input.audioFrames, now.monoMs, session.camera.slateOnAir, session.micSilenced, session.device?.shed)
     var next = phase.copy(watchdog = watchdog)
+    // S1: a window at the floors starts the below-floor count again.
+    if (watchdog.ratedHealthy && session.belowFloor.count > 0) next = next.copy(session = session.copy(belowFloor = BelowFloorRebuilds()))
     val commands = mutableListOf<Command>()
     if (watchdog.advancing(now.monoMs)) {
       if (next.session.liveSinceEpochMs == null) {
@@ -466,6 +468,12 @@ internal object Transports {
       }
     }
     if (verdict !is StallVerdict.Rebuild) return Step(next, commands)
+    if (verdict.cause == StallCause.BELOW_FLOOR) {
+      // S1: past three in a row, a below-floor rebuild waits its turn, and the slow picture publishes meanwhile.
+      val floor = next.session.belowFloor
+      if (!floor.mayRebuild(now.monoMs)) return Step(next, commands)
+      next = next.copy(session = next.session.copy(belowFloor = floor.rebuilt(now.monoMs)))
+    }
     val rebuilt = Timers.rebuild(next, verdict, now)
     return rebuilt.copy(commands = commands + rebuilt.commands)
   }
@@ -666,20 +674,22 @@ internal object Timers {
    * The stall watchdog asked for a rebuild (F-P5-6, F-P5-9). The record's `msSinceAdvance` counts
    * from the last frame; for `no-first-frame`, from the connect; and when `rebaselined` is true, from
    * our own camera reopen, which is not a frame (carry 7), or for a switch from the tap or the last
-   * frame before it ([Devices.switched]).
+   * frame before it ([Devices.switched]). S1: a below-floor rebuild also says how many in a row it is (`count`) and how
+   * long the next must wait (`retryMs`, [BelowFloorRebuilds.waitMs]).
    */
   fun rebuild(onAir: Phase.OnAir, verdict: StallVerdict.Rebuild, now: Now): Step {
     val outage = onAir.outage ?: Transports.outageFor(onAir.session, onAir.transport, now, ReconnectCause.VIDEO_STALLED)
     val watchdog = onAir.watchdog
-    val stalled =
-      record(
-        "video-stalled",
+    val floor = onAir.session.belowFloor.takeIf { verdict.cause == StallCause.BELOW_FLOOR }
+    val fields =
+      listOf(
         "cause" to verdict.cause,
         "msSinceAdvance" to verdict.msSinceAdvance,
         "rebaselined" to (watchdog.lastAdvanceAtMs == null && watchdog.stallFromMs != null),
         "videoFps" to verdict.videoFps,
         "audioFps" to verdict.audioFps,
-      )
+      ) + listOfNotNull(floor?.let { "count" to it.count }, floor?.let { "retryMs" to BelowFloorRebuilds.waitMs(it.count + 1) })
+    val stalled = Command.Record(RecordEntry("video-stalled", fields))
     val step = Transports.replace(onAir, onAir.session, outage, now) { Command.Rebuild(onAir.attemptId, it) }
     return step.copy(commands = listOf(stalled) + step.commands)
   }

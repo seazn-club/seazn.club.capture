@@ -11,6 +11,11 @@ import {
 } from '@/domain/matchday/callWire';
 import { parseDay } from '@/domain/matchday/dayWire';
 import { openRefused, parseOpen, type OpenAnswer } from '@/domain/matchday/openWire';
+import {
+  parseRealtimeToken,
+  parseRetryAfter,
+  type MatchDayTokenAnswer,
+} from '@/domain/matchday/realtimeWire';
 import { parseRefusal } from '@/domain/matchday/refusalWire';
 import type { Read } from '@/domain/matchday/wire';
 import type { SavedDayCode } from '@/domain/mode/dayCode';
@@ -37,8 +42,14 @@ type Deps = {
   now?: () => number;
 };
 
-type Op = 'day' | 'open' | 'review' | 'approve' | 'candidates' | 'preview' | 'call' | 'undo';
-type Reply = { readonly status: number; readonly body: unknown };
+type Op =
+  'day' | 'open' | 'review' | 'approve' | 'candidates' | 'preview' | 'call' | 'undo' | 'realtime';
+/** `retryAfter`: the answer's Retry-After header, read only for a 429. */
+type Reply = {
+  readonly status: number;
+  readonly body: unknown;
+  readonly retryAfter: string | null;
+};
 /** No answer at all, and why: a closed word, never an error's own text. */
 type Lost = { readonly problem: string };
 
@@ -79,7 +90,32 @@ export function createFetchMatchDayPort(deps: Deps): MatchDayPort {
       return answerOf(say, 'approve', reply, parseApproved, nineWords);
     },
     ...callCalls(deps, say),
+    realtimeToken: (code) => realtimeToken(deps, say, code),
   };
+}
+
+/**
+ * The realtime door (phone design 2026-11-24 §4). A 429 is the one answer here that carries more than offline: the wait
+ * its Retry-After asked for. A refusal is its word; a 404, a 5xx or a garbled grant is offline. The grant's token is
+ * never said: it is in no line this port writes, and it is not handed to the logger to mask either, since the masker
+ * keeps the last 16 secrets and an hourly refresh would push the scoring links' out.
+ */
+async function realtimeToken(
+  deps: Deps,
+  say: Reporter,
+  code: SavedDayCode,
+): Promise<MatchDayTokenAnswer> {
+  const reply = await send(deps, code, 'GET', `${ROOT}/realtime-token`, MAX_BODY_BYTES);
+  if (!('problem' in reply) && reply.status === 429) {
+    say.failed('realtime', OFFLINE, 429, 'rate-limited');
+    return {
+      ok: false,
+      retryAfterMs: parseRetryAfter(reply.retryAfter, deps.now?.() ?? Date.now()),
+    };
+  }
+  const answer = answerOf(say, 'realtime', reply, parseRealtimeToken, nineWords);
+  if (answer.ok) return answer;
+  return 'refusal' in answer ? { ok: false, refusal: answer.refusal } : OFFLINE;
 }
 
 type CallCalls = Pick<MatchDayPort, 'candidates' | 'previewCall' | 'call' | 'undoCall'>;
@@ -196,7 +232,17 @@ async function exchange(
     return { problem: 'redirected' };
   }
   const body = await bodyOf(response, request.cap);
-  return body === TOO_LARGE ? { problem: 'too-large' } : { status: response.status, body };
+  if (body === TOO_LARGE) return { problem: 'too-large' };
+  return { status: response.status, body, retryAfter: retryAfterOf(response) };
+}
+
+/** The answer's Retry-After, as sent (only a 429's is ever read); null when the headers cannot be read. */
+function retryAfterOf(response: FetchResponse): string | null {
+  try {
+    return response.headers.get('Retry-After');
+  } catch {
+    return null;
+  }
 }
 
 /** The body as JSON, null when it is none, or {@link TOO_LARGE} over the cap: never a body cut short. */

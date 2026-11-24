@@ -19,7 +19,7 @@ export type RealtimeHandlers = {
  * S2's "something changed" channel (design §6.3, ruling 27): a private Supabase Realtime broadcast of
  * `state_changed`, a ping that is only ever a reason to read the ledger, never data (plan S2-1 Task 8).
  *
- * One subscription at a time: a second `subscribe` closes the first, so the app never holds two sockets, and the
+ * One subscription at a time per port: a second `subscribe` closes the first, so a family never holds two sockets, and the
  * first's owner is not told (its handlers just stop): the caller keeps a single owner of the channel (plan Task 9).
  * The returned function closes the subscription, and a second call of it is nothing.
  *
@@ -27,6 +27,10 @@ export type RealtimeHandlers = {
  * and the library keeps retrying with the expired token to no end. The caller polls while it is down, asks for a fresh
  * grant and subscribes again with it (Review Focus 5). A grant that cannot be used (its url is not https, the library
  * cannot start, the token is refused) is `onDown` too, once, and the subscription is closed.
+ *
+ * Each family has its own port, and so its own client and socket: the library's `setAuth` is socket-wide, so a client
+ * shared by Remote Scoring and Match Day would let one's token overwrite the other's (phone design 2026-11-24 §4; web
+ * spec §4.2). `createNativePorts` builds `realtime` (Remote Scoring) and `matchDayRealtime` apart.
  */
 export interface RealtimePort {
   subscribe(grant: RealtimeGrant, handlers: RealtimeHandlers): () => void;
@@ -99,7 +103,20 @@ function afterReturn(later: () => void): void {
   void Promise.resolve().then(later);
 }
 
-type Deps = { readonly createClient: RealtimeClientFactory; readonly logger: Logger };
+type Deps = {
+  readonly createClient: RealtimeClientFactory;
+  readonly logger: Logger;
+  /**
+   * The family's own words, Remote Scoring's when absent: the broadcast event that is a ping, and the record line's
+   * event. Match Day hears `nudge` and says `matchday.realtime` (phone design 2026-11-24 §4).
+   */
+  readonly family?: RealtimeFamily;
+};
+
+/** What one family of channel is called: its ping's broadcast event and its record line. */
+export type RealtimeFamily = { readonly ping: string; readonly line: string };
+
+const SCORING: RealtimeFamily = { ping: STATE_CHANGED, line: EVENT };
 
 /**
  * The production port over `@supabase/realtime-js` (never `supabase-js`), with the client injected so tests drive a
@@ -120,6 +137,7 @@ export function createSupabaseRealtimePort(deps: Deps): RealtimePort {
 
 /** One subscription's state. `live` is false from the caller's unsubscribe (or a failed start) on: nothing is heard after. */
 type Run = {
+  readonly family: RealtimeFamily;
   live: boolean;
   released: boolean;
   threw: boolean;
@@ -134,6 +152,7 @@ function openSubscription(
   handlers: RealtimeHandlers,
 ): Subscription {
   const run: Run = {
+    family: deps.family ?? SCORING,
     live: true,
     released: false,
     threw: false,
@@ -173,12 +192,12 @@ function release(run: Run, logger: Logger): void {
   run.released = true;
   const socket = run.client;
   const channel = run.channel;
-  if (channel !== null) closing(logger, () => socket.removeChannel(channel));
-  closing(logger, () => socket.disconnect());
+  if (channel !== null) closing(run, logger, () => socket.removeChannel(channel));
+  closing(run, logger, () => socket.disconnect());
 }
 
-function closing(logger: Logger, attempt: () => Promise<unknown>): void {
-  const said = () => logger.warn(EVENT, { state: 'closing', problem: 'close' });
+function closing(run: Run, logger: Logger, attempt: () => Promise<unknown>): void {
+  const said = () => logger.warn(run.family.line, { state: 'closing', problem: 'close' });
   try {
     attempt().catch(said);
   } catch {
@@ -194,7 +213,7 @@ function call(run: Run, logger: Logger, handler: () => void): void {
   } catch {
     if (run.threw) return;
     run.threw = true;
-    logger.warn(EVENT, { state: 'handler', problem: 'threw' });
+    logger.warn(run.family.line, { state: 'handler', problem: 'threw' });
   }
 }
 
@@ -209,8 +228,8 @@ function change(
   if (!run.live || run.state === next) return;
   run.state = next;
   const fields = { state: next, status: KNOWN_STATUS.has(status) ? status : 'other' };
-  if (next === 'up') logger.info(EVENT, fields);
-  else logger.warn(EVENT, fields);
+  if (next === 'up') logger.info(run.family.line, fields);
+  else logger.warn(run.family.line, fields);
   call(run, logger, next === 'up' ? () => handlers.onUp() : () => handlers.onDown());
 }
 
@@ -218,7 +237,7 @@ function change(
 function fail(run: Run, logger: Logger, handlers: RealtimeHandlers, problem: Problem): void {
   if (!run.live) return;
   run.state = 'down';
-  logger.warn(EVENT, { state: problem === 'url' ? 'refused' : 'down', problem });
+  logger.warn(run.family.line, { state: problem === 'url' ? 'refused' : 'down', problem });
   call(run, logger, () => handlers.onDown());
   shut(run, logger);
 }
@@ -237,7 +256,7 @@ async function join(
     if (!run.live) return;
     run.channel = socket
       .channel(grant.channel, { config: { private: true } })
-      .on('broadcast', { event: STATE_CHANGED }, () => call(run, logger, () => handlers.onPing()))
+      .on('broadcast', { event: run.family.ping }, () => call(run, logger, () => handlers.onPing()))
       .subscribe((status) =>
         change(run, logger, handlers, status === SUBSCRIBED ? 'up' : 'down', status),
       );

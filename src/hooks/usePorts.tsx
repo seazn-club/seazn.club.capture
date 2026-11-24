@@ -112,6 +112,11 @@ export type Ports = {
   readonly realtime: RealtimePort;
   /** S4: the Match Day code's calls to the web (the day, a match's scoring link), plain fetch, to the build's host. */
   readonly matchDay: MatchDayPort;
+  /**
+   * Match Day's nudge (phone design 2026-11-24 §4): its own Realtime port, never `realtime`, so it has its own socket and
+   * `setAuth`. A `nudge` is a ping to read the day again; down means the 15 s poll alone.
+   */
+  readonly matchDayRealtime: RealtimePort;
   /** S4: the day's last good copy, tied to its code, and the matches opened from it; one store, so writes queue. */
   readonly matchDayStore: MatchDayStore;
   /** R5: the battery state and the app's settings page, Android only. */

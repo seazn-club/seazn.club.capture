@@ -47,6 +47,10 @@ class Engine(
 
   /** The last snapshot published, as [Snapshot.shown] reads it. Scheduler thread. */
   private var lastShown: Snapshot? = null
+
+  /** S12: when the last `snapshot-failed` line was written, and the failures since it. Scheduler thread. */
+  private var failedSaidAtMs: Long? = null
+  private var failedUnsaid = 0
   private var ticking: Cancellable? = null
 
   /** Starts the tick. Idempotent. On the scheduler's thread only. */
@@ -193,9 +197,24 @@ class Engine(
       if (input != Input.Tick && shown == lastShown) return
       lastShown = shown
       snapshots.publish(snapshot)
-    } catch (_: Exception) {
+    } catch (failure: Exception) {
       snapshotFailures += 1
+      snapshotFailed(failure, now)
     }
+  }
+
+  /**
+   * S12: a failed snapshot is counted, and said: at once the first time, then at most once a [SNAPSHOT_LINE_MS] with the
+   * failures since the last line. The class name only, never the message, which may quote what it failed on (CD30).
+   */
+  private fun snapshotFailed(failure: Exception, now: Now) {
+    failedUnsaid += 1
+    val said = failedSaidAtMs
+    if (said != null && now.monoMs - said < SNAPSHOT_LINE_MS) return
+    val line = RecordEntry("snapshot-failed", listOf("error" to failure::class.java.simpleName, "count" to failedUnsaid))
+    failedSaidAtMs = now.monoMs
+    failedUnsaid = 0
+    record.append(now.wallMs, line)
   }
 
   /** A command the platform throws on is counted and gets a line in [lines], in its place; an `Error` is rethrown too. */
@@ -212,5 +231,8 @@ class Engine(
   companion object {
     /** Twice a second: the watchdog's cadence in P5, and a snapshot at least once a second (AGENTS §2). */
     const val TICK_MS = 500L
+
+    /** S12: at most one `snapshot-failed` line a minute, as `engine-error`'s facts lines are (G3). */
+    const val SNAPSHOT_LINE_MS = 60_000L
   }
 }

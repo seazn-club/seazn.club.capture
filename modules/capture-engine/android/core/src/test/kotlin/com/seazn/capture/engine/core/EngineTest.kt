@@ -1,5 +1,6 @@
 package com.seazn.capture.engine.core
 
+import org.json.JSONObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -153,6 +154,28 @@ class EngineTest {
     throwing = false
     scheduler.advanceBy(500)
     assertEquals(listOf(1_000L), published.map { it.first })
+  }
+
+  /**
+   * S12: a snapshot that failed was counted and said nothing, so a projection that threw for an hour left no trace in the
+   * record. The first failure writes `snapshot-failed {error, count}` at once, then at most one line a minute with the
+   * failures since the last; the error is the class name only, never its message (CD30).
+   */
+  @Test
+  fun `S12 a snapshot that fails is a line at once, then at most one a minute with the count, and never its message`() {
+    var failing = true
+    val engine = engine(projection = { phase, now -> if (failing) throw IllegalStateException("secret-ish detail") else Projection.snapshot(phase, now) })
+    engine.start()
+    scheduler.advanceBy(150_000)
+    val said = lines.filter { """"kind":"snapshot-failed"""" in it }.map(::JSONObject)
+    // Ticks at 0.5 s, 1 s, ...: the first at 0.5 s, then at 60.5 s (120 since), then 120.5 s (120 since).
+    assertEquals(listOf(1, 120, 120), said.map { it.getInt("count") }, "$said")
+    assertEquals(setOf("IllegalStateException"), said.map { it.getString("error") }.toSet())
+    assertTrue(lines.none { "secret-ish" in it })
+    assertEquals(300, engine.snapshotFailures)
+    failing = false
+    scheduler.advanceBy(60_000)
+    assertEquals(3, lines.count { """"kind":"snapshot-failed"""" in it }, "a snapshot that goes up says nothing")
   }
 
   @Test

@@ -63,10 +63,10 @@ describe('carry 11: one scrub, pinned by the file native reads too', () => {
 
   // Beyond the brief: the kind rule is one rule on both sides, so each kind the record holds
   // passes JS's event rule as itself too: native's (the debug build's `scripted` among them), JS's
-  // malformed-snapshot line (C4c I-4) and JS's record.send line (R3), 97 in all.
-  it("passes each of the record's 97 kinds as itself", () => {
+  // malformed-snapshot line (C4c I-4) and JS's record.send line (R3), 98 in all.
+  it("passes each of the record's 98 kinds as itself", () => {
     const kinds = Object.keys(list.kinds);
-    expect(kinds).toHaveLength(97);
+    expect(kinds).toHaveLength(98);
     for (const kind of kinds) expect(scrubEvent(kind, vectors.held)).toBe(kind);
   });
 });

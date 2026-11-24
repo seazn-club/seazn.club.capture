@@ -18,6 +18,7 @@ import com.seazn.capture.engine.core.Scheduler
 import com.seazn.capture.engine.core.SessionRecord
 import com.seazn.capture.engine.core.Snapshot
 import com.seazn.capture.engine.core.SnapshotSink
+import com.seazn.capture.engine.core.shown
 import com.seazn.capture.engine.core.UnpairReason
 import com.seazn.capture.engine.core.Unpaired
 import com.seazn.capture.engine.core.attemptInHand
@@ -111,6 +112,10 @@ class BridgeCore(
 
   /** The phase the last snapshot was published in, by name (review C4a m-1). Scheduler thread. */
   private var publishedPhase: String? = null
+
+  /** S8: the last snapshot sent up to JS, as [shown] reads it, and when. Scheduler thread. */
+  private var sentShown: Snapshot? = null
+  private var sentAtMs: Long? = null
 
   /** The last published snapshot's language (P3), for the glue's notification. */
   @Volatile private var language: String? = null
@@ -511,7 +516,22 @@ class BridgeCore(
     // Review C4a N-1 (ruling C4a-N1): a minute that held lines back ends with the state the machine
     // heard, written by the first publish after it runs out, so a state that then stays is on the record.
     sent?.let { heard -> readinessLines.flush(clock.monotonicMs()) { readinessFields(heard) } }?.let(engine::log)
+    emit(snapshot, wire)
+  }
+
+  /**
+   * S8: up to JS at once when what it shows changed, and otherwise about once a second ([EMIT_MS]): every other tick.
+   * JS reads a silent engine only after 3 s, and its clocks count from instants, not snapshots, so 2 Hz bought nothing
+   * but bridge traffic. [current] stays fresh at every publish, for a pull. A send that throws is not counted as sent.
+   */
+  private fun emit(snapshot: Snapshot, wire: Map<String, Any?>) {
+    val shown = snapshot.shown()
+    val now = clock.monotonicMs()
+    val due = shown != sentShown || sentAtMs?.let { now - it >= EMIT_MS - Engine.TICK_MS / 2 } ?: true
+    if (!due) return
     platform.snapshot(wire)
+    sentShown = shown
+    sentAtMs = now
   }
 
   /**
@@ -565,6 +585,9 @@ class BridgeCore(
   private fun whole(value: Any?): Any? = if (value is Double && value % 1.0 == 0.0 && abs(value) <= MAX_EXACT) value.toLong() else value
 
   companion object {
+    /** S8: a snapshot that shows nothing new goes up to JS about once a second, AGENTS §2's ~1 Hz. */
+    const val EMIT_MS = 1_000L
+
     /**
      * C0b's backstop: twice the client's own timeout ([HttpRequests.TIMEOUT_MS]), so past it and past
      * every give-up of the core's (10 s): a real answer, or the core's own, always comes first.

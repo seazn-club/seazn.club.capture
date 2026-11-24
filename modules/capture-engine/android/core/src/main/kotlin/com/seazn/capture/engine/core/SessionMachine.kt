@@ -249,10 +249,12 @@ internal object Transports {
   /**
    * A new attempt that replaces a live one: a [Command.Rebuild] or a [Command.StartNewSession]. Both
    * reconnect the link, so both ask the descriptor again (spec §1: on every reconnect), spaced as a
-   * refusal's asks are (B6 ruling C1, B7).
+   * refusal's asks are (B6 ruling C1, B7). S4: the attempt replaced proved the path if it published
+   * [FallbackPolicy.SHORT_ATTEMPT_MS], as a drop after that long does ([FallbackPolicy.proved]).
    */
   fun replace(onAir: Phase.OnAir, session: Session, outage: Outage?, now: Now, wrap: (Command.Connect) -> Command): Step {
-    val (connected, connect) = connectCommand(session, onAir.transport, now) ?: return missingTarget(session, onAir.transport, now)
+    val proved = session.copy(fallback = session.fallback.proved(now.monoMs - onAir.connectedAtMs))
+    val (connected, connect) = connectCommand(proved, onAir.transport, now) ?: return missingTarget(proved, onAir.transport, now)
     val (next, fetch) = if (connected.descriptor.mayAsk(now.monoMs)) askDescriptor(connected, now) else connected to null
     val phase = Phase.Connecting(next, onAir.transport, ConnectStep.Requested(connect.attemptId, now.monoMs), outage)
     val connecting = record("connecting", "transport" to onAir.transport, "attempt" to connect.attemptId)

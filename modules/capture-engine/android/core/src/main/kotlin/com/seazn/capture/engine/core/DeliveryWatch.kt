@@ -90,6 +90,8 @@ data class DeliveryWatch(
    * ([onPlaybackHost] refused it). Never cleared, by [newSession] either: the machine records it once a session.
    */
   val refusedOffHost: Boolean = false,
+  /** N49: no not-delivered verdict before this (monotonic) time, [SWITCH_GRACE_MS] after a network switch ([switched]). */
+  val verdictNotBeforeMs: Long? = null,
 ) {
   /** What is polled: the master, restricted to one rendition. */
   val pollUrl: String = hinted(playbackUrl)
@@ -118,12 +120,24 @@ data class DeliveryWatch(
     if (pending?.id != requestId) return Triple(this, emptyList(), null)
     val cleared = copy(pending = null)
     val playlist = (result as? FetchResult.Body)?.let { PlaylistParser.parse(it.text) }
-    return when {
-      result == FetchResult.NoContent && pendingIsMaster -> cleared.nothingLive()
-      playlist is Playlist.Master && pendingIsMaster -> cleared.fetchVariant(playlist, nowMs)
-      playlist is Playlist.Media -> cleared.observed(pending.url, playlist)
-      else -> Triple(cleared.withoutEvidence(), emptyList(), null)
-    }
+    val answered =
+      when {
+        result == FetchResult.NoContent && pendingIsMaster -> cleared.nothingLive()
+        playlist is Playlist.Master && pendingIsMaster -> cleared.fetchVariant(playlist, nowMs)
+        playlist is Playlist.Media -> cleared.observed(pending.url, playlist)
+        else -> Triple(cleared.withoutEvidence(), emptyList(), null)
+      }
+    val quiet = verdictNotBeforeMs?.let { nowMs < it } ?: false
+    return if (quiet) answered.copy(first = answered.first.quietLook(), third = null) else answered
+  }
+
+  /**
+   * N49: a look inside the switch's grace keeps no lag history but its own, so the lag the held old publisher built up
+   * is never read as growth once the grace is over: the lag rule judges from the last look in it.
+   */
+  private fun quietLook(): DeliveryWatch {
+    val last = lags.lastOrNull() ?: return this
+    return copy(lags = listOf(last), minLagMs = last.lagMs, deliveredLagMs = 0)
   }
 
   /** After a forced new session: the new session proves itself from zero. */
@@ -142,6 +156,14 @@ data class DeliveryWatch(
       delivery = Delivery.UNKNOWN,
       deliveredLagMs = null,
     )
+
+  /**
+   * N49: the phone's socket was replaced for a switch of the default network. The new socket proves itself from zero, as
+   * after a forced new session, and no verdict comes for [SWITCH_GRACE_MS] from [nowMs]: Cloudflare is read to keep
+   * the old publisher as the input's source until its read timeout, so the playlist may not move for that long. A stall
+   * that outlasts it is said at the first look after it; the lag it built up is not ([quietLook]).
+   */
+  fun switched(nowMs: Long): DeliveryWatch = newSession().copy(verdictNotBeforeMs = nowMs + SWITCH_GRACE_MS)
 
   private fun fetchVariant(master: Playlist.Master, nowMs: Long): Triple<DeliveryWatch, List<PlaylistRequest>, NotDelivered?> {
     val resolved = PlaylistParser.resolve(pollUrl, master.variants.first()) ?: return Triple(withoutEvidence(), emptyList(), null)
@@ -265,6 +287,14 @@ data class DeliveryWatch(
 
     /** "A stall of about 20 s … means not-delivered" (spec §3; F-P5-13's "~20 s"). */
     const val NOT_DELIVERED_MS = 10 * CONFIGURED_SEGMENT_MS
+
+    /**
+     * N49 (stg, 2026-11-24), INFERRED: after a 4G to Wi-Fi switch the viewers' playlist did not move for about 45 s, though
+     * the new connection was never dropped (the camera input's `statusEnteredAt` stayed at 09:55:31.659 until 10:04:25).
+     * Read as Cloudflare holding the old 4G publisher as the input's source until its read timeout. So no not-delivered
+     * verdict for this long after a switch replaced the socket: one at ~20 s would replace the good new socket too.
+     */
+    const val SWITCH_GRACE_MS = 45_000L
 
     /** Delivered media falling 20 s further behind publishing within one minute. */
     const val LAG_GROWTH_LIMIT_MS = 20_000L

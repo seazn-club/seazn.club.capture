@@ -39,8 +39,9 @@ object SessionMachine {
    * would end it the same way. A stop in that gap reads operator-stopped.
    *
    * Plan D §3.4: whatever the input, a pairing that stops beating writes its open minute of beats ([BeatLogs.closed]).
+   * N49 fix round 1: a session that ends writes its floor cuts no line has said yet ([FloorCuts.closed]).
    */
-  fun reduce(phase: Phase, input: Input, now: Now): Step = BeatLogs.closed(phase, reduced(phase, input, now))
+  fun reduce(phase: Phase, input: Input, now: Now): Step = BeatLogs.closed(phase, FloorCuts.closed(phase, reduced(phase, input, now)))
 
   private fun reduced(phase: Phase, input: Input, now: Now): Step {
     if (input == Input.Tick || input == Input.Stop) return apply(phase, input, now)
@@ -71,8 +72,7 @@ object SessionMachine {
       is Input.Dropped -> Transports.dropped(phase, input, now)
       is Input.Frames -> Transports.frames(phase, input, now)
       is Input.Link -> Transports.link(phase, input, now)
-      is Input.Network -> network(phase, input.validated, now)
-      is Input.NetworkSwitched -> Transports.networkSwitched(phase, input.attemptId, now)
+      is Input.Network -> network(phase, input, now)
       Input.CameraContended -> Devices.contended(phase)
       Input.CameraReleased -> Devices.released(phase)
       is Input.CameraReopened -> Devices.reopened(phase, input.ok, now)
@@ -101,7 +101,7 @@ object SessionMachine {
   /** Back to Idle; a final beat still pending is let go, and the service with it. */
   private fun reset(ended: Phase.Ended): Step {
     val release = if (ended.finalBeatId != null) listOf(Command.Release) else emptyList()
-    return Step(Phase.Idle(ended.ids, ended.networkValidated, ended.micSilenced), release + record("reset"))
+    return Step(Phase.Idle(ended.ids, ended.networkValidated, ended.micSilenced, defaultNetwork = ended.defaultNetwork), release + record("reset"))
   }
 
   internal fun ignored(phase: Phase, intent: String): Step =
@@ -199,8 +199,18 @@ object SessionMachine {
    * Paired with A17's record undelivered sends the stopped sid at once (N37, fix round 1): the server holds that session
    * open until it hears it, and Go live is offered from this step, so a beat at the cadence would lose the race to the
    * operator's hold. A held beat never carries it (RR3), so a return while held keeps the cadence.
+   *
+   * N49: then the default network it names, held while validated and forgotten when not, is judged against the attempt
+   * in hand ([Transports.network]). A validated report that names none leaves it as it was.
    */
-  private fun network(phase: Phase, validated: Boolean, now: Now): Step {
+  private fun network(phase: Phase, input: Input.Network, now: Now): Step {
+    val handle = if (input.validated) input.handle ?: phase.defaultNetwork else null
+    val told = validatedFact(phase, input.validated, now)
+    val judged = Transports.network(told.phase, phase.defaultNetwork, handle, now)
+    return judged.copy(commands = told.commands + judged.commands)
+  }
+
+  private fun validatedFact(phase: Phase, validated: Boolean, now: Now): Step {
     if (phase.networkValidated == validated) return Step(phase)
     val step = Step(phase.withNetwork(validated), listOf(record("network", "validated" to validated)))
     val pending = validated && phase is Phase.Paired && phase.pairing.stopped != null
@@ -250,7 +260,8 @@ internal object Transports {
     val bps = session.regulation.targetBps
     val maxBw = if (transport == Transport.SRT) SrtBandwidth.maxBwBytesPerSecond(bps) else null
     val id = session.nextAttemptId
-    return session.copy(nextAttemptId = id + 1) to Command.Connect(id, target, bps, maxBw)
+    // N49: the attempt is asked on the default network the machine holds, and keeps it until the next is asked.
+    return session.copy(nextAttemptId = id + 1, attemptNetwork = session.defaultNetwork) to Command.Connect(id, target, bps, maxBw)
   }
 
   /** Unreachable after arm's checks; kept total so a bug ends the session visibly rather than throwing. */
@@ -264,7 +275,14 @@ internal object Transports {
       // Seeded at the connect (carry 13): the first reading's bytes, drops and egress count from here.
       val meter = LinkMeter(CONNECT_COUNTERS, now.monoMs)
       val onAir = Phase.OnAir(session, attemptId, phase.transport, now.monoMs, StallWatchdog(now.monoMs), meter, outage = phase.outage)
-      return Step(onAir, listOf(record("connected", "transport" to phase.transport, "attempt" to attemptId)))
+      val connected = record("connected", "transport" to phase.transport, "attempt" to attemptId)
+      // N49 fix 2: asked on a network that is no longer the default (a switch while it connected): replaced now.
+      val asked = session.attemptNetwork
+      val default = session.defaultNetwork
+      // One asked with none validated adopted the next default ([network]), so a null asked network has a null default.
+      if (default == null || asked == default) return Step(onAir, listOf(connected))
+      val step = switchedOver(onAir, onAir.outage ?: outageFor(session, phase.transport, now, ReconnectCause.UPLINK_LOST), now)
+      return step.copy(commands = listOf(connected) + step.commands)
     }
     if (phase is Phase.OnAir && phase.attemptId == attemptId) return Step(phase)
     // A stream this machine no longer wants: close it, so nothing publishes behind the session's back.
@@ -352,32 +370,50 @@ internal object Transports {
   }
 
   /**
-   * N49: the default network became another validated one ([DefaultNetwork]). The attempt's socket stays on the old
-   * network until that network dies, which on 2026-11-24 took the delivery watch's stall verdict, 22 s, to find. On air,
-   * on the attempt in hand and with no outage, the attempt is replaced at once, through [replace] as a new ingest
-   * session is, on the transport in hand, RTMPS after a fallback included; the new socket opens on the new default.
+   * N49: the validated default network is now [handle], [previous] before; the phase already holds [handle]. A socket
+   * stays on the network it was opened on, and the stall verdict that found it on 2026-11-24 took 22 s, so an attempt
+   * asked on another network than the default ([Session.attemptNetwork]) is replaced, as a new ingest session is, on the
+   * transport in hand, RTMPS after a fallback included; the new socket opens on the new default.
    *
-   * It opens an outage, so the hold bounds the reconnect as it bounds a drop's. Its cause is [ReconnectCause.UPLINK_LOST]:
-   * the snapshot's word for an uplink being replaced, which JS already reads; the `network-switched` line before the
-   * `connecting` one names the switch. It is no failure: the fallback policy never hears it. The delivery watch is left
-   * as a drop leaves it: only a not-delivered verdict starts its session again.
+   * It is judged against the attempt's network, never the last default (fix round 1, item 1): a loss and then a new
+   * network inside SRT's peer-idle timeout (about 5 s) leave the old socket alive through the new route. Connected, it is
+   * replaced at once, keeping the outage it is in or opening one ([switchedOver]). Still connecting, it is replaced once
+   * it connects ([connected]; item 2), and one that ends up back on its own network is not. Between attempts the next is
+   * asked on the new default. An attempt asked while none was validated adopts the next one. Every switch with a network
+   * before it writes `network-switched` with its result; a switch away from no network (the first, or after a loss) only
+   * a replace's.
    *
-   * Anything else is only recorded, a switch being rare and the record the one place that can say why a stall followed:
-   * an outage in progress (its own reconnect is the replace, so no second one starts), an attempt the machine has since
-   * replaced (on the new network), and every phase that publishes nothing.
+   * Its outage's cause is [ReconnectCause.UPLINK_LOST]: the snapshot's word for an uplink being replaced, which JS
+   * already reads. It is no failure: the fallback policy never hears it.
    */
-  fun networkSwitched(phase: Phase, attemptId: Int, now: Now): Step {
-    val result =
-      when {
-        phase !is Phase.OnAir -> if ((phase as? Phase.Connecting)?.outage != null) NetworkSwitch.IN_OUTAGE else NetworkSwitch.NOT_ON_AIR
-        phase.attemptId != attemptId -> NetworkSwitch.STALE
-        phase.outage != null -> NetworkSwitch.IN_OUTAGE
-        else -> NetworkSwitch.REPLACED
-      }
-    val line = record("network-switched", "result" to result, "attempt" to attemptId, "phase" to phase.name)
-    if (phase !is Phase.OnAir || result != NetworkSwitch.REPLACED) return Step(phase, listOf(line))
-    val outage = outageFor(phase.session, phase.transport, now, ReconnectCause.UPLINK_LOST)
-    val step = replace(phase, phase.session, outage, now) { Command.StartNewSession(phase.attemptId, it) }
+  fun network(phase: Phase, previous: Long?, handle: Long?, now: Now): Step {
+    val next = phase.withDefaultNetwork(handle)
+    if (handle == null || handle == previous) return Step(next)
+    val session = next.session
+    val asked = next is Phase.OnAir || (next as? Phase.Connecting)?.step is ConnectStep.Requested
+    if (session == null || !asked) {
+      if (previous == null) return Step(next)
+      return Step(next, listOf(switchLine(if (next is Phase.Connecting) NetworkSwitch.BETWEEN_ATTEMPTS else NetworkSwitch.NOT_ON_AIR, next)))
+    }
+    val on = session.attemptNetwork ?: return Step(next.withSession(session.copy(attemptNetwork = handle)))
+    if (on == handle) return Step(next, listOfNotNull(switchLine(NetworkSwitch.SAME, next).takeIf { previous != null }))
+    if (next !is Phase.OnAir) return Step(next, listOf(switchLine(NetworkSwitch.PENDING, next)))
+    return switchedOver(next, next.outage ?: outageFor(session, next.transport, now, ReconnectCause.UPLINK_LOST), now)
+  }
+
+  private fun switchLine(result: NetworkSwitch, phase: Phase): Command =
+    record("network-switched", "result" to result, "attempt" to phase.attemptInHand, "phase" to phase.name)
+
+  /**
+   * N49: the attempt replaced for a switch, a new link on another network (fix round 1, items 3 and 4). The regulator
+   * forgets the rate the old link failed ([BitrateRegulator.newLink]), and the delivery watch starts its session again,
+   * with no verdict for [DeliveryWatch.SWITCH_GRACE_MS] ([DeliveryWatch.switched]).
+   */
+  private fun switchedOver(onAir: Phase.OnAir, outage: Outage?, now: Now): Step {
+    val line = switchLine(NetworkSwitch.REPLACED, onAir)
+    val old = onAir.session
+    val session = old.copy(regulation = BitrateRegulator.newLink(old.regulation), delivery = old.delivery.switched(now.monoMs))
+    val step = replace(onAir, session, outage, now) { Command.StartNewSession(onAir.attemptId, it) }
     return step.copy(commands = listOf(line) + step.commands)
   }
 
@@ -485,6 +521,22 @@ internal object Transports {
       "count" to held.count,
       "videoFps" to videoFps,
     )
+}
+
+/**
+ * N49 fix round 1, item 5: cuts at the floor since the last `bitrate-floor` line ([Regulation.floorCuts]) are said by the
+ * next one, a minute on, and a session that ends before it would never say them. So the step that ends a session (no
+ * session after it, or another sid's) writes them, under the last such cut's rule, with no reading: none was said on.
+ * Called on every step the machine takes, and by the [Engine] on the fatal step it builds when the machine throws.
+ */
+internal object FloorCuts {
+  fun closed(before: Phase, step: Step): Step {
+    val session = before.session ?: return step
+    val regulation = session.regulation
+    val reason = regulation.floorReason
+    if (regulation.floorCuts == 0 || reason == null || step.phase.session?.sid == session.sid) return step
+    return step.copy(commands = step.commands + record("bitrate-floor", "reason" to reason, "count" to regulation.floorCuts))
+  }
 }
 
 /** Everything the tick decides: retries, connect timeouts, hold expiry, the stall watchdog, playlist polls. */

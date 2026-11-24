@@ -216,7 +216,7 @@
     "mic-restored": "native: the microphone came back",
     "mic-silenced": "native: the microphone went silent",
     "network": "native: the network's validation changed",
-    "network-switched": "native: the default network became another validated one, and what the machine made of it: replaced at once on air, or only recorded in an outage, on a stale attempt or off air (N49)",
+    "network-switched": "native: the validated default network became another, and what the machine made of it against the attempt's own network: replaced, pending its connect, same, between attempts or not on air (N49)",
     "no-accelerometer": "native: the phone has no accelerometer, so held never blocks and the side is left (A11)",
     "not-current": "native: the code answered that the broadcast is not current",
     "not-delivered": "native: the playlist stopped showing delivery",

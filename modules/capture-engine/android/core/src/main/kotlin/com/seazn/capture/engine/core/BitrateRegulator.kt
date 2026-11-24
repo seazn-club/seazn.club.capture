@@ -31,6 +31,8 @@ data class Regulation(
   val floorCuts: Int = 0,
   /** When the last `bitrate-floor` line was due; null before the first. A drop and a new attempt keep it. */
   val floorSaidAtMs: Long? = null,
+  /** The rule of the last cut at the floor: what the session's end says [floorCuts] under (N49 fix round 1, item 5). */
+  val floorReason: BitrateMove? = null,
 )
 
 /** Why a reading moved the target: the `bitrate` line's `reason` (R-990P). */
@@ -128,6 +130,13 @@ object BitrateRegulator {
   private const val CLEAN_BUFFER_DIVISOR = 10
 
   fun sessionStarted(): Regulation = Regulation(Encode.START_BPS)
+
+  /**
+   * N49 fix round 1: a socket replaced for a switch of the default network is a new link, on another network. The rate
+   * the old one failed says nothing of it, so it is forgotten, and Weak signal (`poor-uplink`, which needs one) with it.
+   * The target and the cut stand, so the climb starts where it was and F-P5-7's tested raise still gates it.
+   */
+  fun newLink(state: Regulation): Regulation = state.copy(failed = null)
 
   /** A new attempt keeps the target, the cut and the failed rate. Only the clean interval restarts. */
   fun attemptStarted(state: Regulation): Regulation = state.cleanWaitRestarted(null)
@@ -257,8 +266,8 @@ object BitrateRegulator {
    */
   private fun atFloor(state: Regulation, nowMs: Long, move: BitrateMove): Regulated {
     val count = state.floorCuts + 1
-    if (since(state.floorSaidAtMs, nowMs) < FLOOR_LINE_MS) return Regulated(state.copy(floorCuts = count), move)
-    return Regulated(state.copy(floorCuts = 0, floorSaidAtMs = nowMs), move, floor = FloorCut(move, count))
+    if (since(state.floorSaidAtMs, nowMs) < FLOOR_LINE_MS) return Regulated(state.copy(floorCuts = count, floorReason = move), move)
+    return Regulated(state.copy(floorCuts = 0, floorSaidAtMs = nowMs, floorReason = move), move, floor = FloorCut(move, count))
   }
 
   private fun carriedCleanly(state: Regulation, link: LinkSample, nowMs: Long): Regulation {

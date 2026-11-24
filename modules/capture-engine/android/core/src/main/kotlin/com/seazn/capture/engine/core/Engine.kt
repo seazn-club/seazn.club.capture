@@ -142,7 +142,7 @@ class Engine(
         val lines = listOf(engineError(failure), SessionMachine.endedLine(phase, EndReason.FATAL_ERROR))
         val fatal = Step(phase.ended(EndReason.FATAL_ERROR, now), lines + Command.End(EndReason.FATAL_ERROR) + release)
         // The machine did not take this step, so its minute of beats is written here (plan D §3.4, B2 review Minor 1).
-        BeatLogs.closed(phase, fatal)
+        BeatLogs.closed(phase, FloorCuts.closed(phase, fatal))
       }
     }
 

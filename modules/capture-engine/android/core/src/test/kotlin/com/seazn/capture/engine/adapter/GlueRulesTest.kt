@@ -381,19 +381,18 @@ class GlueRulesTest {
   @Test
   fun `M-8 M-9 the network and pose callbacks and the exit read are guarded`() {
     val network = glue("NetworkWatch.kt")
-    // N49: each callback feeds the core's rule (DefaultNetwork), the network's handle with it, and keeps none of its own.
+    // N49: each callback feeds the core's rule (DefaultNetwork), the validated network's handle with it, and keeps none of its own.
     val capabilities = """override fun onCapabilitiesChanged\(network: Network, caps: NetworkCapabilities\) = guarded \{ changed\(current\.capabilities\(""" +
-      """network\.networkHandle, caps\.hasCapability\(NetworkCapabilities\.NET_CAPABILITY_VALIDATED\), attemptInHand\)\) \}"""
+      """network\.networkHandle, caps\.hasCapability\(NetworkCapabilities\.NET_CAPABILITY_VALIDATED\)\)\) \}"""
     assertTrue(Regex(capabilities).containsMatchIn(network), "onCapabilitiesChanged")
-    assertTrue(Regex("""override fun onLost\(network: Network\) = guarded \{ changed\(current\.lost\(network\.networkHandle\)\) \}""").containsMatchIn(network), "onLost")
+    assertTrue(Regex("""override fun onLost\(network: Network\) = guarded \{ changed\(current\.lost\(\)\) \}""").containsMatchIn(network), "onLost")
     assertTrue(Regex("""private fun changed\(heard: DefaultNetwork\.Heard\) \{\s+current = heard\.next\s+heard\.inputs\.forEach\(report\)\s+\}""").containsMatchIn(network), "every input heard is reported, in order")
     assertTrue(Regex("""catch \(e: Exception\) \{\s+line\(RecordEntry\("watch-failed", listOf\("action" to "network", "error" to e\.javaClass\.simpleName\)\)\)""").containsMatchIn(body(network, "private fun guarded(")), "network's line")
     // Fix round 2: the network watch starts inside the build, where EngineHost.line drops every line, and its
     // first callback can come before the build returns; its lines go to the running core directly.
     val host = glue("EngineHost.kt")
     assertFalse(Regex("""\bNetworkWatch\([^)]*::line""").containsMatchIn(host), "never through EngineHost.line")
-    assertTrue(Regex("""\bNetworkWatch\(app, report, toCore, attemptInHand\)""").containsMatchIn(body(host, "private fun startWatchers(")), "the network watch writes to the core")
-    assertTrue(Regex("""startWatchers\(app, cameras, capture, device, report, toCore\) \{ core\.attemptInHand\(\) \}""").containsMatchIn(hostBuild()), "N49: a switch is stamped with the core's attempt in hand")
+    assertTrue(Regex("""\bNetworkWatch\(app, report, toCore\)""").containsMatchIn(body(host, "private fun startWatchers(")), "the network watch writes to the core")
     val toCore = Regex("""val toCore: \(RecordEntry\) -> Unit = \{ core\.log\(it\.level, it\.kind, it\.fields\.toMap\(\)\) \}""").find(hostBuild())
     assertTrue(toCore != null, "toCore is the core's own log, made in the build")
     assertTrue(Regex("""startWatchers\(app, cameras, capture, device, report, toCore\)""").containsMatchIn(hostBuild()), "and handed to the watchers")

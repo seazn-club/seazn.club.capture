@@ -124,6 +124,13 @@ data class Session(
   val descriptor: DescriptorAsks = DescriptorAsks(),
   /** Seeded at arm from the last network fact, which outlives the session before it (final review I-1). */
   val networkValidated: Boolean = false,
+  /** N49: the validated default network's handle, seeded at arm as [networkValidated] is ([Phase.defaultNetwork]). */
+  val defaultNetwork: Long? = null,
+  /**
+   * N49: the default network when the attempt in hand was asked for ([Transports.connect], [Transports.replace]), never
+   * forgotten on a loss: its socket was opened there. Null when none was validated then; the next one validated is adopted.
+   */
+  val attemptNetwork: Long? = null,
   /** Set by the first encoded frame, and kept across drops: the HUD's elapsed time never resets. */
   val liveSinceEpochMs: Long? = null,
   val notDelivered: Boolean = false,
@@ -163,17 +170,18 @@ sealed interface Phase {
     val networkValidated: Boolean = false,
     val micSilenced: Boolean = false,
     val unpaired: Unpaired? = null,
+    val defaultNetwork: Long? = null,
   ) : Phase {
     override val name = "idle"
   }
 
   /** `pair` heard; the camera and microphone permissions are being asked. No beat, no service yet. */
-  data class Pairing(val pairing: PairingState, val ids: Ids, val networkValidated: Boolean, val micSilenced: Boolean) : Phase {
+  data class Pairing(val pairing: PairingState, val ids: Ids, val networkValidated: Boolean, val micSilenced: Boolean, val defaultNetwork: Long? = null) : Phase {
     override val name = "pairing"
   }
 
   /** Paired and waiting for a Go live (A5): beating, the service and the wake lock held. */
-  data class Paired(val pairing: PairingState, val ids: Ids, val networkValidated: Boolean, val micSilenced: Boolean) : Phase {
+  data class Paired(val pairing: PairingState, val ids: Ids, val networkValidated: Boolean, val micSilenced: Boolean, val defaultNetwork: Long? = null) : Phase {
     override val name = "paired"
   }
 
@@ -194,6 +202,7 @@ sealed interface Phase {
     val notBeforeMs: Long = 0,
     val notCurrent: Boolean = false,
     val retrying: Boolean = false,
+    val defaultNetwork: Long? = null,
   ) : Phase {
     override val name = "arming"
   }
@@ -241,6 +250,7 @@ sealed interface Phase {
     /** A8: the final beat in flight, whose answer (or [Heartbeat.TIMEOUT_MS]) releases the service. */
     val finalBeatId: Int? = null,
     val finalBeatAtMs: Long = 0,
+    val defaultNetwork: Long? = null,
   ) : Phase {
     override val name = "ended"
   }
@@ -372,6 +382,36 @@ fun Phase.withNetwork(validated: Boolean): Phase =
   }
 
 /**
+ * N49: the validated default network's handle (`Network.getNetworkHandle()`), in any phase, kept between sessions as
+ * [networkValidated] is and null while none is validated. Each attempt is asked on it ([Session.attemptNetwork]).
+ */
+val Phase.defaultNetwork: Long?
+  get() =
+    when (this) {
+      is Phase.Idle -> defaultNetwork
+      is Phase.Ended -> defaultNetwork
+      is Phase.Pairing -> defaultNetwork
+      is Phase.Paired -> defaultNetwork
+      is Phase.Arming -> defaultNetwork
+      is Phase.Armed -> session.defaultNetwork
+      is Phase.Connecting -> session.defaultNetwork
+      is Phase.OnAir -> session.defaultNetwork
+    }
+
+/** This phase with [handle] as the default network, in the session or, with none, kept for the next. */
+fun Phase.withDefaultNetwork(handle: Long?): Phase =
+  when (this) {
+    is Phase.Idle -> copy(defaultNetwork = handle)
+    is Phase.Ended -> copy(defaultNetwork = handle)
+    is Phase.Pairing -> copy(defaultNetwork = handle)
+    is Phase.Paired -> copy(defaultNetwork = handle)
+    is Phase.Arming -> copy(defaultNetwork = handle)
+    is Phase.Armed -> copy(session = session.copy(defaultNetwork = handle))
+    is Phase.Connecting -> copy(session = session.copy(defaultNetwork = handle))
+    is Phase.OnAir -> copy(session = session.copy(defaultNetwork = handle))
+  }
+
+/**
  * The last mic fact (`isClientSilenced` for our recording, F-P5-8), in any phase. The watch reports a
  * change only, and keeps its last word for the process, so the engine keeps the fact between sessions
  * the way it keeps the network's, and each session is seeded with it at arm (review 18 I1).
@@ -412,7 +452,7 @@ fun Phase.withMic(silenced: Boolean): Phase =
 fun Phase.ended(reason: EndReason, now: Now): Phase.Ended {
   if (this is Phase.Ended) return this
   val durationMs = firstLiveEpochMs?.let { (now.wallMs - it).coerceAtLeast(0) }
-  return Phase.Ended(reason, ids, durationMs, networkValidated, micSilenced, pairing, heldSid)
+  return Phase.Ended(reason, ids, durationMs, networkValidated, micSilenced, pairing, heldSid, defaultNetwork = defaultNetwork)
 }
 
 val Session.ids: Ids

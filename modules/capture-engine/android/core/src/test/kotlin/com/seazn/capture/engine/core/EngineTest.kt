@@ -241,6 +241,26 @@ class EngineTest {
     assertEquals(listOf<Command>(Command.End(EndReason.FATAL_ERROR)), executed.filterIsInstance<Command.End>())
   }
 
+  @Test
+  fun `N49 fix 5 a failure inside the machine on air says the session's unsaid floor cuts`() {
+    // Three floor cuts no line has said, under drops; then the machine throws.
+    val atFloor: (Phase, Input, Now) -> Step = { phase, input, now ->
+      if (input is Input.MicSilenced) {
+        val session = phase.session!!
+        Step(phase.withSession(session.copy(regulation = session.regulation.copy(floorCuts = 3, floorReason = BitrateMove.DROPS))))
+      } else failsOnSwitch(phase, input, now)
+    }
+    val engine = engine(reducer = atFloor)
+    engine.live()
+    engine.send(Input.MicSilenced(false))
+    scheduler.advanceBy(0)
+    lines.clear()
+    engine.send(Input.SwitchCamera)
+    scheduler.advanceBy(0)
+    assertEquals(listOf("engine-error", "ended", "bitrate-floor", "beats"), lines.map(::kindOf), lines.toString())
+    assertEquals("""{"at":"2026-09-21T14:13:20.500Z","kind":"bitrate-floor","reason":"drops","count":3}""", lines[2])
+  }
+
   /**
    * Batch 13 fix round 1 (m1 of its review): a failing command's line goes in the command's place in the step
    * ([Engine.execute]), so the briefed order is seen in the record: `ended` before the End, as [SessionMachine.end] has it.

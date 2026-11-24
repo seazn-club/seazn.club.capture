@@ -48,16 +48,16 @@ internal object Pairings {
         starts = StartAsks(nextId = ids.start),
       )
     val asked = line("pair", "claim" to input.request.claim, "slot" to name.slot, "tokenTag" to name.tokenTag, "stopped" to (stopped != null))
-    return Step(Phase.Pairing(pairing, ids, phase.networkValidated, phase.micSilenced), left + asked + Command.AskPermissions)
+    return Step(Phase.Pairing(pairing, ids, phase.networkValidated, phase.micSilenced, phase.defaultNetwork), left + asked + Command.AskPermissions)
   }
 
   fun permissions(phase: Phase, granted: Boolean, now: Now): Step {
     if (phase !is Phase.Pairing) return Step(phase, listOf(line("permissions-late", "granted" to granted)))
     if (!granted) {
-      val idle = Phase.Idle(phase.ids, phase.networkValidated, phase.micSilenced, Unpaired(UnpairReason.PERMISSIONS, phase.pairing.name))
+      val idle = Phase.Idle(phase.ids, phase.networkValidated, phase.micSilenced, Unpaired(UnpairReason.PERMISSIONS, phase.pairing.name), phase.defaultNetwork)
       return Step(idle, listOf(line("unpaired", "reason" to UnpairReason.PERMISSIONS)))
     }
-    val paired = Phase.Paired(phase.pairing.copy(heartbeat = phase.pairing.heartbeat.soon(now.monoMs)), phase.ids, phase.networkValidated, phase.micSilenced)
+    val paired = Phase.Paired(phase.pairing.copy(heartbeat = phase.pairing.heartbeat.soon(now.monoMs)), phase.ids, phase.networkValidated, phase.micSilenced, phase.defaultNetwork)
     // The claim goes at once (A9): the first beat is due now.
     return Heartbeats.tick(Step(paired, listOf(Command.Hold, line("paired"))), now)
   }
@@ -71,8 +71,8 @@ internal object Pairings {
   fun unpair(phase: Phase): Step =
     when {
       phase is Phase.Paired && phase.pairing.starts.awaited -> SessionMachine.ignored(phase, "unpair")
-      phase is Phase.Paired -> Step(Phase.Idle(phase.ids, phase.networkValidated, phase.micSilenced), listOf(Command.Release, line("unpaired", "reason" to "operator")))
-      phase is Phase.Pairing -> Step(Phase.Idle(phase.ids, phase.networkValidated, phase.micSilenced), listOf(line("unpaired", "reason" to "operator")))
+      phase is Phase.Paired -> Step(Phase.Idle(phase.ids, phase.networkValidated, phase.micSilenced, defaultNetwork = phase.defaultNetwork), listOf(Command.Release, line("unpaired", "reason" to "operator")))
+      phase is Phase.Pairing -> Step(Phase.Idle(phase.ids, phase.networkValidated, phase.micSilenced, defaultNetwork = phase.defaultNetwork), listOf(line("unpaired", "reason" to "operator")))
       else -> SessionMachine.ignored(phase, "unpair")
     }
 
@@ -96,7 +96,7 @@ internal object Pairings {
     if (phase is Phase.Paired && phase.pairing.isCourt) return Step(phase, listOf(line("intent-ignored", "intent" to "forget", "phase" to phase.name, "court" to true)))
     if (phase !is Phase.Paired || phase.pairing.starts.awaited) return SessionMachine.ignored(phase, "forget")
     val pairing = phase.pairing
-    val idle = Phase.Idle(phase.ids, phase.networkValidated, phase.micSilenced, Unpaired(UnpairReason.FORGOTTEN, pairing.name))
+    val idle = Phase.Idle(phase.ids, phase.networkValidated, phase.micSilenced, Unpaired(UnpairReason.FORGOTTEN, pairing.name), phase.defaultNetwork)
     // The one definition, as every unpair line reads it; never true here, as Paired holds no broadcast.
     val wasLive = "wasLive" to (phase.firstLiveEpochMs != null)
     val commands = listOf(Command.Release, Command.WriteForgotten(pairing.name), line("unpaired", "reason" to UnpairReason.FORGOTTEN, wasLive))
@@ -112,7 +112,7 @@ internal object Pairings {
     if (reason == UnpairReason.CODE_ENDED && pairing.stopped != null) commands += Command.DeleteStopped(pairing.name.code, pairing.name.slot)
     commands += line("unpaired", "reason" to reason, "wasLive" to (phase.firstLiveEpochMs != null))
     // Plan D §3.4: Idle holds no pairing, so the log goes out with the step, the answer that unpaired the phone in it.
-    return Step(Phase.Idle(phase.ids, phase.networkValidated, phase.micSilenced, Unpaired(reason, pairing.name)), commands, leftLog = pairing.beatLog)
+    return Step(Phase.Idle(phase.ids, phase.networkValidated, phase.micSilenced, Unpaired(reason, pairing.name), phase.defaultNetwork), commands, leftLog = pairing.beatLog)
   }
 
   fun automatic(phase: Phase, on: Boolean): Step {
@@ -159,7 +159,7 @@ internal object Starts {
     // pending a beat (N48) is confirmed here: whatever arms the broadcast ends it.
     val cleared = pairing.copy(waiting = waiting, refusal = null, startFailed = null, lastEnd = null, starts = pairing.starts.copy(inFlightId = null, pending = false))
     val (asks, id) = DescriptorAsks(nextId = ids.descriptor).asked(now.monoMs)
-    val arming = Phase.Arming(cleared, sid, cause, ids, phase.networkValidated, phase.micSilenced, asks)
+    val arming = Phase.Arming(cleared, sid, cause, ids, phase.networkValidated, phase.micSilenced, asks, defaultNetwork = phase.defaultNetwork)
     return Step(arming, listOf(line("broadcast-start", "sid" to sid, "cause" to cause), fetchCode(pairing, id)))
   }
 
@@ -186,6 +186,7 @@ internal object Starts {
         nextAttemptId = ids.attempt,
         descriptor = arming.asks,
         networkValidated = arming.networkValidated,
+        defaultNetwork = arming.defaultNetwork,
         micSilenced = arming.micSilenced,
       )
     val armed = line("armed", "sid" to arming.sid, "transport" to config.primary.transport, "srtOffered" to descriptor.srtOffered, "playbackUrl" to config.playbackUrl)
@@ -248,7 +249,7 @@ internal object Starts {
         heartbeat = arming.pairing.heartbeat.copy(lastSentAtMonoMs = null),
       )
     val noted = line("start-failed", "sid" to arming.sid, "failure" to failure)
-    val step = Step(Phase.Paired(pairing, arming.ids, arming.networkValidated, arming.micSilenced), extra.toList() + noted + Command.WriteStopped(stopped))
+    val step = Step(Phase.Paired(pairing, arming.ids, arming.networkValidated, arming.micSilenced, arming.defaultNetwork), extra.toList() + noted + Command.WriteStopped(stopped))
     return Heartbeats.tick(step, now)
   }
 
@@ -331,7 +332,7 @@ internal object Verdicts {
     val publishing = phase is Phase.Connecting || phase is Phase.OnAir
     val ended = line("broadcast-ended", "sid" to phase.heldSid, "lastEnd" to lastEnd, "wasLive" to (phase.firstLiveEpochMs != null))
     val camera = phase.camera?.afterSession ?: CameraState.OWN
-    val paired = Phase.Paired(pairing.copy(lastEnd = lastEnd, camera = camera), phase.ids, phase.networkValidated, phase.micSilenced)
+    val paired = Phase.Paired(pairing.copy(lastEnd = lastEnd, camera = camera), phase.ids, phase.networkValidated, phase.micSilenced, phase.defaultNetwork)
     return Step(paired, listOfNotNull(if (publishing) Command.StopBroadcast else null, ended))
   }
 

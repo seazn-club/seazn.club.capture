@@ -75,16 +75,12 @@ sealed interface Input {
    * `NET_CAPABILITY_VALIDATED`, pushed on every change, in any phase. The machine keeps the last one
    * between sessions and seeds each session with it at arm (final review I-1). Until the first, it is
    * not validated.
+   *
+   * N49: a validated report names its network, [handle] (`Network.getNetworkHandle()`), and is told again whenever the
+   * validated default becomes another network ([DefaultNetwork]). The machine asks each attempt on the default it holds
+   * and replaces one that is no longer on it ([Transports.network]). Null names none: the default is left as it was.
    */
-  data class Network(val validated: Boolean) : Input
-
-  /**
-   * N49: the default network became another validated network, which [DefaultNetwork] decides. A socket already open
-   * stays on the network it was opened on until that network dies, so on air the machine replaces it at once
-   * ([Transports.networkSwitched]). [attemptId] is the attempt in hand when the platform saw it: one older than the
-   * machine's when it lands was replaced in between, on the new network, and is stale.
-   */
-  data class NetworkSwitched(val attemptId: Int) : Input
+  data class Network(val validated: Boolean, val handle: Long? = null) : Input
 
   /** Another app opened a camera while ours is held (F-P5-9). */
   data object CameraContended : Input

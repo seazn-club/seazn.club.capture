@@ -973,10 +973,14 @@ No `bitrate` line follows, to the auto-stop at 10:04:24. The phone showed "Weak 
 09:59 on clean 5 GHz Wi-Fi with 0% ping loss. There is no `network` line. Cloudflare showed the input at 0.55–1.35 Mb/s
 from 09:55 to the end, against 2–3.3 Mb/s before. Cloudflare's input events: `INPUT_GOP_OUT_OF_RANGE` and
 `INPUT_DISCONNECTED` at 09:55:37–38, then `TIMEOUT_READING_FROM_INPUT` and `INPUT_DISCONNECTED` at 09:56:07 and
-09:56:15. INFERRED: most likely the old 4G connection dying with a group of frames cut off.
+09:56:15. INFERRED: all of them were the old 4G connection's, dying with a group of frames cut off; the new connection
+(attempt 17, 09:55:31) was never dropped, since the camera input's `statusEnteredAt` stayed at 09:55:31.659 until
+10:04:25.
 
-**The viewers' gap:** about 22 s on the phone (the switch to the stall verdict), plus about 50 s for the relay to pick
-the camera up again. The relay's part is the web's.
+**The viewers' gap:** about 22 s on the phone (the switch to the stall verdict), then about 45 s more. INFERRED (fix
+round 1, 2026-11-24): Cloudflare held the old 4G publisher as the input's source until its read timeout
+(`TIMEOUT_READING_FROM_INPUT` at 09:56:07), so the playlist did not move although the new connection was up. Meanwhile
+the relay retried every few seconds and read 0 B (the seaznstream session's evidence). The relay's part is the web's.
 
 **Two causes on the phone:**
 
@@ -1009,6 +1013,35 @@ the camera up again. The relay's part is the web's.
   (`DefaultNetworkTest`, `NetworkSwitchTest`). The snapshot's cause while it reconnects is `uplink-lost`: a new word
   would have to be taught to JS's snapshot reader and status line, which this fix leaves alone. The delivery watch's
   thresholds are unchanged.
+
+**Fix round 1 (review of B, 2026-11-24):**
+
+- **Judged against the attempt's network.** B judged a switch against the last validated default, which a loss
+  forgot, so a fast hand-off (`onLost(4G)`, then Wi-Fi validated under SRT's peer-idle timeout of about 5 s, while the
+  4G socket lives on through the new route) was told as no switch. `Input.Network` now carries the validated network's
+  handle (`DefaultNetwork` tells it whenever validated is new or the network is another), the machine keeps the default
+  between phases as it keeps the validated fact, and each attempt keeps the default it was asked on
+  (`Session.attemptNetwork`), which a loss never forgets. `Input.NetworkSwitched` and the glue's attempt stamp are gone.
+- **A switch while an attempt connects.** B only recorded a switch during a replace in flight (`in-outage`), so 4G to
+  Wi-Fi to 4G inside a ~1 s connect left the new socket on Wi-Fi. A connecting attempt asked on another network is now
+  replaced once it connects, never torn down mid-connect; one that ends up back on its own network is not. Connected
+  and before its first frames, it is replaced at once, keeping its outage.
+- **A replaced switch is a new link.** The regulator forgets the rate the old link failed (`BitrateRegulator.newLink`),
+  which clears Weak signal; the target and the last cut stand, so the tested raise still gates the climb.
+- **The delivery watch.** A replaced switch starts the watch's ingest session again, as a not-delivered verdict does,
+  and no verdict comes for `SWITCH_GRACE_MS`, 45 s, after it (INFERRED, from the gap above: a verdict at ~20 s would
+  replace the good new socket too). A look inside the grace keeps no lag history but its own, so the lag the held
+  publisher built up is not read as growth after it.
+- **Unsaid floor cuts.** Cuts at the floor after the last `bitrate-floor` line are said when the session ends, under
+  the last cut's rule, with no reading (`FloorCuts.closed`).
+- The `network-switched` words are now `replaced`, `pending`, `same`, `between-attempts` and `not-on-air`; a switch
+  away from no network (the first, or after a loss) writes a line only when it replaces.
+
+**Not built: binding the SRT socket to a network.** No SRT socket is bound to an Android `Network`, so after a switch
+the old socket's packets, its shutdown included, are INFERRED to leave over the new network from a new address, which
+Cloudflare ignores. srtdroid 1.10.1 exposes no file descriptor and no `srt_bind_acquire` wrapper (its libsrt 1.5.7
+exports the C symbol only), and its libsrt carries the "SRTO_BINDTODEVICE is not supported on that platform" branch.
+`bindProcessToNetwork` would pin every socket of the process, the beats' and JS's HTTP included. Recorded for later.
 
 **Device-only, not yet seen:** that Android tells a default switch as the new network's `onCapabilitiesChanged` with
 no `onLost` of the old one (INFERRED from the missing `network` line), and that the new socket opens on the new

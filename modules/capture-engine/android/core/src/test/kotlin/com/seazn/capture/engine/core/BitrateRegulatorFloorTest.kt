@@ -55,6 +55,16 @@ class BitrateRegulatorFloorTest {
   }
 
   @Test
+  fun `N49 fix 5 the floor's rule is the last cut's, said or not`() {
+    // Drops at the floor to 21 s, their line said; then a backlog at the floor at 24 s, inside the minute: not said.
+    val floored = atFloorUntil21s()
+    assertEquals(BitrateMove.DROPS, floored.floorReason)
+    val held = BitrateRegulator.regulate(floored, backlog, 24_000, Transport.SRT, latency)
+    assertNull(held.floor, "inside the minute")
+    assertEquals(BitrateMove.BACKLOG, held.state.floorReason)
+  }
+
+  @Test
   fun `R-RTRF a cut at the floor is still a cut - Weak signal stays, and the raise waits 30 s from it`() {
     val floored = atFloorUntil21s()
     assertEquals(21_000L, floored.lastCutAtMs)

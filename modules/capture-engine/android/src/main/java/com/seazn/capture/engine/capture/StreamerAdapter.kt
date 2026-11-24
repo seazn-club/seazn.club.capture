@@ -401,6 +401,29 @@ class StreamerAdapter(
     }
 
     /**
+     * Spec 2026-11-24-camera-stabilisation §4: camera settings belong to one camera source (3.2.1, javap:
+     * `ICameraSource.getSettings`), so only the source held now, of that id, is read. `isOpticalAvailable` is StreamPack's
+     * read of `LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION` for ON.
+     */
+    override fun opticalStabiliser(cameraId: String): Boolean? =
+      heldCamera(cameraId)?.settings?.stabilization?.isOpticalAvailable
+
+    /**
+     * Spec §4: StreamPack 3.2.1's `setIsEnableOptical(true)` only sets the key (javap: its ON branch returns after
+     * `CameraSettings.set`; only OFF applies the repeating request), so the repeating request is applied here after it.
+     * The run asks only after an accepted open: against a device not open, `set` and `applyRepeatingSession` open it.
+     */
+    override suspend fun stabilise(cameraId: String) {
+      val camera = heldCamera(cameraId) ?: return
+      camera.settings.stabilization.setIsEnableOptical(true)
+      camera.settings.applyRepeatingSession()
+    }
+
+    /** The held streamer's camera source, when it is camera [cameraId]: never a slate, a switch's other camera or none. */
+    private fun heldCamera(cameraId: String): ICameraSource? =
+      (current.value?.videoInput?.sourceFlow?.value as? ICameraSource)?.takeIf { it.cameraId == cameraId }
+
+    /**
      * Review C7 I-2: each camera source's id when StreamPack 3.2.1 reports it open, previewing or streaming
      * (javap: `CameraSource.startPreview` and `startStream` emit true after `CameraController.addTarget`, the
      * lazy open). A new source, a switch's or a reopen's, is watched afresh. F-S4-1: each time it turns open,

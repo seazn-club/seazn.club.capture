@@ -275,7 +275,9 @@ class CaptureRunProbeTest : CaptureRunTestKit() {
       assertEquals(1, s.parts.watchingBusy, "the opening watches its busy opens")
       s.parts.busyOpen("0")
       advanceUntilIdle()
-      assertEquals(emptyList(), s.told.reports + s.told.lines.map { it.kind } + s.parts.log, "nothing on air: the open's own")
+      // The open's own stabilisation lines (spec 2026-11-24) are the open's, not the busy word's.
+      val lines = s.told.lines.map { it.kind }.filter { it != "stabilisation" }
+      assertEquals(emptyList(), s.told.reports + lines + s.parts.log, "nothing on air: the open's own")
       assertTrue(s.cameras.ready(camera = true), "and nothing marked here")
 
       does(s, connect(1))

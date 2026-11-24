@@ -272,6 +272,22 @@ class FakeParts : CaptureParts {
   /** Through the cause chain, as the adapter reads: coroutines' stack-trace recovery may hand the run a copy that wraps the throw. */
   override fun busyCamera(failure: Throwable): String? = generateSequence(failure) { it.cause }.take(8).firstNotNullOfOrNull { busyFailures[it] }
 
+  /** Spec 2026-11-24 §4: whether each camera has OIS, by id; absent is a camera whose source is not held now. */
+  val optical = mutableMapOf("0" to true, "1" to false)
+
+  /** Spec §4: a stabilise that throws this. */
+  var stabiliseFailure: Exception? = null
+
+  /** Spec §4: each camera OIS was turned on for, in order. */
+  val stabilised = mutableListOf<String>()
+
+  override fun opticalStabiliser(cameraId: String): Boolean? = optical[cameraId]
+
+  override suspend fun stabilise(cameraId: String) {
+    stabiliseFailure?.let { throw it }
+    stabilised += cameraId
+  }
+
   companion object {
     const val STEP_MS = 10L
 

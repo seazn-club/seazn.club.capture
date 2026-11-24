@@ -89,6 +89,19 @@ interface CaptureParts {
    * holds a camera source, beside which a second open of ours would evict our own.
    */
   suspend fun probeCamera(): Probe?
+
+  /**
+   * Spec 2026-11-24-camera-stabilisation §4: whether camera [cameraId] has OIS (StreamPack's `isOpticalAvailable`, from
+   * `LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION`). Null when the source held now is not that camera: a slate, a switch
+   * since, or nothing held.
+   */
+  fun opticalStabiliser(cameraId: String): Boolean?
+
+  /**
+   * Turns OIS on for the held camera source [cameraId] and applies it to the running session. Asked only of a camera
+   * that has OIS. A throw is the run's to record; it never reaches the session's failure path.
+   */
+  suspend fun stabilise(cameraId: String)
 }
 
 /** N45 I1: what a probe of our camera found ([CaptureParts.probeCamera]). */

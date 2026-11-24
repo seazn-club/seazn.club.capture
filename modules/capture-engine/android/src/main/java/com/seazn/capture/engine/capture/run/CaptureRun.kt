@@ -12,6 +12,8 @@ import com.seazn.capture.engine.core.PairRequest
 import com.seazn.capture.engine.core.RecordEntry
 import com.seazn.capture.engine.core.SessionMachine
 import com.seazn.capture.engine.core.Side
+import com.seazn.capture.engine.core.Stabilisation
+import com.seazn.capture.engine.core.Stabiliser
 import java.io.IOException
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicInteger
@@ -115,6 +117,9 @@ class CaptureRun(
   private var probeReleasedAt: Long? = null
   @Volatile private var quickRetakes = 0
 
+  /** Spec 2026-11-24-camera-stabilisation §4: the camera and OIS state the last `stabilisation` line said, in this opening. */
+  private var stabilisedLine: Pair<String, Stabiliser>? = null
+
   fun open(asked: PairRequest) = serial.submit { opened(asked) }
 
   /** Re-review 2 (R2-M2 ruling): the unpair never waits behind a probe ([abandonProbe]). */
@@ -187,8 +192,15 @@ class CaptureRun(
       scope.launch {
         launch {
           parts.cameraOpens().collect { id ->
+            // Spec 2026-11-24 §5: read as the report is heard, as [CameraAvailability.opened] reads it.
+            val accepted = !cameras.falseOpen(id)
             cameras.opened(id)?.let(calls.report)
-            serial.submit(::openSeen)
+            serial.submit {
+              openSeen()
+              // Every camera source opened, a switch's, a reopen's and the slate's fall included; never a busy open's
+              // false report, as a setting against a device not open opens it outside the take and the probe.
+              if (accepted) stabilise(id)
+            }
           }
         }
         // N45 I2: the busy word is marked as it is heard, before its take is queued: StreamPack's report of the same
@@ -478,7 +490,30 @@ class CaptureRun(
     openWatch = null
     attempt = null
     rotation = null
+    stabilisedLine = null
     parts.release()
+  }
+
+  /**
+   * Spec 2026-11-24-camera-stabilisation §3: camera [camera], just reported open, gets OIS wherever it has it (owner,
+   * 2026-11-24: "OIS only"). One line when the camera or its state differs from the last said in this opening. A setter
+   * that throws writes one `capture-call-failed` line and is never the session's failure: the picture goes on
+   * unstabilised rather than the broadcast ending, and the next open says its state again.
+   */
+  private suspend fun stabilise(camera: String) {
+    try {
+      val available = parts.opticalStabiliser(camera) ?: return
+      val state = Stabilisation.optical(available)
+      if (state == Stabiliser.ON) parts.stabilise(camera)
+      if (stabilisedLine == camera to state) return
+      stabilisedLine = camera to state
+      calls.line(Stabilisation.entry(state))
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      stabilisedLine = null
+      calls.line(RecordEntry("capture-call-failed", listOf("action" to "stabilisation", "error" to e.javaClass.simpleName)))
+    }
   }
 
   private suspend fun run(command: Command) {

@@ -1,7 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { SessionState } from '@/domain/session/SessionState';
-import type { EngineSnapshot, Telemetry, ThermalStatus } from '@/engine/CaptureEnginePort';
+import type {
+  EngineSnapshot,
+  ServerFacts,
+  Telemetry,
+  ThermalStatus,
+} from '@/engine/CaptureEnginePort';
 import { createFakeCaptureEngine, type FakeScene } from '@/engine/FakeCaptureEngine';
 import { diagnosticsSections } from '@/hooks/diagnostics';
 import { settingsDiagRows } from '@/hooks/settingsDiagnostics';
@@ -80,6 +85,19 @@ describe('the Diagnostics card fits its half in landscape (spec §6)', () => {
   it('fits at 804 × 332, the rulings’ geometry: the halves have 252, 8 to spare', () => {
     expect(halvesBudget(332)).toBe(252);
     expect(halvesBudget(332) - cardHeight).toBe(8);
+  });
+
+  // T46 (design 2026-11-24 §3): on air the card gains the server's four rows, 332 dp: past the half on every landscape
+  // here but 915 × 412, where it fits exactly. So on air its half scrolls (SettingsScreen.test.tsx: each half scrolls on
+  // its own); off air it is the 244 above.
+  it('on air the card is 332: 244 + 4 × 22, 84 past the owner’s half, which scrolls', () => {
+    const onAir = cardHeight + SERVER_ROWS.length * layout.diagRow;
+    expect(onAir).toBe(332);
+    expect(onAir - halvesBudget(328)).toBe(84);
+    for (const height of [328, 332, 360, 390] as const) {
+      expect(onAir, `${height}`).toBeGreaterThan(halvesBudget(height));
+    }
+    expect(halvesBudget(412)).toBe(onAir);
   });
 
   // Every sum in this file adds these up. They are the board's numbers written as literals, so a token that drifts
@@ -191,6 +209,16 @@ const CARD_ROWS = [
   'diag.hbSent',
 ] as const satisfies readonly MessageKey[];
 
+/** T46: the server's four rows, on air only, after Delivery's (design 2026-11-24 §3). */
+const SERVER_ROWS = [
+  'diag.relay',
+  'diag.programme',
+  'diag.cameraIngest',
+  'diag.programmeIngest',
+] as const satisfies readonly MessageKey[];
+const ON_AIR_ROWS = [...CARD_ROWS.slice(0, 6), ...SERVER_ROWS, ...CARD_ROWS.slice(6)];
+const ON_AIR: ReadonlySet<string> = new Set(['publishing', 'degraded', 'reconnecting']);
+
 /** The port's ThermalStatus, in full. `satisfies` makes the list complete or a type error. */
 const THERMAL = {
   none: 0,
@@ -209,7 +237,7 @@ const THERMAL_STATUSES = Object.keys(THERMAL) as ThermalStatus[];
  * before an incident owns the screen (the reason is at each).
  */
 type Probe = {
-  readonly row: (typeof CARD_ROWS)[number];
+  readonly row: (typeof CARD_ROWS)[number] | (typeof SERVER_ROWS)[number];
   readonly state: string;
   readonly kind: 'static' | 'worst';
   /** A `worst` probe must really show its number (decimal point as dots), a `no reading` one the dash. */
@@ -419,16 +447,79 @@ function probes(): readonly Probe[] {
       contains: '100',
       shown: (scene) => withTelemetry(live(scene), { batteryPercent: 100 }),
     },
+    ...serverProbes(live),
+  ];
+}
+
+/** T46's facts, every member known; each probe changes one. */
+const FACTS: ServerFacts = {
+  relayOutput: 'connected',
+  programmePhase: 'live',
+  fps: 30,
+  kbps: 2800,
+  cameraIngest: 'connected',
+  programmeIngest: 'connected',
+  ageS: 4,
+};
+
+/**
+ * T46: every word each server row can say, its dash, and the programme's rate at the widest the relay reports (60 fps,
+ * five-digit kbps: past the 3000k encode ceiling, AGENTS §8) and at a usual one.
+ */
+function serverProbes(
+  live: (scene: (name: FakeScene) => EngineSnapshot) => EngineSnapshot,
+): Probe[] {
+  const facts = (scene: (name: FakeScene) => EngineSnapshot, server: ServerFacts | null) =>
+    withTelemetry(live(scene), { server });
+  const words = <K extends keyof ServerFacts>(
+    row: Probe['row'],
+    member: K,
+    list: readonly ServerFacts[K][],
+  ) =>
+    list.map((word) => ({
+      row,
+      state: `${String(member)} ${String(word)}`,
+      kind: 'static' as const,
+      shown: (scene: (name: FakeScene) => EngineSnapshot) =>
+        facts(scene, { ...FACTS, [member]: word }),
+    }));
+  const ingest = ['connected', 'disconnected', 'errored'] as const;
+  return [
+    ...words('diag.relay', 'relayOutput', ['connecting', 'connected', 'backoff']),
+    ...words('diag.programme', 'programmePhase', ['waiting', 'frozen', 'reconnecting', 'final']),
+    ...words('diag.cameraIngest', 'cameraIngest', ingest),
+    ...words('diag.programmeIngest', 'programmeIngest', ingest),
+    ...SERVER_ROWS.map((row) => ({
+      row,
+      state: 'no reading',
+      kind: 'static' as const,
+      shown: (scene: (name: FakeScene) => EngineSnapshot) => facts(scene, null),
+    })),
+    {
+      row: 'diag.programme',
+      state: '60 fps 12000 kbps',
+      kind: 'worst',
+      contains: '12000',
+      shown: (scene) => facts(scene, { ...FACTS, fps: 60, kbps: 12000 }),
+    },
+    {
+      row: 'diag.programme',
+      state: '30 fps 2800 kbps',
+      kind: 'worst',
+      contains: '2800',
+      shown: (scene) => facts(scene, FACTS),
+    },
   ];
 }
 
 /**
  * Probes per language: 6 Transport (SRT, RTMPS, RTMPS only, the dash, and armed and reconnecting RTMPS-only),
  * 3 Delivery, 8 Heat, 6 other dashes, and 28 worst-case numbers (bitrate, rtt, battery, the lag at the hold
- * window, and 8 samples each of Behind live, Checked and Last sent).
+ * window, and 8 samples each of Behind live, Checked and Last sent). T46 adds 19: 3 Relay, 4 Programme words,
+ * 3 each feed, 4 dashes, and 2 programme rates (worst).
  */
-const PROBES_PER_LANGUAGE = 51;
-const WORST_PER_LANGUAGE = 28;
+const PROBES_PER_LANGUAGE = 70;
+const WORST_PER_LANGUAGE = 30;
 
 /** A fake engine in a named scene, read once. */
 function scene(name: FakeScene): EngineSnapshot {
@@ -548,8 +639,11 @@ describe('every Diagnostics row fits its line at 640 × 360, in every language (
       const misfits: string[] = [];
       let checkedHere = 0;
       for (const probe of set) {
-        const rows = cardRows(probe.shown(scene), lang);
-        expect(rows.map((row) => row.key)).toEqual(CARD_ROWS);
+        const shown = probe.shown(scene);
+        const rows = cardRows(shown, lang);
+        expect(rows.map((row) => row.key)).toEqual(
+          ON_AIR.has(shown.state.kind) ? ON_AIR_ROWS : CARD_ROWS,
+        );
         const row = rows.find((candidate) => candidate.key === probe.row);
         if (row === undefined) throw new Error(`no ${probe.row} row`);
         // The probe shows what it says it does: a dash for no reading, its number for a worst case.
@@ -621,6 +715,18 @@ describe('every Diagnostics row fits its line at 640 × 360, in every language (
     }
   });
 
+  it.each(LANGS)('%s: T46’s section name, on air, fits the 72 dp of its column', (lang) => {
+    const shown = cardRows(scene('live'), lang).filter((row) => row.section !== null);
+    expect(shown).toHaveLength(5);
+    const name = (shown.find((row) => row.key === 'diag.relay')?.section ?? '').toUpperCase();
+    expect(name.length).toBeGreaterThan(0);
+    const width =
+      condensed.width(name, typeScale.diagSection.fontSize) +
+      Array.from(name).length * (typeScale.diagSection.letterSpacing ?? 0);
+    expect(width, `${lang} section "${name}"`).toBeLessThanOrEqual(SECTION_TEXT);
+    sectionsChecked += 1;
+  });
+
   // N33: Share record left the header for the record row (the D3 fixes plan's Task 6.3); its labels are proved below,
   // in the column the row sits in. The header is the board's pulse and the heading on one line, 20 dp tall. Two
   // widths bound it: the half of a 640 dp landscape window, and a 320 dp portrait phone's card (the narrowest card
@@ -671,7 +777,7 @@ describe('every Diagnostics row fits its line at 640 × 360, in every language (
     expect(headersChecked).toBe(2 * 4); // two widths x four languages
     expect(probesChecked).toBe(4 * PROBES_PER_LANGUAGE);
     expect(labelsChecked).toBe(4 * 9);
-    expect(sectionsChecked).toBe(4 * 4);
+    expect(sectionsChecked).toBe(4 * 4 + 4);
   });
 });
 

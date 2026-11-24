@@ -36,13 +36,35 @@ const Q1_ROWS = [
   ['diag.hbSent', 'diag.section.heartbeat'],
 ] as const;
 
+/**
+ * T46 (design 2026-11-24 §3): on air the card gains the server's four rows after Delivery's, so it is 13 rows and its
+ * half scrolls (settingsFit.test.ts). Off air it is Q1's nine.
+ */
+const LIVE_ROWS = [
+  ...Q1_ROWS.slice(0, 6),
+  ['diag.relay', 'diag.section.server'],
+  ['diag.programme', null],
+  ['diag.cameraIngest', null],
+  ['diag.programmeIngest', null],
+  ...Q1_ROWS.slice(6),
+] as const;
+
 describe("Settings' Diagnostics rows (Q1, spec §6)", () => {
   it("shows Q1's rows, in the board's order, each section named once on its first row", () => {
-    const rows = settingsDiagRows(sectionsFor('live'));
+    const rows = settingsDiagRows(sectionsFor('paired-ready'));
     expect(rows).toHaveLength(9); // Q1's count, a literal (anti-vacuity: 0 rows would fail)
     expect(rows.map((row) => row.key)).toEqual(Q1_ROWS.map(([key]) => key));
     expect(rows.map((row) => row.section)).toEqual(
       Q1_ROWS.map(([, section]) => (section === null ? null : en[section])),
+    );
+  });
+
+  it("T46: on air, the server's four rows after Delivery's, under Server", () => {
+    const rows = settingsDiagRows(sectionsFor('live'));
+    expect(rows).toHaveLength(13);
+    expect(rows.map((row) => row.key)).toEqual(LIVE_ROWS.map(([key]) => key));
+    expect(rows.map((row) => row.section)).toEqual(
+      LIVE_ROWS.map(([, section]) => (section === null ? null : en[section])),
     );
   });
 
@@ -68,6 +90,10 @@ describe("Settings' Diagnostics rows (Q1, spec §6)", () => {
       ['Viewers receiving', 'Yes'],
       ['Behind live', '9.2 s'],
       ['Checked', '1.5 s ago'],
+      ['Relay', '—'],
+      ['Programme', '—'],
+      ['Camera feed', '—'],
+      ['Programme feed', '—'],
       ['Battery', '74%'],
       ['Heat', 'Normal'],
       ['Last sent', '4 s ago'],
@@ -101,19 +127,19 @@ describe("Settings' Diagnostics rows (Q1, spec §6)", () => {
   // the input order fails here.
   it("orders by the board, whatever order the sections arrive in, and names each section's first row", () => {
     const rows = settingsDiagRows([...sectionsFor('live')].reverse());
-    expect(rows.map((row) => row.key)).toEqual(Q1_ROWS.map(([key]) => key));
+    expect(rows.map((row) => row.key)).toEqual(LIVE_ROWS.map(([key]) => key));
     expect(rows.map((row) => row.section)).toEqual(
-      Q1_ROWS.map(([, section]) => (section === null ? null : en[section])),
+      LIVE_ROWS.map(([, section]) => (section === null ? null : en[section])),
     );
   });
 
   // Question 4, another language: the same keys, the language's own labels and section names.
   it('selects by key, so the Spanish card has the same nine rows', () => {
     const rows = settingsDiagRows(sectionsFor('live', {}, 'es'));
-    expect(rows.map((row) => row.key)).toEqual(Q1_ROWS.map(([key]) => key));
+    expect(rows.map((row) => row.key)).toEqual(LIVE_ROWS.map(([key]) => key));
     expect(rows.map((row) => row.section)).toEqual(
-      Q1_ROWS.map(([, section]) => (section === null ? null : es[section])),
+      LIVE_ROWS.map(([, section]) => (section === null ? null : es[section])),
     );
-    expect(rows.map((row) => row.label)).toEqual(Q1_ROWS.map(([key]) => es[key]));
+    expect(rows.map((row) => row.label)).toEqual(LIVE_ROWS.map(([key]) => es[key]));
   });
 });

@@ -109,6 +109,17 @@ async function startedViewfinder() {
   }
 }
 
+/** T46: the server's facts, by hand from the shared vectors' live-server-facts case, its programme feed lost. */
+const SERVER_FACTS = {
+  relayOutput: 'connected',
+  programmePhase: 'live',
+  fps: 30,
+  kbps: 2800,
+  cameraIngest: 'connected',
+  programmeIngest: 'disconnected',
+  ageS: 4,
+} as const;
+
 describe('Settings has no score preview control (D2 §4.1)', () => {
   // The four removed Score preview labels, one a language, copied here because the dictionaries no longer hold them.
   it.each(LANGS)(
@@ -364,11 +375,13 @@ describe('Diagnostics inside Settings (spec §6, Q1)', () => {
     expect(screen.getByTestId('record-row').contains(shareButton())).toBe(true);
   });
 
-  it("lists Q1's nine rows as section | item | value, from the live report", () => {
+  // T46 (design 2026-11-24 §3): on air, Q1's nine and the server's four after Delivery's.
+  it("lists Q1's nine rows and, on air, the server's four as section | item | value, from the live report", () => {
     const view = renderSettings();
     act(() => view.engine.scene('live'));
+    act(() => view.engine.patch({ server: SERVER_FACTS }));
     const rows = diagRows();
-    expect(rows).toHaveLength(9); // Q1's count, a literal (F13): 0 rows must fail, not pass as 0 = 0
+    expect(rows).toHaveLength(13); // a literal (F13): 0 rows must fail, not pass as 0 = 0
     expect(rows.map(cellsOf)).toEqual([
       ['Link', 'Transport', 'SRT'],
       ['', 'Bitrate', '2840 kbps'],
@@ -376,6 +389,10 @@ describe('Diagnostics inside Settings (spec §6, Q1)', () => {
       ['Delivery', 'Viewers receiving', 'Yes'],
       ['', 'Behind live', '9.2 s'],
       ['', 'Checked', '1.5 s ago'],
+      ['Server', 'Relay', 'Connected'],
+      ['', 'Programme', '30 fps 2800k'],
+      ['', 'Camera feed', 'Connected'],
+      ['', 'Programme feed', 'No signal'],
       ['Phone', 'Battery', '74%'],
       ['', 'Heat', 'Normal'],
       ['Heartbeat', 'Last sent', '4 s ago'],
@@ -473,7 +490,7 @@ describe('Diagnostics inside Settings (spec §6, Q1)', () => {
   it('keeps every item and value to one line, ellipsised at the tail', () => {
     const view = renderSettings();
     act(() => view.engine.scene('live'));
-    expect(diagRows()).toHaveLength(9);
+    expect(diagRows()).toHaveLength(13);
     for (const row of diagRows()) {
       for (const cell of [row.children[1], row.children[2]] as Element[]) {
         const style = getComputedStyle(cell);
@@ -1417,7 +1434,7 @@ describe('the Diagnostics values are fixed-width, right-aligned (the board’s)'
   it('sets every value in Geist Mono with tabular figures, flush right', () => {
     const view = renderSettings();
     act(() => view.engine.scene('live'));
-    expect(diagRows()).toHaveLength(9);
+    expect(diagRows()).toHaveLength(13);
     for (const row of diagRows()) {
       const value = getComputedStyle(row.children[2] as Element);
       expect(value.fontFamily).toContain(font.numeric);

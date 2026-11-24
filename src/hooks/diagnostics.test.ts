@@ -5,11 +5,15 @@ import { PAIR } from '@/engine/testing/pairIntent';
 import { UNREPORTED } from '@/engine/unreported';
 import { diagnosticsSections } from '@/hooks/diagnostics';
 import en from '@/i18n/en.json';
+import es from '@/i18n/es.json';
+import fr from '@/i18n/fr.json';
+import nl from '@/i18n/nl.json';
 import { LANGS, type Lang } from '@/i18n/language';
 import type { SessionState } from '@/domain/session/SessionState';
 import { createTranslator } from '@/i18n/translate';
 
 const NOW = Date.parse('2026-10-03T13:00:00Z');
+const DICTS: Readonly<Record<Lang, typeof en>> = { en, es, fr, nl };
 
 function rowsFor(
   scene: FakeScene,
@@ -42,6 +46,11 @@ describe('diagnosticsSections (spec §4)', () => {
       'Behind live': '9.2 s',
       Checked: '1.5 s ago',
       'Data used': '312 MB',
+      // T46: on air the server's rows show, dashes while the fake has no facts.
+      Relay: '—',
+      Programme: '—',
+      'Camera feed': '—',
+      'Programme feed': '—',
       Camera: 'This app',
       Battery: '74%',
       Drain: '18%/h',
@@ -66,15 +75,15 @@ describe('diagnosticsSections (spec §4)', () => {
   });
 
   // Task 5: Settings' card picks its rows by key, never by translated text, so a row says which
-  // message it was made from. The count is the table above: 23 rows, each a distinct key.
+  // message it was made from. The count is the table above: 27 rows (23, and T46's four on air), each a distinct key.
   it('gives every row the message key its label was translated from', () => {
     const engine = createFakeCaptureEngine(() => NOW);
     engine.scene('live');
     const sections = diagnosticsSections(engine.getSnapshot(), NOW, createTranslator('en'));
     engine.dispose();
     const rows = sections.flatMap((section) => section.rows);
-    expect(rows).toHaveLength(23);
-    expect(new Set(rows.map((row) => row.key)).size).toBe(23);
+    expect(rows).toHaveLength(27);
+    expect(new Set(rows.map((row) => row.key)).size).toBe(27);
     for (const row of rows)
       expect({ key: row.key, label: row.label }).toEqual({
         key: row.key,
@@ -402,5 +411,105 @@ describe('A18: SRT not offered (Diagnostics)', () => {
       }
     }
     expect(held).toBeGreaterThan(4 * 5); // anti-vacuity: at least five scenes hold a broadcast
+  });
+});
+
+/**
+ * T46 (design 2026-11-24 §3): the relay's and Cloudflare's last word, four rows under "Server" while live only
+ * (publishing, degraded, reconnecting). Expected text is the dictionary's (AGENTS §10), never diagnostics.ts's.
+ */
+describe('T46: the server rows', () => {
+  const FACTS = {
+    relayOutput: 'connected',
+    programmePhase: 'live',
+    fps: 30,
+    kbps: 2800,
+    cameraIngest: 'connected',
+    programmeIngest: 'errored',
+    ageS: 4,
+  } as const;
+
+  function sections(scene: FakeScene, server: Telemetry['server'], lang: Lang = 'en') {
+    const engine = createFakeCaptureEngine(() => NOW);
+    engine.scene(scene);
+    engine.patch({ server });
+    const read = diagnosticsSections(engine.getSnapshot(), NOW, createTranslator(lang));
+    engine.dispose();
+    return read;
+  }
+
+  it('reads live facts under Server, after Delivery: the relay, the programme rate, both feeds', () => {
+    const read = sections('live', FACTS);
+    expect(read.map((section) => section.title)).toEqual([
+      'Link',
+      'Delivery',
+      'Server',
+      'Phone',
+      'Heartbeat',
+      'Engine',
+    ]);
+    expect(read[2]?.rows.map((row) => [row.key, row.label, row.value])).toEqual([
+      ['diag.relay', 'Relay', 'Connected'],
+      ['diag.programme', 'Programme', '30 fps 2800k'],
+      ['diag.cameraIngest', 'Camera feed', 'Connected'],
+      ['diag.programmeIngest', 'Programme feed', 'Error'],
+    ]);
+  });
+
+  it('reads no facts while live as four dashes, never a guess', () => {
+    const rows = sections('live', null).find((section) => section.title === 'Server')?.rows;
+    expect(rows?.map((row) => row.value)).toEqual(['—', '—', '—', '—']);
+  });
+
+  it.each(['holding', 'stalled', 'not-delivered'] as const)(
+    'shows them while %s: a broadcast on air in trouble',
+    (scene) => {
+      const read = sections(scene, FACTS);
+      expect(read.map((section) => section.title)).toContain('Server');
+    },
+  );
+
+  it.each(['paired-ready', 'arming-retrying', 'armed-not-ready', 'connecting', 'stopped'] as const)(
+    'hides them off air (%s), even with facts in hand',
+    (scene) => {
+      const read = sections(scene, FACTS);
+      expect(read.map((section) => section.title)).not.toContain('Server');
+      expect(read.flatMap((section) => section.rows.map((row) => row.key))).not.toContain(
+        'diag.relay',
+      );
+    },
+  );
+
+  it('names a programme that is not live by its word, whatever its rate', () => {
+    const value = (
+      programmePhase: (typeof FACTS)['programmePhase'] | 'frozen' | null,
+      fps: number | null,
+    ) => sections('live', { ...FACTS, programmePhase, fps })[2]?.rows[1]?.value;
+    expect(value('frozen', 30)).toBe('Frozen');
+    expect(value('live', null)).toBe('Live');
+    expect(value(null, 30)).toBe('30 fps 2800k');
+    expect(value(null, null)).toBe('—');
+  });
+
+  it.each(LANGS)('%s: every word reads as its dictionary says', (lang) => {
+    const dict = DICTS[lang];
+    const words = [
+      ['relayOutput', 0, ['connecting', 'connected', 'backoff'], 'diag.relay.'],
+      ['programmePhase', 1, ['waiting', 'frozen', 'reconnecting', 'final'], 'diag.programme.'],
+      ['cameraIngest', 2, ['connected', 'disconnected', 'errored'], 'diag.ingest.'],
+      ['programmeIngest', 3, ['connected', 'disconnected', 'errored'], 'diag.ingest.'],
+    ] as const;
+    let checked = 0;
+    for (const [member, at, list, prefix] of words) {
+      for (const word of list) {
+        const rows = sections('live', { ...FACTS, [member]: word }, lang)[2]?.rows;
+        expect(rows?.[at]?.value).toBe(dict[`${prefix}${word}` as keyof typeof en]);
+        checked += 1;
+      }
+    }
+    expect(checked).toBe(13);
+    expect(sections('live', { ...FACTS, fps: 60, kbps: 12000 }, lang)[2]?.rows[1]?.value).toBe(
+      dict['diag.programme.rate'].replace('{fps}', '60').replace('{kbps}', '12000'),
+    );
   });
 });

@@ -950,3 +950,69 @@ cannot leave the 20 s without a beat.
   share of the GOP's duration, peaked at 1.25 in this run and at 1.37 in N47's 2 s run, so both runs' uplinks fell
   behind at times; the largest GOP was 1401 KB (3 s at about 3.7 Mb/s). INFERRED: the phone was on Wi-Fi (adb reached it on
   the LAN); the record names no network.
+
+---
+
+### N49 — A switch from 4G to Wi-Fi on air waited 22 s for a stall, and the regulator then held the floor unseen
+
+**Seen:** staging, 2026-11-24, record R-RTRF, session `5e5403ce…`. The operator moved the phone from 4G to Wi-Fi at
+about 09:55, on air over SRT. The record, verbatim:
+
+```
+09:55:08.980 bitrate from 3000000 to 1354464 reason backlog egressBps 3362272 dropped 0 lost 0 sendBufferMs 1131
+09:55:10.982 bitrate from 1354464 to 677232 reason drops dropped 378 sendBufferMs 2049
+09:55:12.983 bitrate from 677232 to 500000 reason drops dropped 240 sendBufferMs 1902
+09:55:30.373 not-delivered cause stalled stalledMs 21615 lagGrowthMs 21883
+09:55:30.373 connecting srt attempt 17
+09:55:31.131 connected srt attempt 17
+09:55:32.134 resumed srt cause not-delivered outageMs 1761
+09:55:39.412 delivered
+```
+
+No `bitrate` line follows, to the auto-stop at 10:04:24. The phone showed "Weak signal. Still live." around 09:57 to
+09:59 on clean 5 GHz Wi-Fi with 0% ping loss. There is no `network` line. Cloudflare showed the input at 0.55–1.35 Mb/s
+from 09:55 to the end, against 2–3.3 Mb/s before. Cloudflare's input events: `INPUT_GOP_OUT_OF_RANGE` and
+`INPUT_DISCONNECTED` at 09:55:37–38, then `TIMEOUT_READING_FROM_INPUT` and `INPUT_DISCONNECTED` at 09:56:07 and
+09:56:15. INFERRED: most likely the old 4G connection dying with a group of frames cut off.
+
+**The viewers' gap:** about 22 s on the phone (the switch to the stall verdict), plus about 50 s for the relay to pick
+the camera up again. The relay's part is the web's.
+
+**Two causes on the phone:**
+
+- **The switch was never told.** `NetworkWatch` reported only a change of `NET_CAPABILITY_VALIDATED`, and the default
+  network was validated before and after, so the machine heard nothing. The SRT socket stayed on 4G until the delivery
+  watch's stall verdict (`stalledMs 21615`) started a new ingest session; that reconnect took 0.76 s.
+- **The floor poisoned the raise cap, silently.** From 09:55:12 the target sat at the 500k floor. Each later backlog or
+  drops cut recorded 500k as the rate that failed, so the raise cap was 80% of it, 400k, under the floor, for 5 min
+  after the last such cut, and no raise could happen. A cut that does not move the target wrote no line, while it still
+  moved the last-cut time that shows Weak signal. INFERRED, from the regulator's rule (only a cut in the last 30 s shows
+  Weak signal): the cuts went on at the floor to about 09:59, and the cap held the target at 500k after them. Why the
+  link backlogged on clean Wi-Fi is not known: the record names no network, and no floor cut wrote a line.
+
+**Fixed (phone), the owner's go-ahead (2026-11-24, "do both A and B"):**
+
+- **A.** A cut that cannot lower the target (it is at the floor already) keeps the rate that failed before it, and so
+  does a failing drop's halving at the floor (`BitrateRegulator.failedAt`). It still moves the last-cut time: a backlog
+  at 500k is a real poor uplink on the path the phone sends on, so Weak signal stays true and a raise waits 30 s after
+  it. A cut that lowers the target, a clamp onto the floor included, names the rate it left, as before, and that rate
+  still caps raises for 5 min. Cuts at the floor are now said as `bitrate-floor`, at most once a minute
+  (`FLOOR_LINE_MS`), with the rule of the cut, the count since the last line, and the reading's `egressBps`, `dropped`,
+  `lost` and `sendBufferMs` (`BitrateRegulatorFloorTest`, `SessionMachineBitrateRecordTest`).
+- **B.** The core's `DefaultNetwork` tells a validated report from another network than the last validated default as
+  `Input.NetworkSwitched`, stamped with the attempt in hand; `NetworkWatch` only feeds it the network's handle. The
+  first network is not a switch, nor one validated after the last was lost (its socket dies with it). The validated
+  fact is told exactly as before. On air, on the attempt in hand, with no outage, the machine replaces the attempt at
+  once as a new ingest session does (`StartNewSession`, on the transport in hand, RTMPS after a fallback included),
+  with a hold from the switch. Every switch writes `network-switched` with its `result`: `replaced`, `in-outage` (an
+  outage or its hold is in progress, so no second replace starts), `stale` (an attempt replaced since) or `not-on-air`
+  (`DefaultNetworkTest`, `NetworkSwitchTest`). The snapshot's cause while it reconnects is `uplink-lost`: a new word
+  would have to be taught to JS's snapshot reader and status line, which this fix leaves alone. The delivery watch's
+  thresholds are unchanged.
+
+**Device-only, not yet seen:** that Android tells a default switch as the new network's `onCapabilitiesChanged` with
+no `onLost` of the old one (INFERRED from the missing `network` line), and that the new socket opens on the new
+default.
+
+**Not the phone's:** two Go live holds at 09:42:43 and 09:42:49 failed `AlreadyLive refusedSid` for the session the
+phone had already ended; the web's to fix.

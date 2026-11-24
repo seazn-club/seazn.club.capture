@@ -326,6 +326,44 @@ describe('interruption (question 3)', () => {
     expect(w.matchDay.tokenCalls).toHaveLength(1);
   });
 
+  it('a foreground event while a channel is held and its refresh timed asks nothing more', async () => {
+    const w = world();
+    w.matchDay.answerRealtime(granted(grant(1)), granted(grant(2)));
+    w.start();
+    await settle();
+    w.foreground.fire();
+    await settle();
+    expect(w.matchDay.tokenCalls).toHaveLength(1);
+    expect(w.open().map((s) => s.grant.token)).toEqual([grant(1).token]);
+  });
+
+  it('a foreground event with no channel held (waiting out a backoff) asks the door at once', async () => {
+    const w = world();
+    w.matchDay.answerRealtime({ ok: false, offline: true }, granted(grant(2)));
+    w.start();
+    await settle();
+    w.foreground.fire();
+    await settle();
+    expect(w.matchDay.tokenCalls).toHaveLength(2);
+    expect(w.open()).toHaveLength(1);
+  });
+
+  it('a code that ends while a trailing read waits cancels that read too', async () => {
+    const w = world();
+    w.matchDay.answerRealtime(granted(grant(1, 5_000)), { ok: false, refusal: 'MD_ENDED' });
+    w.start();
+    await settle();
+    await vi.advanceTimersByTimeAsync(1_000);
+    w.live.ping();
+    await vi.advanceTimersByTimeAsync(500);
+    w.live.ping();
+    expect(w.read).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(w.matchDay.tokenCalls).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(w.read).toHaveBeenCalledTimes(1);
+  });
+
   it('the token is in no record line', async () => {
     const w = world();
     w.matchDay.answerRealtime(granted(grant(1)), { ok: false, refusal: 'MD_ENDED' });

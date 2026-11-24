@@ -1,23 +1,16 @@
 import { httpsOrigin } from '@/domain/credentials/wire';
 import { err, ok } from '@/domain/Result';
 import type { MatchDayRefusal } from '@/domain/matchday/matchDay';
-import {
-  all,
-  field,
-  scalar,
-  successData,
-  toInstant,
-  word,
-  type Read,
-} from '@/domain/matchday/wire';
+import { all, field, scalar, successData, word, type Read } from '@/domain/matchday/wire';
 
 /**
  * What the Match Day realtime door hands the list to hear nudges by (phone design 2026-11-24 §4; web spec §3):
  * `GET /api/v1/match-day-code/realtime-token`. The token is a credential: it lives in memory for one subscription, and
  * never goes to the store, the record, a log line, an error or a URL. The topic is joined exactly as answered.
  *
- * PROVISIONAL until `capture-matchday-realtime.v1.json` is vendored: the v1 envelope every md_ route answers in, and
- * `expiresAt` as epoch seconds (the beat grant's `EpochS`) or a UTC instant.
+ * Confirmed by the web (2026-11-24): the v1 envelope `{ok: true, data: {token, topic, expiresAt, url, apikey},
+ * requestId}`, and `expiresAt` in epoch SECONDS only (an ISO value is garbled: poll only). Vectors stay PROVISIONAL
+ * until `docs/contracts/capture-matchday-realtime.v1.json` is vendored from a merged web main.
  */
 export type MatchDayGrant = {
   readonly token: string;
@@ -53,11 +46,10 @@ const server = scalar(
   'expected an https url',
 );
 const expiry = scalar((raw) => {
-  if (typeof raw === 'string') return toInstant(raw);
   if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 0 || raw > MAX_EPOCH_S)
     return undefined;
   return new Date(raw * 1000);
-}, 'expected epoch seconds or a UTC instant');
+}, 'expected epoch seconds');
 
 /** The door's 200, or why it is not one the phone can join by. */
 export function parseRealtimeToken(body: unknown): Read<MatchDayGrant> {

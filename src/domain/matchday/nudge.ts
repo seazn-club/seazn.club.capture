@@ -79,7 +79,8 @@ export function doorStep(answer: MatchDayTokenAnswer, failures: number, now: num
   }
   if ('refusal' in answer) return OVER.has(answer.refusal) ? { kind: 'stop' } : backoff;
   if ('retryAfterMs' in answer && answer.retryAfterMs !== null) {
-    return { kind: 'retry', inMs: answer.retryAfterMs };
+    // Floored at the first backoff step: a Retry-After of 0 or a past date, answered again and again, is no hot loop.
+    return { kind: 'retry', inMs: Math.max(answer.retryAfterMs, retryWaitMs(0)) };
   }
   return backoff;
 }

@@ -160,9 +160,22 @@ describe('doorStep: what a door answer means for the subscription', () => {
       kind: 'retry',
       inMs: 90_000,
     });
-    expect(doorStep({ ok: false, retryAfterMs: 1_000 }, 5, NOW)).toEqual({
+    expect(doorStep({ ok: false, retryAfterMs: 90_000 }, 5, NOW)).toEqual({
       kind: 'retry',
-      inMs: 1_000,
+      inMs: 90_000,
+    });
+  });
+
+  it('a 429 asking for less than 5 s (0, or a date gone by) still waits 5 s: never a hot loop', () => {
+    for (const asked of [0, 1_000, 4_999]) {
+      expect(doorStep({ ok: false, retryAfterMs: asked }, 5, NOW)).toEqual({
+        kind: 'retry',
+        inMs: 5_000,
+      });
+    }
+    expect(doorStep({ ok: false, retryAfterMs: 5_001 }, 5, NOW)).toEqual({
+      kind: 'retry',
+      inMs: 5_001,
     });
   });
 

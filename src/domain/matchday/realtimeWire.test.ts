@@ -2,9 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { parseRealtimeToken, parseRetryAfter } from '@/domain/matchday/realtimeWire';
 
 /**
- * PROVISIONAL (phone design 2026-11-24 §4; web spec §3): vectors copied from the web spec until
- * `capture-matchday-realtime.v1.json` is vendored from a merged web main. The answer is in the v1 envelope every md_
- * route answers in, and `expiresAt` is epoch seconds, as the beat's grant is. All values are made up.
+ * The envelope and `expiresAt` in epoch seconds are confirmed by the web (2026-11-24). The vectors stay PROVISIONAL
+ * until `docs/contracts/capture-matchday-realtime.v1.json` is vendored from a merged web main. All values are made up.
  */
 const TOKEN = 'eyJmYWtl.eyJtZC1mYWtlLXBheWxvYWQ.ZmFrZS1zaWduYXR1cmU';
 const DATA = {
@@ -30,9 +29,12 @@ describe('parseRealtimeToken (PROVISIONAL)', () => {
     });
   });
 
-  it('reads expiresAt as a UTC instant too', () => {
+  it('refuses expiresAt as an ISO instant: the web sends epoch seconds only', () => {
     const read = parseRealtimeToken(answer({ ...DATA, expiresAt: '2026-10-03T14:00:00Z' }));
-    expect(read.ok && read.value.expiresAt.toISOString()).toBe('2026-10-03T14:00:00.000Z');
+    expect(read).toEqual({
+      ok: false,
+      error: { kind: 'invalid-field', field: 'expiresAt', reason: 'expected epoch seconds' },
+    });
   });
 
   it('ignores a field the contract does not name', () => {
@@ -62,6 +64,7 @@ describe('parseRealtimeToken (PROVISIONAL)', () => {
     ['expiresAt', { expiresAt: 1.5e20 }],
     ['expiresAt', { expiresAt: Number.NaN }],
     ['expiresAt', { expiresAt: '2026-10-03 14:00' }],
+    ['expiresAt', { expiresAt: '1791000000' }],
     ['expiresAt', { expiresAt: null }],
   ])('refuses a bad %s (%j), and the error never carries the value', (name, patch) => {
     const read = parseRealtimeToken(answer({ ...DATA, ...patch }));

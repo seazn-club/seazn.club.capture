@@ -92,6 +92,7 @@ export function startMatchDayNudge(
     if (step.kind === 'stop') {
       stopped = true;
       close();
+      trail.cancel();
       ports.logger.info('matchday.nudge', { state: 'stopped' });
       return;
     }
@@ -115,7 +116,12 @@ export function startMatchDayNudge(
   };
 
   const listening = [
-    ports.foreground.subscribe(() => void door()),
+    // A return while a channel is held (a repeated foreground event) asks nothing more: a held channel always has its
+    // refresh timed or in flight, so the door is already accounted for.
+    ports.foreground.subscribe(() => {
+      if (leave !== null) return;
+      void door();
+    }),
     ports.foreground.subscribeBackground(away),
   ];
   void door();

@@ -51,7 +51,7 @@ class ScoringLinkTest {
   /**
    * RP4's witness. Nothing reached the task boundary (`taskFailures`, and no `engine-error` line), nothing is held
    * against the process (`stickyFailure`), and the pairing carries on. A `LinkageError` that did reach `failed` would
-   * make all three fail at once, which is how `BridgeCoreTest`'s "carry 18" sees one.
+   * make all three fail at once, which is how `BridgeCoreFailureTest`'s "carry 18" sees one.
    */
   private fun assertUntouched(why: String) {
     assertEquals("paired", state(), why)

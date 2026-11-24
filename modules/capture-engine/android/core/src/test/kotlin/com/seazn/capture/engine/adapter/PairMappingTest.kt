@@ -15,7 +15,7 @@ import kotlin.test.assertTrue
 class PairMappingTest {
   /**
    * As Expo hands it over: every number a Double (expo-modules-core 57.0.20, `FrontendConverter.cpp`'s
-   * `AnyFrontendConvert`). [PairWire]'s, shared with `BridgeCoreTest`: made up, the code and slot within
+   * `AnyFrontendConvert`). [PairWire]'s, shared with the `BridgeCore*Test` files: made up, the code and slot within
    * `capture-beat.v1`, the beat path D3's `/beats`, the token Configs' own, which no rule shapes yet.
    */
   private fun wire(): MutableMap<String, Any?> = PairWire.valid().toMutableMap()

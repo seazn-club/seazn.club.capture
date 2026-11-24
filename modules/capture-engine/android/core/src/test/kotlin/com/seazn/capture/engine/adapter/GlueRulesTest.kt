@@ -228,7 +228,7 @@ class GlueRulesTest {
    * Device session 4, F-S4-1: StreamPack's camera-loss lines reach the capture's watch, through the one flow the
    * build makes: StreamPack's logger is the build's `VendorLines`, which tells the flow each loss, and the capture
    * is given that flow and hands it to the run; a start's failure is read by the core's `CameraFailures`. N45: its busy
-   * errors reach the run the same way, through a flow of their own. The run's side is CaptureRunTest's; this is the
+   * errors reach the run the same way, through a flow of their own. The run's side is the CaptureRun*Test files'; this is the
    * wiring no JVM test reaches.
    */
   @Test
@@ -251,7 +251,7 @@ class GlueRulesTest {
   /**
    * Re-review 4 cap (controller ruling 2026-10-05): the app's return to the foreground re-arms the capture's camera
    * rebuilds. No native foreground watcher existed: Expo's module lifecycle is the one, and the host hands it to
-   * the capture it holds, building nothing for it. CaptureRunTest drives the run's side.
+   * the capture it holds, building nothing for it. The CaptureRun*Test files drive the run's side.
    */
   @Test
   fun `re-review 4 the app's return to the foreground reaches the capture's run, building nothing`() {
@@ -819,7 +819,7 @@ class GlueRulesTest {
 
   /**
    * Review C7 I-2 and M-4: StreamPack opens the camera lazily, at the first preview or the start, so the glue calls
-   * no camera held; the run does, once StreamPack reports the source open (CaptureRunTest, CaptureRunMachineTest).
+   * no camera held; the run does, once StreamPack reports the source open (the CaptureRun*Test files).
    * Every camera source the glue sets is announced first (`cameras.opening`), so its own open is ours; the open
    * signal is the source's previewing or streaming flow (3.2.1, javap); the readiness reads the open's outcome;
    * and the preview's open failure, which 3.2.1's PreviewView hands its listener, reaches the capture.
@@ -906,7 +906,7 @@ class GlueRulesTest {
    * Device fix round, item (c): StreamPack 3.2.1's `VideoInput.setSource` skips a camera source of the same id
    * (`CameraSourceFactory.isSourceEquals`, javap), so the reopen's swap opens a camera only from the slate. Over a
    * camera source it answers false before announcing or setting anything, never a silent true; with nothing on air
-   * the run builds the camera afresh instead (CaptureRunTest, CaptureRunMachineTest).
+   * the run builds the camera afresh instead (the CaptureRun*Test files).
    */
   @Test
   fun `(c) the reopen's swap opens only from the slate, and answers false over a camera source`() {

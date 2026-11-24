@@ -59,7 +59,7 @@ class BridgeCoreRecordPinsTest {
   private fun armed() {
     core.start()
     core.report(Input.Network(true))
-    // Ready on every check, as BridgeCoreTest's `ready()`: the hold's POST start goes only then (A11).
+    // Ready on every check, as BridgeCoreTestKit's `ready()`: the hold's POST start goes only then (A11).
     core.readiness(cameraFrames = true, audioPeak = 0.4, pose = Pose.Held(Side.LEFT))
     scheduler.advanceBy(Engine.TICK_MS)
     core.readiness(audioPeak = 0.4)

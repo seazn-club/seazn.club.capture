@@ -62,6 +62,10 @@ kotlin.sourceSets["test"].kotlin.srcDir("../src/main/java/com/seazn/capture/engi
 // it against the start's bound.
 kotlin.sourceSets["test"].kotlin.srcDir("../src/main/java/com/seazn/capture/engine/net")
 
+// Design 2026-11-24 §2.3: the nudge socket's rules (Phoenix frames, heartbeat, backoff) and its OkHttp adapter import
+// nothing Android, so core's tests run the rules against a fake socket.
+kotlin.sourceSets["test"].kotlin.srcDir("../src/main/java/com/seazn/capture/engine/realtime")
+
 tasks.test {
   useJUnitPlatform()
   // The vector files both languages read (CD5, CD6), relative to this build.

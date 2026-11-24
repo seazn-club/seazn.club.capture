@@ -17,6 +17,8 @@ import com.seazn.capture.engine.core.Input
 import com.seazn.capture.engine.core.RecordEntry
 import com.seazn.capture.engine.endpoints.TlsGuard
 import com.seazn.capture.engine.http.HttpAdapter
+import com.seazn.capture.engine.realtime.NudgeLink
+import com.seazn.capture.engine.realtime.OkHttpNudgeSockets
 import com.seazn.capture.engine.vendor.VendorLines
 import com.seazn.capture.engine.watch.CameraWatch
 import com.seazn.capture.engine.watch.DeviceSampler
@@ -79,6 +81,7 @@ object EngineHost {
     TlsGuard.record = ::line
     TlsGuard.install(TlsGuard.MODE)
     val thread = HandlerThread("capture-engine").apply { start() }
+    val scheduler = HandlerScheduler(Handler(thread.looper))
     lateinit var core: BridgeCore
     val report: (Input) -> Unit = { core.report(it) }
     // Review C7 fix rounds 2 and 3: EngineHost.line drops lines until this build returns, and every watcher started
@@ -94,8 +97,10 @@ object EngineHost {
     val keeper = keeper(app) { core }
     // Task 34: a debug build's seam may hold another HTTP path; a release build's never does.
     val http = HttpSeam.override?.invoke(app) ?: HttpAdapter()
-    val platform = AndroidPlatform(capture, http, RecordFile(File(app.filesDir, "record")), pose, device, keeper, ::emit, power = { PowerState.mode(app) })
-    core = BridgeCore.shared { core(app, thread, platform) }
+    // Design 2026-11-24 §2.3: the nudge socket runs on the engine's thread, the one the core's commands reach it on.
+    val nudges = NudgeLink(OkHttpNudgeSockets(), scheduler, AndroidClock::wallMs, report, toCore)
+    val platform = AndroidPlatform(capture, http, RecordFile(File(app.filesDir, "record")), pose, device, keeper, ::emit, power = { PowerState.mode(app) }, nudges = nudges)
+    core = BridgeCore.shared { core(app, scheduler, platform) }
     core.start()
     // Review C7 M-9: the core runs from here, so a throw must not end this build half done; core.log, as
     // EngineHost.line drops lines until the build returns.
@@ -151,10 +156,10 @@ object EngineHost {
    * the model is `Build.MODEL` alone; the beat trims it, caps it at 80 characters and sends a blank one
    * as null (`Beats.model`).
    */
-  private fun core(app: Context, thread: HandlerThread, platform: AndroidPlatform) =
+  private fun core(app: Context, scheduler: HandlerScheduler, platform: AndroidPlatform) =
     BridgeCore(
       AndroidClock,
-      HandlerScheduler(Handler(thread.looper)),
+      scheduler,
       platform,
       AndroidStore(File(app.noBackupFilesDir, "capture")),
       appVersion(app),

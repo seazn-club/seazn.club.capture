@@ -11,6 +11,7 @@ import com.seazn.capture.engine.core.Command
 import com.seazn.capture.engine.core.PairRequest
 import com.seazn.capture.engine.core.RecordEntry
 import com.seazn.capture.engine.http.HttpPort
+import com.seazn.capture.engine.realtime.NudgeLink
 import com.seazn.capture.engine.watch.DeviceSampler
 import com.seazn.capture.engine.watch.PoseWatch
 
@@ -25,6 +26,8 @@ class AndroidPlatform(
   private val emit: (String, Map<String, Any?>) -> Unit,
   /** N27: the app's battery mode (`PowerMode`), or null when it cannot be read. */
   private val power: () -> String?,
+  /** Design 2026-11-24 §2.3: the capture nudge's socket, on the grant the core hands over. */
+  private val nudges: NudgeLink,
 ) : Platform {
   private val main = Handler(Looper.getMainLooper())
 
@@ -47,6 +50,8 @@ class AndroidPlatform(
         keeper.release()
         pose.stop()
       }
+      is Command.Nudges -> nudges.grant(command.grant)
+      Command.NudgesOff -> nudges.off()
       else -> Unit
     }
     capture.execute(command)

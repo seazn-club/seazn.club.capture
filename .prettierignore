@@ -2,6 +2,8 @@
 # the Gradle output of a local module compile would otherwise be checked.
 modules/*/android/build/
 modules/*/android/core/build/
+# The CMake output of the JNI shim (N49), from any release or debug build of the app.
+modules/*/android/.cxx/
 # The JVM host (CD8) is a subproject of the core build, with its own Gradle output.
 modules/*/android/core/host/build/
 # The web's contracts, vendored byte for byte and pinned by sha256 (plan D spec §3.1): never reformatted.

@@ -115,7 +115,7 @@ class NotDeliveredBackoffTest {
     assertTrue(rig.records("bitrate").isNotEmpty(), "the regulator cut")
     while (rig.verdicts().size < 2) driven.run(500)
     val second = rig.verdicts().last()
-    assertEquals(2, second.field("count"))
+    assertEquals(1, second.field("count"), "a restart at once for a poor link is no step of the ladder (review of batch 2, item 5)")
     assertEquals(0L, second.field("retryMs"), "the own link failed lately: no wait")
     assertEquals(2, rig.sent<Command.StartNewSession>().size)
   }
@@ -126,7 +126,24 @@ class NotDeliveredBackoffTest {
     val driven = driven()
     val rig = driven.rig
     rig.send(Input.Link(rig.attempt!!, LinkCounters(250_000, 400, 0, 3, 0, 20, 40, null)))
+    while (rig.verdicts().size < 3) driven.run(500)
+    val (first, second, third) = rig.verdicts().map { it.field("count") to it.field("retryMs") }
+    assertEquals(0 to 0L, first, "inside 30 s of the cut: at once, and not counted")
+    assertEquals(1 to 0L, second, "the cut was over 30 s before: the ladder's first step")
+    assertEquals(2 to 4_000L, third)
+  }
+
+  /** Review of batch 2, item 5: the split is judged again while a restart waits, and a poor link goes at once. */
+  @Test
+  fun `a link that turns poor inside a wait restarts at once, without a ladder step`() {
+    val driven = driven()
+    val rig = driven.rig
     while (rig.verdicts().size < 2) driven.run(500)
-    assertEquals(4_000L, rig.verdicts().last().field("retryMs"), "the cut was over 30 s before the second verdict")
+    assertEquals(4_000L, rig.verdicts().last().field("retryMs"))
+    val restarts = rig.sent<Command.StartNewSession>().size
+    rig.send(Input.Link(rig.attempt!!, LinkCounters(250_000, 400, 0, 3, 0, 20, 40, null)))
+    driven.run(500)
+    assertEquals(restarts + 1, rig.sent<Command.StartNewSession>().size, "inside the 4 s, at the next tick")
+    assertEquals(2, rig.session.deliveryRestarts)
   }
 }

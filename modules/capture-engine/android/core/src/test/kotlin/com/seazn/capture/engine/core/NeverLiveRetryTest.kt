@@ -98,4 +98,23 @@ class NeverLiveRetryTest {
     }
     assertEquals(List(30) { 2_000L } + listOf(4_000L, 8_000, 16_000, 30_000), waits, "from ${rig.mono - start}")
   }
+
+  /** Review of batch 2, item 4: a session that ends says the failures its minute held back. */
+  @Test
+  fun `a start that ends says the failures held back since its last line`() {
+    val rig = failingFor(130_000)
+    // Said at 60 s; held at 64, 72, 88 and 118.
+    assertEquals(4, rig.session.retries.unsaid)
+    rig.send(Input.Stop)
+    val last = rig.records("connect-failed").last()
+    assertEquals(listOf("transport" to Transport.SRT, "count" to 4), last.fields)
+  }
+
+  @Test
+  fun `a start that ends inside its first minute has nothing held, so nothing more is said`() {
+    val rig = failingFor(30_000)
+    val said = rig.records("connect-failed").size
+    rig.send(Input.Stop)
+    assertEquals(said, rig.records("connect-failed").size)
+  }
 }

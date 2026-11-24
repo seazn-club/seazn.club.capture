@@ -117,6 +117,12 @@ class BridgeCore(
   private var sentShown: Snapshot? = null
   private var sentAtMs: Long? = null
 
+  /**
+   * Review of batch 2, item 3: the loudest peak read since the last send. Each facts read takes the meter's peak and
+   * resets it (`PeakMeter.take`), so a peak read on a tick that is not sent rides on the next send, never lost.
+   */
+  private var heldPeak = 0.0
+
   /** The last published snapshot's language (P3), for the glue's notification. */
   @Volatile private var language: String? = null
 
@@ -503,7 +509,9 @@ class BridgeCore(
   private fun published(snapshot: Snapshot) {
     // PV22: Phase.holdsService is Paired or a broadcast held, the wake lock's span: one definition.
     ticks.observe(clock.monotonicMs(), wakeHeld = engine.phase.holdsService)?.let(engine::log)
-    val wire = wire(snapshot, read().copy(deliveryCheckedAtMs = checkedAtMs))
+    val facts = read()
+    val peak = maxOf(heldPeak, facts.audioLevel.takeIf { it.isFinite() } ?: 0.0)
+    val wire = wire(snapshot, facts.copy(audioLevel = peak, deliveryCheckedAtMs = checkedAtMs))
     language = snapshot.language
     current = wire
     // Review C4a m-1: a tick can move the phase with no input behind it, such as an outage hold that ran
@@ -516,7 +524,8 @@ class BridgeCore(
     // Review C4a N-1 (ruling C4a-N1): a minute that held lines back ends with the state the machine
     // heard, written by the first publish after it runs out, so a state that then stays is on the record.
     sent?.let { heard -> readinessLines.flush(clock.monotonicMs()) { readinessFields(heard) } }?.let(engine::log)
-    emit(snapshot, wire)
+    heldPeak = peak
+    if (emit(snapshot, wire)) heldPeak = 0.0
   }
 
   /**
@@ -524,14 +533,15 @@ class BridgeCore(
    * JS reads a silent engine only after 3 s, and its clocks count from instants, not snapshots, so 2 Hz bought nothing
    * but bridge traffic. [current] stays fresh at every publish, for a pull. A send that throws is not counted as sent.
    */
-  private fun emit(snapshot: Snapshot, wire: Map<String, Any?>) {
+  private fun emit(snapshot: Snapshot, wire: Map<String, Any?>): Boolean {
     val shown = snapshot.shown()
     val now = clock.monotonicMs()
     val due = shown != sentShown || sentAtMs?.let { now - it >= EMIT_MS - Engine.TICK_MS / 2 } ?: true
-    if (!due) return
+    if (!due) return false
     platform.snapshot(wire)
     sentShown = shown
     sentAtMs = now
+    return true
   }
 
   /**

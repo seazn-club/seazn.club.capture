@@ -51,6 +51,7 @@ class Engine(
   /** S12: when the last `snapshot-failed` line was written, and the failures since it. Scheduler thread. */
   private var failedSaidAtMs: Long? = null
   private var failedUnsaid = 0
+  private var failedError: String? = null
   private var ticking: Cancellable? = null
 
   /** Starts the tick. Idempotent. On the scheduler's thread only. */
@@ -118,6 +119,7 @@ class Engine(
   private fun process(input: Input) {
     val now = clock.now()
     val step = reduced(input, now)
+    val ending = step.phase is Phase.Ended && phase !is Phase.Ended
     phase = step.phase
     val errors = mutableListOf<Throwable>()
     val lines = mutableListOf<RecordEntry>()
@@ -126,6 +128,8 @@ class Engine(
     }
     for (entry in lines) contained(errors) { record.append(now.wallMs, entry) }
     contained(errors) { publish(input, now) }
+    // Review of batch 2, item 4: the session's end says the failures the minute held back.
+    if (ending) contained(errors) { flushFailed(now) }
     val first = errors.firstOrNull() ?: return
     for (later in errors.drop(1)) first.addSuppressed(later)
     throw first
@@ -146,7 +150,7 @@ class Engine(
         val lines = listOf(engineError(failure), SessionMachine.endedLine(phase, EndReason.FATAL_ERROR))
         val fatal = Step(phase.ended(EndReason.FATAL_ERROR, now), lines + Command.End(EndReason.FATAL_ERROR) + release)
         // The machine did not take this step, so its minute of beats is written here (plan D §3.4, B2 review Minor 1).
-        BeatLogs.closed(phase, FloorCuts.closed(phase, fatal))
+        BeatLogs.closed(phase, NeverLiveRetries.closed(phase, FloorCuts.closed(phase, fatal)))
       }
     }
 
@@ -197,6 +201,8 @@ class Engine(
       if (input != Input.Tick && shown == lastShown) return
       lastShown = shown
       snapshots.publish(snapshot)
+      // Review of batch 2, item 4: a snapshot that goes up again says the failures held back since the last line.
+      flushFailed(now)
     } catch (failure: Exception) {
       snapshotFailures += 1
       snapshotFailed(failure, now)
@@ -209,10 +215,17 @@ class Engine(
    */
   private fun snapshotFailed(failure: Exception, now: Now) {
     failedUnsaid += 1
+    failedError = failure::class.java.simpleName
     val said = failedSaidAtMs
     if (said != null && now.monoMs - said < SNAPSHOT_LINE_MS) return
-    val line = RecordEntry("snapshot-failed", listOf("error" to failure::class.java.simpleName, "count" to failedUnsaid))
     failedSaidAtMs = now.monoMs
+    flushFailed(now)
+  }
+
+  /** The `snapshot-failed` line for the failures not yet said, if any; the rate's clock is [snapshotFailed]'s. */
+  private fun flushFailed(now: Now) {
+    if (failedUnsaid == 0) return
+    val line = RecordEntry("snapshot-failed", listOf("error" to failedError, "count" to failedUnsaid))
     failedUnsaid = 0
     record.append(now.wallMs, line)
   }

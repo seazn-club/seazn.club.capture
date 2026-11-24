@@ -2,6 +2,7 @@ package com.seazn.capture.engine.core
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /**
  * S4: the fallback count was cleared only by a drop of an attempt that had published [FallbackPolicy.SHORT_ATTEMPT_MS],
@@ -61,5 +62,26 @@ class FallbackCountResetTest {
       val policy = afterEnd(10_000, name)
       assertEquals(Transport.RTMPS, policy.current, name)
     }
+  }
+
+  /** Review of batch 2, item 6: what proves the path is publishing from the first frame, not the connect. */
+  @Test
+  fun `27 s from the connect but under 25 from the first frame proves nothing - the third failure falls back`() {
+    val rig = MachineRig().armed()
+    rig.ready()
+    rig.send(Input.ConnectFailed(1, ConnectFailure.TIMEOUT, null))
+    rig.advance(2_000)
+    rig.send(Input.Connected(2))
+    // No frame for 3.5 s (inside the first-frame grace), then 20 s of frames, then a stall rebuild ~3.5 s on.
+    rig.advance(3_500, videoPerStep = 0)
+    rig.advance(20_000)
+    end(rig, "a stall rebuild")
+    assertTrue(rig.records("video-stalled").single().field("cause") == StallCause.NO_VIDEO, "the end is the stall")
+    repeat(2) {
+      val attempt = rig.attempt ?: run { rig.advance(SessionMachine.RETRY_MS); rig.attempt!! }
+      rig.send(Input.ConnectFailed(attempt, ConnectFailure.TIMEOUT, null))
+      rig.advance(SessionMachine.RETRY_MS)
+    }
+    assertEquals(Transport.RTMPS, rig.session.fallback.current)
   }
 }

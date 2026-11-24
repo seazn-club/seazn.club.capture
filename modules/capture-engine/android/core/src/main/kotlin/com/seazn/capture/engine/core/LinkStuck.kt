@@ -52,3 +52,58 @@ data class StuckWatch(
     const val STUCK_MS = 5_000L
   }
 }
+
+/**
+ * Review of batch 2, item 1: stuck replaces in a row, across attempts. A replace opens a new hold once frames clear the
+ * outage, and the target stays at the floor, so a link that cannot carry the floor is stuck again a few seconds after
+ * each reconnect: without this, a new ingest session every 6–10 s for as long as the link lasts. The first
+ * [FREE_REPLACES] go at once; each after waits [waitMs] from the last. [CLEAR_MS] with no stuck reading while the
+ * playlist advances starts the count again ([cleared]). DEVICE-UNVERIFIED.
+ */
+data class StuckReplaces(
+  val count: Int = 0,
+  val lastAtMs: Long? = null,
+  /** When the run of readings that were not stuck began; null after a stuck one. */
+  val clearSinceMs: Long? = null,
+) {
+  fun mayReplace(nowMs: Long): Boolean = lastAtMs?.let { nowMs - it >= waitMs(count + 1) } ?: true
+
+  fun replaced(nowMs: Long): StuckReplaces = StuckReplaces(count + 1, nowMs, clearSinceMs = null)
+
+  /** One reading: [stuck] when it was stuck; [advancing] when the playlist moves ([STUCK_UNDELIVERED_MS]). */
+  fun read(stuck: Boolean, advancing: Boolean, nowMs: Long): StuckReplaces {
+    if (stuck) return copy(clearSinceMs = null)
+    val since = clearSinceMs ?: nowMs
+    if (count > 0 && advancing && nowMs - since >= CLEAR_MS) return StuckReplaces()
+    return copy(clearSinceMs = since)
+  }
+
+  companion object {
+    /** Two replaces fix a link that stuck once; a third in a row is a link that cannot carry the floor. */
+    const val FREE_REPLACES = 2
+
+    /** Then 15 s, doubling to [MAX_WAIT_MS]: a hold is 60 s, so the first waits still fit inside one. */
+    const val FIRST_WAIT_MS = 15_000L
+    const val MAX_WAIT_MS = 120_000L
+
+    /** 15 s doubled three times is 120 s; the cap also keeps the shift from overflowing. */
+    private const val MAX_DOUBLINGS = 3
+
+    /** Half a minute of a link that carries the floor, and a playlist that moves, is a healthy link again. */
+    const val CLEAR_MS = 30_000L
+
+    /**
+     * A stuck verdict acts only once the playlist has not moved for this long: two 3 s segments ([Encode.GOP_MS]). A
+     * picture that is choppy but still delivered is never replaced. R-RTRF's 4G death had not moved for about 7 s at
+     * its stuck time, so it still fires. DEVICE-UNVERIFIED.
+     */
+    const val STUCK_UNDELIVERED_MS = 2 * Encode.GOP_MS
+
+    /** The wait before replace [replace] in a row (1 for the first): 0 twice, then 15, 30, 60, then 120 s. */
+    fun waitMs(replace: Int): Long {
+      if (replace <= FREE_REPLACES) return 0
+      val doublings = (replace - FREE_REPLACES - 1).coerceAtMost(MAX_DOUBLINGS)
+      return minOf(FIRST_WAIT_MS shl doublings, MAX_WAIT_MS)
+    }
+  }
+}

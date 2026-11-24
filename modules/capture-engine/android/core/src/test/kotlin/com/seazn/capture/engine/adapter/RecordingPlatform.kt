@@ -32,6 +32,9 @@ class RecordingPlatform : Platform {
   /** Thrown by every facts read: a battery or thermal reader that fails on every read (review C4a I-2). */
   var throwOnFacts: Throwable? = null
 
+  /** The meter's peaks, one a facts read, each taken as `PeakMeter.take` takes it; 0.5 once they run out. */
+  val audioLevels = ArrayDeque<Double>()
+
   /** Thrown by the next snapshot hand-up only: the bridge to JS failing once. */
   var throwOnSnapshotOnce: Throwable? = null
 
@@ -109,7 +112,7 @@ class RecordingPlatform : Platform {
       throw it
     }
     throwOnFacts?.let { throw it }
-    return PlatformFacts(audioLevel = 0.5)
+    return PlatformFacts(audioLevel = audioLevels.removeFirstOrNull() ?: 0.5)
   }
 
   override fun snapshot(wire: Map<String, Any?>) {

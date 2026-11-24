@@ -175,7 +175,25 @@ class EngineTest {
     assertEquals(300, engine.snapshotFailures)
     failing = false
     scheduler.advanceBy(60_000)
-    assertEquals(3, lines.count { """"kind":"snapshot-failed"""" in it }, "a snapshot that goes up says nothing")
+    // Review of batch 2, item 4: the first snapshot that goes up says the failures held back since the last line.
+    val all = lines.filter { """"kind":"snapshot-failed"""" in it }.map { JSONObject(it).getInt("count") }
+    assertEquals(listOf(1, 120, 120, 59), all, "then nothing more")
+    assertEquals(300, all.sum())
+  }
+
+  /** Review of batch 2, item 4: a session that ends while snapshots still fail says the failures held back. */
+  @Test
+  fun `S12 the session's end says the snapshot failures the minute held back`() {
+    val engine = engine(projection = { _, _ -> throw IllegalStateException("x") })
+    engine.start()
+    engine.live()
+    scheduler.advanceBy(10_000)
+    val before = lines.filter { """"kind":"snapshot-failed"""" in it }.map { JSONObject(it).getInt("count") }
+    engine.send(Input.Stop)
+    scheduler.advanceBy(0)
+    val after = lines.filter { """"kind":"snapshot-failed"""" in it }.map { JSONObject(it).getInt("count") }
+    assertEquals(before.size + 1, after.size, "$before then $after")
+    assertEquals(engine.snapshotFailures, after.sum(), "every failure said once")
   }
 
   @Test

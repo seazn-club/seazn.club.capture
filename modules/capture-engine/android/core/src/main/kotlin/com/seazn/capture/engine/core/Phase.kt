@@ -141,6 +141,8 @@ data class Session(
   val notDelivered: Boolean = false,
   /** S6: failed attempts before live, and how their lines are held to one a minute. */
   val retries: NeverLiveRetries = NeverLiveRetries(),
+  /** Review of batch 2, item 1: stuck replaces in a row, across attempts. */
+  val stuckReplaces: StuckReplaces = StuckReplaces(),
   /** S1: below-floor rebuilds in a row, across attempts, and when the last went. */
   val belowFloor: BelowFloorRebuilds = BelowFloorRebuilds(),
   /** S2: not-delivered verdicts since the playlist last showed delivery (`delivered`), the backoff's step. */
@@ -247,6 +249,8 @@ sealed interface Phase {
      * waits. A new attempt, which is itself a reconnect, never carries one.
      */
     val restartAtMs: Long? = null,
+    /** This attempt's first advancing frame (review of batch 2, item 6): what proves a path, not the connect. */
+    val framesAtMs: Long? = null,
   ) : Phase {
     override val name = "on-air"
   }

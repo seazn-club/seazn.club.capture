@@ -133,7 +133,8 @@ class LinkStuckTest {
     rig.live()
     rig.phase = (rig.phase as Phase.OnAir).let { it.copy(session = it.session.copy(regulation = Regulation(floor))) }
     val since = (rig.state as SnapshotState.Publishing).sinceEpochMs
-    stuckFrom = (rig.mono / 1_000 + 1) * 1_000
+    // Two seconds on, so the playlist (no answer here) has not moved for 6 s by the verdict: STUCK_UNDELIVERED_MS.
+    stuckFrom = (rig.mono / 1_000 + 3) * 1_000
     var at: Long? = null
     rig.advance(10_000) { if (at == null && rig.sent<Command.StartNewSession>().isNotEmpty()) at = rig.mono }
     assertEquals(stuckFrom + StuckWatch.STUCK_MS, at, "5 s after the first stuck reading")
@@ -141,7 +142,7 @@ class LinkStuckTest {
     assertEquals(1, renewed.previousAttemptId)
     val line = rig.records("link-stuck").single()
     assertEquals(
-      listOf("attempt" to 1, "count" to 6, "target" to floor, "sendBufferMs" to 1_900, "egressBps" to 720_000L, "dropped" to 0L, "lost" to 0L),
+      listOf("attempt" to 1, "count" to 6, "retryMs" to 0L, "target" to floor, "sendBufferMs" to 1_900, "egressBps" to 720_000L, "dropped" to 0L, "lost" to 0L),
       line.fields,
     )
     val reconnecting = assertIs<SnapshotState.Reconnecting>(rig.state)
@@ -162,7 +163,8 @@ class LinkStuckTest {
     val onAir = rig.phase as Phase.OnAir
     val held = Outage(Hold(Transport.SRT, 60_000, rig.mono - 2_000), ReconnectCause.VIDEO_STALLED)
     val primed = StuckWatch(sinceMs = rig.mono - 5_000, readings = 5)
-    rig.phase = onAir.copy(session = onAir.session.copy(regulation = Regulation(floor)), outage = held, stuck = primed)
+    val undelivered = onAir.session.delivery.copy(sinceAdvanceMs = StuckReplaces.STUCK_UNDELIVERED_MS)
+    rig.phase = onAir.copy(session = onAir.session.copy(regulation = Regulation(floor), delivery = undelivered), outage = held, stuck = primed)
     rig.send(Input.Link(onAir.attemptId, LinkCounters(90_000, 1, 0, 0, 0, 20, 1_900, null)))
     assertEquals(1, rig.records("link-stuck").size)
     assertEquals(held, assertIs<Phase.Connecting>(rig.phase).outage)
@@ -174,7 +176,7 @@ class LinkStuckTest {
     assertTrue(list.getJSONObject("kinds").has("link-stuck"))
     val plain = list.getJSONArray("plain").let { a -> (0 until a.length()).map { a.getString(it) } }
     val scalars = list.getJSONObject("scalars").keySet()
-    for (key in listOf("attempt", "count", "target", "sendBufferMs", "egressBps", "dropped", "lost")) {
+    for (key in listOf("attempt", "count", "retryMs", "target", "sendBufferMs", "egressBps", "dropped", "lost")) {
       assertTrue(key in plain || key in scalars, key)
     }
   }

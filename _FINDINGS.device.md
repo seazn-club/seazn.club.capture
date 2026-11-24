@@ -1094,3 +1094,22 @@ records and the code, not seen on a phone.
 - **Backlog.** S9: a hung RTMPS connect holding the capture queue needs a read of komuxer's connect (cancellable or
   blocking) before any change. S11: the two test files near 1500 lines (BridgeCoreTest is 1406 now; S7's test went to
   a file of its own).
+
+**Batch 2, review fixes (2026-11-24).**
+
+- **Stuck replaces back off, and only an undelivered picture is replaced.** A stuck verdict acts only once the playlist
+  has not moved for 6 s, two 3 s segments (`StuckReplaces.STUCK_UNDELIVERED_MS`): a choppy picture still delivered is
+  never replaced; R-RTRF's 4G death had not moved for about 7 s, so it still fires. Stuck replaces in a row
+  (`StuckReplaces`, across attempts): two at once, then 15, 30, 60, then 120 s from the last; 30 s of readings not
+  stuck while the playlist moves starts the count again. `link-stuck` carries `retryMs`. DEVICE-UNVERIFIED.
+- **A stuck replace starts the delivery watch's ingest session again**, as a not-delivered restart does, so the old
+  attempt's stall no longer brings a second replace about 13 s into the new one.
+- **The meter keeps every peak.** Each facts read takes the meter's peak and resets it, and S8 sends every other
+  tick's snapshot, so the bridge carries the loudest peak read since the last send into the next one. The facts are
+  still read at every publish, and tick-late still observes every publish.
+- **Held lines are said.** A session that ends writes `connect-failed {transport, count}` for the failures its minute
+  held back; `snapshot-failed` says its held failures when a snapshot goes up again or the session ends.
+- **The cause split is judged again while a restart waits**: a link that turns poor goes at once, and a restart at once
+  for a poor link is no step of the ladder (`count` stays).
+- **What proves a path is publishing from the attempt's first frame**, not the connect (`FallbackPolicy.proved`).
+- `Transports.link` gives the regulator's commands to `regulatedCommands`.

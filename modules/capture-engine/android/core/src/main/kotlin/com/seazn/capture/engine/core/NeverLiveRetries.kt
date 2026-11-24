@@ -48,6 +48,17 @@ data class NeverLiveRetries(
   fun waitMs(): Long = if (slow == 0) SessionMachine.RETRY_MS else minOf(SessionMachine.RETRY_MS shl slow.coerceAtMost(MAX_DOUBLINGS), MAX_RETRY_MS)
 
   companion object {
+    /**
+     * Review of batch 2, item 4: a session that ends writes the failures no line has said yet, as [FloorCuts.closed]
+     * does its cuts: `connect-failed {transport, count}`.
+     */
+    fun closed(before: Phase, step: Step): Step {
+      val session = before.session ?: return step
+      val unsaid = session.retries.unsaid
+      if (unsaid == 0 || step.phase.session?.sid == session.sid) return step
+      return step.copy(commands = step.commands + Command.Record(RecordEntry("connect-failed", listOf("transport" to session.fallback.current, "count" to unsaid))))
+    }
+
     /** A minute of trying as before: a fix at the ground (a hotspot turned on, a cable) is usually that quick. */
     const val FAST_MS = 60_000L
 

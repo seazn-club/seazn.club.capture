@@ -158,6 +158,53 @@ seazn-club/seazn.club.capture`).
    app is Live Stream and Remote Scoring for badminton (AGENTS §1; table
    tennis is plan S2-2, and the Dashboard mode is S4).
 
+## R8: the release build is minified
+
+Play Console flagged build 1314 (DEX optimisation low, 1% obfuscation, no R8,
+56.5 MB of DEX), and the owner asked for R8 in a pull request of its own
+(2026-11-24: "Ok separate pr after 68"). `app.json`'s `expo-build-properties`
+sets `enableMinifyInReleaseBuilds` and `enableShrinkResourcesInReleaseBuilds`,
+so every release build, the EAS `production` bundle and a local
+`assembleRelease` alike, runs R8 and drops unused resources. Debug builds do
+not. Measured on 2026-11-24 (arm64 release APK, dev twin): 95.7 MB with
+56.6 MB of DEX before, 56.7 MB with 20.6 MB of DEX after. R8 shrinks and
+renames but does not optimise: Expo's generated `android/app/build.gradle`
+names `proguard-android.txt`, which says `-dontoptimize`. R8 8.12.14 (AGP
+8.12) warns "An error occurred when parsing kotlin metadata" for classes
+compiled by Kotlin 2.3 and 2.4 (ours, StreamPack's), so it cannot rewrite
+their Kotlin metadata. Only `kotlin-reflect` reads that metadata: in this app,
+Expo's records, which Expo's own rules keep whole. The phone check after this
+change is what settles it.
+
+**Keep rules.** Each library ships its own (Expo modules, React Native,
+srtdroid's core, OkHttp, coroutines). What the capture engine reads by name
+is kept by its own `modules/capture-engine/android/consumer-rules.pro`, which
+the app's R8 reads, each rule with a comment naming its reader, and
+`GlueRulesTest` pins every rule to the name its reader uses:
+
+- StreamPack's `audioRecord` field (`AudioSessionIds`, the mic watch) and
+  srtdroid's `CoroutineSrtSocket.socket` (`SeaznSrtSink`, N49), read by
+  reflection; srtdroid's own rules keep `SrtSocket.srtsocket`.
+- The JNI shim's `SrtNetworkBinder.nativeBind`, found by its C name.
+- StreamPack's camera source package (`CameraFailures`: a camera failure
+  rebuilds the camera) and `io.ktor.network` (`TlsCloserGuard`, F-P5-12: an
+  unswallowed TLS closer throw kills the process), read from class names and
+  stack frames.
+- Class names in the session record: every `Throwable`, the engine's own
+  classes and StreamPack's, so `error`, `rootError`, `site`, `answer` and
+  `word` read as they did before R8.
+
+A new reflective or name-based read in the engine needs its rule in the same
+change. The engine must be checked on a phone after any rule change: a
+missing rule is a crash or a silent watch failure, not a build error.
+
+**Mapping.** AGP writes R8's mapping into the app bundle
+(`BUNDLE-METADATA/com.android.tools.build.obfuscation/proguard.map`), and Play
+reads it from there to deobfuscate crash and ANR stack traces in Android
+vitals, so the release workflow uploads nothing more. A local `assembleRelease`
+leaves it at `android/app/build/outputs/mapping/release/mapping.txt`. The
+session record needs no mapping: the names it carries are kept.
+
 ## Why the build number is pinned
 
 EAS uploads a shallow clone of the repo (depth 1), so `git rev-list --count`

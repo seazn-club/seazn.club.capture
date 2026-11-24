@@ -582,6 +582,29 @@ class GlueRulesTest {
   }
 
   /**
+   * R8 (owner, 2026-11-24): the release build minifies. Two core readers decide behaviour by a class's or a stack
+   * frame's package: CameraFailures (StreamPack's camera source, a camera failure rebuilds the camera) and
+   * TlsCloserGuard (Ktor's network, F-P5-12: unswallowed, Android kills the process). Each prefix they read is kept
+   * from renaming and inlining (`-keep,allowshrinking ... { *; }`), and the record's class names stay legible.
+   */
+  @Test
+  fun `R8 every package read by name decides nothing differently in a release that minifies`() {
+    val core = File(src.parentFile, "core/src/main/kotlin/com/seazn/capture/engine/adapter")
+    fun prefix(file: String, name: String): String =
+      Regex("""private const val $name = "([\w.]+)\."""").find(File(core, file).readText())?.groupValues?.get(1) ?: error("no $name in $file")
+    val read = listOf(prefix("CameraFailures.kt", "SOURCE"), prefix("TlsCloserGuard.kt", "KTOR_NETWORK"))
+    assertEquals(listOf("io.github.thibaultbee.streampack.core.elements.sources.video.camera", "io.ktor.network"), read)
+    val rules = File(src.parentFile, "consumer-rules.pro").readText()
+    for (pkg in read) {
+      val rule = Regex("""-keep,allowshrinking class ${Regex.escape(pkg)}\.\*\* \{ \*; \}""")
+      assertTrue(rule.containsMatchIn(rules), "$pkg kept from renaming and inlining")
+    }
+    assertTrue("-keepnames class * extends java.lang.Throwable" in rules, "the record's `error` and `rootError` name the class")
+    assertTrue("-keepnames class com.seazn.capture.engine.**" in rules, "the record's `answer` and `word` name the engine's own")
+    assertTrue("-keepattributes InnerClasses,EnclosingMethod" in rules, "a nested class keeps its simple name")
+  }
+
+  /**
    * CD16 and N1 (Task 38): the notification follows the snapshot only while the service is held, so an
    * idle phone posts nothing; its work on the main looper costs a line when it fails, never the process.
    */

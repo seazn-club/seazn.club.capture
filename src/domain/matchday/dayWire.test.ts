@@ -45,6 +45,9 @@ const EXTRA_FIELD: Readonly<Record<string, (data: Wire) => void>> = {
   'invalid-row-carries-url': (data) => {
     delete data.courts[0]?.next[0]?.url;
   },
+  'invalid-live-seazn-query': (data) => {
+    data.courts[0]!.now!.live_seazn = null;
+  },
 };
 
 /** What the phone says of each other fixture the contract refuses: the field it names, never the value. */
@@ -115,6 +118,14 @@ describe('parseDay runs every capture-matchday-day.v1 answer fixture', () => {
       expect(result.ok && result.value.canCall).toBe(false);
     },
   );
+
+  it('keeps no watch address from a row that carries one: the phone has no Watch live control', () => {
+    const result = read(fixtureOf(DAY, 'valid-live-seazn'));
+    expect(result.ok).toBe(true);
+    expect(JSON.stringify(result)).not.toContain('/live/');
+    const refused = read(fixtureOf(DAY, 'invalid-live-seazn-query'));
+    expect(JSON.stringify(refused)).not.toContain('token=');
+  });
 
   it('keeps no scoring link from a row that carries one', () => {
     const result = read(fixtureOf(DAY, 'invalid-row-carries-url'));
@@ -296,8 +307,11 @@ function requiredAt(...steps: string[]): string[] {
 /**
  * The fields the contract requires that the phone reads as optional (task 8d-B ruling: a build still reads a staging
  * web that does not send them yet): an absent one reads null, a present one of the wrong type is still refused.
+ * `live_seazn` (web #1301, Task 17) is required by the contract and not read at all: the phone has no Watch live
+ * control, so the field is ignored whatever it holds.
  */
 const OPTIONAL: ReadonlySet<string> = new Set([
+  'live_seazn',
   'round_tag',
   'home_slot',
   'away_slot',

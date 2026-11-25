@@ -6,7 +6,7 @@ import type { FetchResponse } from '@/services/httpAsk';
 import { createLogger } from '@/services/logger';
 import { createRingRecord, parseRecordLine } from '@/services/sessionRecord';
 import { FIXTURE_DAY_TOKEN } from '../../test/fixtures/dayCode';
-import { answered, refusedWith } from '../../test/matchDayContracts';
+import { answered, contractAdmits, fixtureOf, refusedWith } from '../../test/matchDayContracts';
 
 /** Made up throughout. The `md_` bearer and the grant's JWT are both credentials the port must never say. */
 const ORIGIN = 'https://stg.seazn.club';
@@ -15,13 +15,13 @@ const DOOR = `${ORIGIN}/api/v1/match-day-code/realtime-token`;
 const NOW = Date.parse('2026-10-03T13:00:00Z');
 const JWT = 'eyJmYWtl.eyJtZC1mYWtlLXBheWxvYWQ.ZmFrZS1zaWduYXR1cmU';
 
-/** PROVISIONAL (web spec §3), until capture-matchday-realtime.v1 is vendored. */
-const GRANT = {
-  token: JWT,
-  topic: 'match-day:3c1d2e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f',
-  expiresAt: NOW / 1000 + 3600,
-  url: 'https://abcdwxyz.supabase.example',
-  apikey: 'sb-fake-anon-key-0123456789',
+/** The vendored contract's own fixture (capture-matchday-realtime.v1, web #1301). */
+const GRANT = fixtureOf('capture-matchday-realtime.v1', 'valid') as {
+  token: string;
+  topic: string;
+  expiresAt: number;
+  url: string;
+  apikey: string;
 };
 
 const respond = (
@@ -53,7 +53,7 @@ function portOver(fetch: ScoringFetch) {
 
 const answering = (response: FetchResponse) => portOver(async () => response);
 
-describe('realtimeToken: the Match Day realtime door (PROVISIONAL)', () => {
+describe('realtimeToken: the Match Day realtime door ', () => {
   it('GETs the door with the md_ token in the Authorization header only, never in the URL', async () => {
     const { port, calls } = answering(respond(200, answered(GRANT)));
     await port.realtimeToken(CODE);
@@ -72,24 +72,29 @@ describe('realtimeToken: the Match Day realtime door (PROVISIONAL)', () => {
     expect(await port.realtimeToken(CODE)).toEqual({
       ok: true,
       value: {
-        token: JWT,
+        token: GRANT.token,
         topic: GRANT.topic,
         url: GRANT.url,
         apikey: GRANT.apikey,
-        expiresAt: new Date(NOW + 3_600_000),
+        expiresAt: new Date(GRANT.expiresAt * 1000),
       },
     });
   });
 
   it.each([
-    [401, 'MD_UNKNOWN'],
-    [410, 'MD_WITHDRAWN'],
-    [410, 'MD_ENDED'],
-    [403, 'MD_NOT_OPEN'],
-  ])('a %i %s is the refusal, in its word', async (status, code) => {
-    const { port } = answering(respond(status, refusedWith({ code, message: 'dev' })));
-    expect(await port.realtimeToken(CODE)).toEqual({ ok: false, refusal: code });
-  });
+    [401, 'MD_UNKNOWN', 'unknown'],
+    [410, 'MD_WITHDRAWN', 'withdrawn'],
+    [410, 'MD_ENDED', 'ended'],
+    [403, 'MD_NOT_OPEN', 'not-open'],
+  ])(
+    'a %i %s is the refusal, in its word (the contract’s own fixture)',
+    async (status, code, name) => {
+      const error = fixtureOf('capture-matchday-realtime.v1', `refusal-valid-${name}`);
+      expect(contractAdmits('capture-matchday-realtime.v1', error, '/$defs/refusal')).toBe(true);
+      const { port } = answering(respond(status, refusedWith(error)));
+      expect(await port.realtimeToken(CODE)).toEqual({ ok: false, refusal: code });
+    },
+  );
 
   it('a 429 carries the wait its Retry-After asked for', async () => {
     const { port } = answering(respond(429, null, { 'retry-after': '42' }));

@@ -409,6 +409,48 @@
               ],
               "additionalProperties": false
             },
+            "realtime": {
+              "description": "Realtime push nudges (spec 2026-11-24 §2.1): the current pairing's push channel, so the phone beats at once instead of waiting out pollSeconds. Sent for the code's current pairing only, on waiting, go-live, live and over; never on replaced or taken (the caller no longer holds the pairing). Omitted, never null, when there is none, a failed mint included (a failed mint never fails the beat). Join `realtime:{topic}` with private: true and listen for the broadcast event `nudge`, payload {v, reason, at}: v epoch milliseconds, at ISO-8601, reason go-live, stop, replaced, over or next-match; an unknown reason is still a ping. A nudge carries no state: the beat answer stays the only truth and pollSeconds the cadence, and the server shortens no timeout because of a nudge. Each token lives 30 minutes. A new token rides on every current-pairing beat, so a new token is not a refresh signal: keep the joined token and swap it (setAuth) only when it has under 10 minutes left, or on a channel error or refusal. A later waiting, go-live, live or over answer WITHOUT realtime (after a failed mint, say) is no reason to leave: keep a joined channel until its expiresAt, and join nothing new without the object (absent means poll only). On replaced or taken, leave the channel: the pairing is no longer the caller's.",
+              "type": "object",
+              "properties": {
+                "url": {
+                  "description": "The Supabase project URL: https, with no userinfo, query or fragment. Derive the websocket (wss) URL from it. Public; the phone bakes in no Supabase config.",
+                  "type": "string",
+                  "pattern": "^https:\\/\\/[^\\s/?#@]+(\\/[^\\s?#]*)?$"
+                },
+                "apikey": {
+                  "description": "The Supabase project's public anon key, sent as the socket's apikey; 1 to 512 characters. Public.",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "topic": {
+                  "description": "The bare topic capture:{pairingId}, the pairing id a lowercase 8-4-4-4-12 uuid; the phone joins realtime:{topic}. A court pairing outlives its matches, so its topic stays the same across them.",
+                  "type": "string",
+                  "pattern": "^capture:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                },
+                "token": {
+                  "description": "The subscriber JWT for this topic only, 1 to 4096 characters. A secret: never in a record, snapshot, log line or URL.",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "expiresAt": {
+                  "description": "When the token expires, as epoch seconds. The phone times its swap from this, never from a guess of its own clock.",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "url",
+                "apikey",
+                "topic",
+                "token",
+                "expiresAt"
+              ],
+              "additionalProperties": false
+            },
             "state": {
               "type": "string",
               "const": "waiting"
@@ -526,6 +568,48 @@
               ],
               "additionalProperties": false
             },
+            "realtime": {
+              "description": "Realtime push nudges (spec 2026-11-24 §2.1): the current pairing's push channel, so the phone beats at once instead of waiting out pollSeconds. Sent for the code's current pairing only, on waiting, go-live, live and over; never on replaced or taken (the caller no longer holds the pairing). Omitted, never null, when there is none, a failed mint included (a failed mint never fails the beat). Join `realtime:{topic}` with private: true and listen for the broadcast event `nudge`, payload {v, reason, at}: v epoch milliseconds, at ISO-8601, reason go-live, stop, replaced, over or next-match; an unknown reason is still a ping. A nudge carries no state: the beat answer stays the only truth and pollSeconds the cadence, and the server shortens no timeout because of a nudge. Each token lives 30 minutes. A new token rides on every current-pairing beat, so a new token is not a refresh signal: keep the joined token and swap it (setAuth) only when it has under 10 minutes left, or on a channel error or refusal. A later waiting, go-live, live or over answer WITHOUT realtime (after a failed mint, say) is no reason to leave: keep a joined channel until its expiresAt, and join nothing new without the object (absent means poll only). On replaced or taken, leave the channel: the pairing is no longer the caller's.",
+              "type": "object",
+              "properties": {
+                "url": {
+                  "description": "The Supabase project URL: https, with no userinfo, query or fragment. Derive the websocket (wss) URL from it. Public; the phone bakes in no Supabase config.",
+                  "type": "string",
+                  "pattern": "^https:\\/\\/[^\\s/?#@]+(\\/[^\\s?#]*)?$"
+                },
+                "apikey": {
+                  "description": "The Supabase project's public anon key, sent as the socket's apikey; 1 to 512 characters. Public.",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "topic": {
+                  "description": "The bare topic capture:{pairingId}, the pairing id a lowercase 8-4-4-4-12 uuid; the phone joins realtime:{topic}. A court pairing outlives its matches, so its topic stays the same across them.",
+                  "type": "string",
+                  "pattern": "^capture:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                },
+                "token": {
+                  "description": "The subscriber JWT for this topic only, 1 to 4096 characters. A secret: never in a record, snapshot, log line or URL.",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "expiresAt": {
+                  "description": "When the token expires, as epoch seconds. The phone times its swap from this, never from a guess of its own clock.",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "url",
+                "apikey",
+                "topic",
+                "token",
+                "expiresAt"
+              ],
+              "additionalProperties": false
+            },
             "state": {
               "type": "string",
               "const": "go-live"
@@ -544,6 +628,63 @@
                 "automatic",
                 "operator"
               ]
+            },
+            "delivery": {
+              "description": "Delivery facts (Task 46, 2026-11-24), so the phone can tell \"my camera reaches Cloudflare but the programme is down\" from \"all fine\": what the relay and Cloudflare last said about the session's video. On go-live and live only (the two answers that tell the phone to publish; no other answer admits it), to the slot's current phone, for any session with a fact to tell: a composed session's relay and both its inputs, a passthrough session's camera input only (it has no relay and no programme). Each member is omitted, never null, when it is not known; when none is known the object is omitted, never empty and never null. Plain values only: no URL, host, id, key or token. A phone reads an unknown word in any member as not known. Unrelated to the beat REQUEST's own `delivery` (ok, stalled or unknown: what the phone reports of its own picture) and to the `delivery` key a capture-record line may carry (capture-record.v1): the three only share a name.",
+              "type": "object",
+              "properties": {
+                "relayOutput": {
+                  "description": "The relay's output to the programme, as the relay's last beat reported it: connecting, connected or backoff (waiting to retry). Omitted when that beat is older than three of the relay's beats, when it was the relay's final beat, or when it reported none.",
+                  "type": "string",
+                  "enum": [
+                    "connecting",
+                    "connected",
+                    "backoff"
+                  ]
+                },
+                "programmePhase": {
+                  "description": "What the programme shows, as the relay's last beat reported it: waiting, live, frozen (the camera's picture stalled), reconnecting or final. Omitted on the same terms as relayOutput.",
+                  "type": "string",
+                  "enum": [
+                    "waiting",
+                    "live",
+                    "frozen",
+                    "reconnecting",
+                    "final"
+                  ]
+                },
+                "fps": {
+                  "description": "The programme's frames per second, as the relay's last beat reported it, rounded to a whole number. Omitted on the same terms as relayOutput.",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "kbps": {
+                  "description": "The programme's bitrate in kbit/s, as the relay's last beat reported it, rounded to a whole number. Omitted on the same terms as relayOutput.",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "cameraIngest": {
+                  "description": "The phone's camera feed at Cloudflare, from the latest live-input notification Cloudflare sent for it: connected, disconnected or errored. Omitted when Cloudflare has sent none.",
+                  "type": "string",
+                  "enum": [
+                    "connected",
+                    "disconnected",
+                    "errored"
+                  ]
+                },
+                "programmeIngest": {
+                  "description": "The programme feed at Cloudflare (a composed session's only), from the latest live-input notification Cloudflare sent for it: connected, disconnected or errored. Omitted when Cloudflare has sent none.",
+                  "type": "string",
+                  "enum": [
+                    "connected",
+                    "disconnected",
+                    "errored"
+                  ]
+                }
+              },
+              "additionalProperties": false
             }
           },
           "required": [
@@ -647,6 +788,48 @@
               ],
               "additionalProperties": false
             },
+            "realtime": {
+              "description": "Realtime push nudges (spec 2026-11-24 §2.1): the current pairing's push channel, so the phone beats at once instead of waiting out pollSeconds. Sent for the code's current pairing only, on waiting, go-live, live and over; never on replaced or taken (the caller no longer holds the pairing). Omitted, never null, when there is none, a failed mint included (a failed mint never fails the beat). Join `realtime:{topic}` with private: true and listen for the broadcast event `nudge`, payload {v, reason, at}: v epoch milliseconds, at ISO-8601, reason go-live, stop, replaced, over or next-match; an unknown reason is still a ping. A nudge carries no state: the beat answer stays the only truth and pollSeconds the cadence, and the server shortens no timeout because of a nudge. Each token lives 30 minutes. A new token rides on every current-pairing beat, so a new token is not a refresh signal: keep the joined token and swap it (setAuth) only when it has under 10 minutes left, or on a channel error or refusal. A later waiting, go-live, live or over answer WITHOUT realtime (after a failed mint, say) is no reason to leave: keep a joined channel until its expiresAt, and join nothing new without the object (absent means poll only). On replaced or taken, leave the channel: the pairing is no longer the caller's.",
+              "type": "object",
+              "properties": {
+                "url": {
+                  "description": "The Supabase project URL: https, with no userinfo, query or fragment. Derive the websocket (wss) URL from it. Public; the phone bakes in no Supabase config.",
+                  "type": "string",
+                  "pattern": "^https:\\/\\/[^\\s/?#@]+(\\/[^\\s?#]*)?$"
+                },
+                "apikey": {
+                  "description": "The Supabase project's public anon key, sent as the socket's apikey; 1 to 512 characters. Public.",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "topic": {
+                  "description": "The bare topic capture:{pairingId}, the pairing id a lowercase 8-4-4-4-12 uuid; the phone joins realtime:{topic}. A court pairing outlives its matches, so its topic stays the same across them.",
+                  "type": "string",
+                  "pattern": "^capture:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                },
+                "token": {
+                  "description": "The subscriber JWT for this topic only, 1 to 4096 characters. A secret: never in a record, snapshot, log line or URL.",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "expiresAt": {
+                  "description": "When the token expires, as epoch seconds. The phone times its swap from this, never from a guess of its own clock.",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "url",
+                "apikey",
+                "topic",
+                "token",
+                "expiresAt"
+              ],
+              "additionalProperties": false
+            },
             "state": {
               "type": "string",
               "const": "live"
@@ -656,6 +839,63 @@
               "type": "string",
               "format": "uuid",
               "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "delivery": {
+              "description": "Delivery facts (Task 46, 2026-11-24), so the phone can tell \"my camera reaches Cloudflare but the programme is down\" from \"all fine\": what the relay and Cloudflare last said about the session's video. On go-live and live only (the two answers that tell the phone to publish; no other answer admits it), to the slot's current phone, for any session with a fact to tell: a composed session's relay and both its inputs, a passthrough session's camera input only (it has no relay and no programme). Each member is omitted, never null, when it is not known; when none is known the object is omitted, never empty and never null. Plain values only: no URL, host, id, key or token. A phone reads an unknown word in any member as not known. Unrelated to the beat REQUEST's own `delivery` (ok, stalled or unknown: what the phone reports of its own picture) and to the `delivery` key a capture-record line may carry (capture-record.v1): the three only share a name.",
+              "type": "object",
+              "properties": {
+                "relayOutput": {
+                  "description": "The relay's output to the programme, as the relay's last beat reported it: connecting, connected or backoff (waiting to retry). Omitted when that beat is older than three of the relay's beats, when it was the relay's final beat, or when it reported none.",
+                  "type": "string",
+                  "enum": [
+                    "connecting",
+                    "connected",
+                    "backoff"
+                  ]
+                },
+                "programmePhase": {
+                  "description": "What the programme shows, as the relay's last beat reported it: waiting, live, frozen (the camera's picture stalled), reconnecting or final. Omitted on the same terms as relayOutput.",
+                  "type": "string",
+                  "enum": [
+                    "waiting",
+                    "live",
+                    "frozen",
+                    "reconnecting",
+                    "final"
+                  ]
+                },
+                "fps": {
+                  "description": "The programme's frames per second, as the relay's last beat reported it, rounded to a whole number. Omitted on the same terms as relayOutput.",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "kbps": {
+                  "description": "The programme's bitrate in kbit/s, as the relay's last beat reported it, rounded to a whole number. Omitted on the same terms as relayOutput.",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "cameraIngest": {
+                  "description": "The phone's camera feed at Cloudflare, from the latest live-input notification Cloudflare sent for it: connected, disconnected or errored. Omitted when Cloudflare has sent none.",
+                  "type": "string",
+                  "enum": [
+                    "connected",
+                    "disconnected",
+                    "errored"
+                  ]
+                },
+                "programmeIngest": {
+                  "description": "The programme feed at Cloudflare (a composed session's only), from the latest live-input notification Cloudflare sent for it: connected, disconnected or errored. Omitted when Cloudflare has sent none.",
+                  "type": "string",
+                  "enum": [
+                    "connected",
+                    "disconnected",
+                    "errored"
+                  ]
+                }
+              },
+              "additionalProperties": false
             }
           },
           "required": [
@@ -755,6 +995,48 @@
               "required": [
                 "label",
                 "scheduledStart"
+              ],
+              "additionalProperties": false
+            },
+            "realtime": {
+              "description": "Realtime push nudges (spec 2026-11-24 §2.1): the current pairing's push channel, so the phone beats at once instead of waiting out pollSeconds. Sent for the code's current pairing only, on waiting, go-live, live and over; never on replaced or taken (the caller no longer holds the pairing). Omitted, never null, when there is none, a failed mint included (a failed mint never fails the beat). Join `realtime:{topic}` with private: true and listen for the broadcast event `nudge`, payload {v, reason, at}: v epoch milliseconds, at ISO-8601, reason go-live, stop, replaced, over or next-match; an unknown reason is still a ping. A nudge carries no state: the beat answer stays the only truth and pollSeconds the cadence, and the server shortens no timeout because of a nudge. Each token lives 30 minutes. A new token rides on every current-pairing beat, so a new token is not a refresh signal: keep the joined token and swap it (setAuth) only when it has under 10 minutes left, or on a channel error or refusal. A later waiting, go-live, live or over answer WITHOUT realtime (after a failed mint, say) is no reason to leave: keep a joined channel until its expiresAt, and join nothing new without the object (absent means poll only). On replaced or taken, leave the channel: the pairing is no longer the caller's.",
+              "type": "object",
+              "properties": {
+                "url": {
+                  "description": "The Supabase project URL: https, with no userinfo, query or fragment. Derive the websocket (wss) URL from it. Public; the phone bakes in no Supabase config.",
+                  "type": "string",
+                  "pattern": "^https:\\/\\/[^\\s/?#@]+(\\/[^\\s?#]*)?$"
+                },
+                "apikey": {
+                  "description": "The Supabase project's public anon key, sent as the socket's apikey; 1 to 512 characters. Public.",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "topic": {
+                  "description": "The bare topic capture:{pairingId}, the pairing id a lowercase 8-4-4-4-12 uuid; the phone joins realtime:{topic}. A court pairing outlives its matches, so its topic stays the same across them.",
+                  "type": "string",
+                  "pattern": "^capture:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                },
+                "token": {
+                  "description": "The subscriber JWT for this topic only, 1 to 4096 characters. A secret: never in a record, snapshot, log line or URL.",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "expiresAt": {
+                  "description": "When the token expires, as epoch seconds. The phone times its swap from this, never from a guess of its own clock.",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "url",
+                "apikey",
+                "topic",
+                "token",
+                "expiresAt"
               ],
               "additionalProperties": false
             },

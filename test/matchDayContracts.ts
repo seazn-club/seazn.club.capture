@@ -11,7 +11,8 @@ export type MatchDayContract =
   | 'capture-matchday-day.v1'
   | 'capture-matchday-open.v1'
   | 'capture-matchday-approval.v1'
-  | 'capture-matchday-call.v1';
+  | 'capture-matchday-call.v1'
+  | 'capture-matchday-realtime.v1';
 
 const CONTRACTS = new URL('../contracts/', import.meta.url);
 
@@ -48,6 +49,7 @@ for (const contract of [
   'capture-matchday-open.v1',
   'capture-matchday-approval.v1',
   'capture-matchday-call.v1',
+  'capture-matchday-realtime.v1',
 ] as const) {
   ajv.addSchema(schemaOf(contract) as object);
 }

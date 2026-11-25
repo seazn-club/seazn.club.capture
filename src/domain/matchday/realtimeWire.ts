@@ -9,8 +9,8 @@ import { all, field, scalar, successData, word, type Read } from '@/domain/match
  * never goes to the store, the record, a log line, an error or a URL. The topic is joined exactly as answered.
  *
  * Confirmed by the web (2026-11-24): the v1 envelope `{ok: true, data: {token, topic, expiresAt, url, apikey},
- * requestId}`, and `expiresAt` in epoch SECONDS only (an ISO value is garbled: poll only). Vectors stay PROVISIONAL
- * until `docs/contracts/capture-matchday-realtime.v1.json` is vendored from a merged web main.
+ * requestId}`, and `expiresAt` in epoch SECONDS only (an ISO value is garbled: poll only). Vendored as
+ * capture-matchday-realtime.v1 at web 55d5bcc87d (#1301), whose fixtures the tests run.
  */
 export type MatchDayGrant = {
   readonly token: string;

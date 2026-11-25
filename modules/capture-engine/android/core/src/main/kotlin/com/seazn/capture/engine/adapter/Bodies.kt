@@ -383,7 +383,7 @@ object Bodies {
   private const val TOKEN_MAX = 8_192
 
   /**
-   * A beat answer's `realtime` (design 2026-11-24 §2.1; PROVISIONAL until vendored), or null: absent, null or any
+   * A beat answer's `realtime` (design 2026-11-24 §2.1; vendored at web 55d5bcc87d), or null: absent, null or any
    * member out of shape is no grant, and never refuses the answer. Whether it has expired is the core's to judge, on
    * its own clock. Never throws.
    */
@@ -398,7 +398,7 @@ object Bodies {
   }
 
   /**
-   * T46's `delivery` (capture-beat.v1 at web edfff98171; PROVISIONAL until vendored), or null when nothing in it is
+   * T46's `delivery` (capture-beat.v1, vendored at web 55d5bcc87d), or null when nothing in it is
    * known. Each member alone: an unknown word or an integer outside 0 to 2^53 - 1 is not known, and never refuses the
    * answer. Never throws.
    */

@@ -1,7 +1,7 @@
 package com.seazn.capture.engine.core
 
 /**
- * A beat answer's `realtime` (design 2026-11-24 §2.1; web spec 2026-11-24 §2.1, PROVISIONAL until vendored): where the
+ * A beat answer's `realtime` (design 2026-11-24 §2.1; vendored: capture-beat.v1 at web 55d5bcc87d): where the
  * pairing's nudge channel is, and the short-lived token that joins it. [url] is the server's https origin, [apikey] its
  * public anon key, [topic] `capture:{pairing}`, [expiresAtS] epoch seconds.
  *
@@ -53,7 +53,7 @@ enum class NudgeState(override val wire: String) : Wire {
 }
 
 /**
- * T46's `delivery` on a go-live or live answer (capture-beat.v1 at web edfff98171, PROVISIONAL until vendored): what
+ * T46's `delivery` on a go-live or live answer (capture-beat.v1, vendored at web 55d5bcc87d): what
  * the relay and Cloudflare last said about the session's video. Each member null when not known: absent, an unknown
  * word, or an integer out of range. Plain values only.
  */
@@ -73,7 +73,7 @@ data class ServerDelivery(
     get() = this == ServerDelivery()
 
   companion object {
-    /** The contract's enum sets, copied from capture-beat.v1 at web edfff98171 (PROVISIONAL). */
+    /** The contract's enum sets, copied from capture-beat.v1 at web 55d5bcc87d. */
     val RELAY_OUTPUT = setOf("connecting", "connected", "backoff")
     val PROGRAMME_PHASE = setOf("waiting", "live", "frozen", "reconnecting", "final")
     val INGEST = setOf("connected", "disconnected", "errored")

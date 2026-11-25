@@ -94,7 +94,7 @@ export const WIRE_VOCABULARY = {
     'competition_frozen',
     'match_stopped',
   ]),
-  // T46 (capture-beat.v1 at web edfff98171, PROVISIONAL until vendored).
+  // T46 (capture-beat.v1, vendored at web 55d5bcc87d).
   relayOutput: new Set(['connecting', 'connected', 'backoff']),
   programmePhase: new Set(['waiting', 'live', 'frozen', 'reconnecting', 'final']),
   ingest: new Set(['connected', 'disconnected', 'errored']),

@@ -1,5 +1,5 @@
 {
-  "about": "PROVISIONAL (design 2026-11-24, docs/specs/2026-11-24-realtime-nudge-phone-design.md): a beat answer's `realtime` (web spec 2026-11-24-realtime-push-nudges-design.md §2.1, branch feat/realtime-nudges) and T46's `delivery` (capture-beat.v1 at web edfff98171, branch feat/seazn-hosted), neither yet on web main nor vendored. Read by BodiesTest.kt (Bodies.realtime, Bodies.delivery, Bodies.beat). The vendor task swaps these rows for the vendored contract's fixtures and validates the answers with ajv. Every value is made up; no token here is a real JWT.",
+  "about": "A beat answer's `realtime` and T46's `delivery`, as capture-beat.v1 vendored at web 55d5bcc87d (#1301) names them (design 2026-11-24, docs/specs/2026-11-24-realtime-nudge-phone-design.md). Read by RealtimeBodiesTest.kt (Bodies.realtime, Bodies.delivery, Bodies.beat); realtimeVectors.test.ts checks the valid grant and the word sets against the vendored schema. The rows are the native readers' own, looser than the contract where a value cannot break the join (a trailing slash or a port on the origin). Every value is made up; no token here is a real JWT.",
   "realtime": {
     "valid": {
       "url": "https://example-ref.supabase.co",

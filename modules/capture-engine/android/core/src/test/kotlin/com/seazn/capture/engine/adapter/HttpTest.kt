@@ -203,6 +203,19 @@ class HttpTest {
   }
 
   @Test
+  fun `a start's 503 unavailable, with the Retry-After the web sends while the phone's own session still ends, fails the start as it always did`() {
+    // capture-start.v1 `$defs.refusal` (web 55d5bcc87d, #1301): 503 unavailable carries Retry-After, 1 to 20 s. The phone
+    // reads the status alone: the operator tries again, and the wait is not kept (no automatic retry is built).
+    for (wait in listOf("1", "20", null)) {
+      assertEquals(
+        StartAnswer.Failed("503"),
+        HttpAnswers.start(7, HttpOutcome.Answered(503, """{"code":"unavailable","message":"m"}""", retryAfter = wait)).answer,
+        "Retry-After $wait",
+      )
+    }
+  }
+
+  @Test
   fun `C0b a timeout, a reset or any throw is an answer on every endpoint, named by its class alone`() {
     val thrown =
       listOf(

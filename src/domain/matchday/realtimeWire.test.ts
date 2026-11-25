@@ -1,21 +1,57 @@
 import { describe, expect, it } from 'vitest';
 import { parseRealtimeToken, parseRetryAfter } from '@/domain/matchday/realtimeWire';
+import { answered, contractAdmits, fixtureOf, fixturesOf } from '../../../test/matchDayContracts';
+
+const REALTIME = 'capture-matchday-realtime.v1';
 
 /**
- * The envelope and `expiresAt` in epoch seconds are confirmed by the web (2026-11-24). The vectors stay PROVISIONAL
- * until `docs/contracts/capture-matchday-realtime.v1.json` is vendored from a merged web main. All values are made up.
+ * The door's data is the vendored `capture-matchday-realtime.v1` fixture (web #1301, pinned by contractPins.test.ts):
+ * the envelope and `expiresAt` in epoch seconds, as the web confirmed on 2026-11-24. Its values are made up.
  */
-const TOKEN = 'eyJmYWtl.eyJtZC1mYWtlLXBheWxvYWQ.ZmFrZS1zaWduYXR1cmU';
-const DATA = {
-  token: TOKEN,
-  topic: 'match-day:3c1d2e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f',
-  expiresAt: 1_791_000_000,
-  url: 'https://abcdwxyz.supabase.example',
-  apikey: 'sb-fake-anon-key-0123456789',
+const DATA = fixtureOf('capture-matchday-realtime.v1', 'valid') as {
+  token: string;
+  topic: string;
+  expiresAt: number;
+  url: string;
+  apikey: string;
 };
+const TOKEN = DATA.token;
 const answer = (data: Record<string, unknown>) => ({ ok: true, data, requestId: 'req-1' });
 
-describe('parseRealtimeToken (PROVISIONAL)', () => {
+/**
+ * What the phone says of each fixture the contract refuses. It is stricter than the contract where a value would break
+ * the join (a topic that is not a match-day one, a url that is not https or carries userinfo, a missing or empty
+ * credential, a non-seconds instant that is no number) and looser, deliberately, where it cannot (an unknown key, a
+ * float or millisecond `expiresAt` that is still a finite number of seconds, an uppercase id, a url with a query: the
+ * phone builds the socket's address from the origin alone).
+ */
+const READ_ANYWAY: ReadonlySet<string> = new Set([
+  'invalid-expires-millis-float',
+  'invalid-extra-key',
+  'invalid-topic-uppercase-id',
+  'invalid-url-with-query',
+]);
+
+describe('parseRealtimeToken runs every capture-matchday-realtime.v1 answer fixture', () => {
+  const answers = fixturesOf(REALTIME).filter(([name]) => !name.startsWith('refusal-'));
+
+  it('has the valid one and the refused ones', () => {
+    expect(answers.map(([name]) => name)).toContain('valid');
+    expect(answers.length).toBeGreaterThanOrEqual(10);
+  });
+
+  it.each(answers)(
+    '%s: the phone and the contract agree, or the phone is the looser',
+    (name, data) => {
+      const admitted = contractAdmits(REALTIME, data);
+      expect(admitted).toBe(name === 'valid');
+      const read = parseRealtimeToken(answered(data));
+      expect(read.ok).toBe(admitted || READ_ANYWAY.has(name));
+    },
+  );
+});
+
+describe('parseRealtimeToken', () => {
   it('reads the door’s answer: the token, the topic as answered, the server and key, and when it expires', () => {
     expect(parseRealtimeToken(answer(DATA))).toEqual({
       ok: true,
@@ -24,7 +60,7 @@ describe('parseRealtimeToken (PROVISIONAL)', () => {
         topic: DATA.topic,
         url: DATA.url,
         apikey: DATA.apikey,
-        expiresAt: new Date(1_791_000_000_000),
+        expiresAt: new Date(DATA.expiresAt * 1000),
       },
     });
   });

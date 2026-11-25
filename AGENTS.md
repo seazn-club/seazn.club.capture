@@ -507,7 +507,10 @@ Three rules travel with these tokens:
   hold it, and the server's Go live is the decision (A2, A10). The Stop hold
   ends the broadcast and unpairs (A3). On a court code it ends this match only
   and the court waits again (O5), and its label says so: "Hold to stop this
-  match".
+  match". The same mis-tap reasoning locks the pinch zoom from Arming on: a
+  pinch zooms before air only. A tap on the preview sets focus and exposure
+  there, on air too, since it never moves the frame (owner, 2026-11-24;
+  `docs/specs/2026-11-25-zoom-and-metering.md`).
 - **What viewers see is built, and hidden** (the owner's ruling, 2026-10-09:
   "keep all code and just hide button then when later stage like when org
   reqeust we can implemnt"). One compile-time switch, `FEATURES.viewerCheck`

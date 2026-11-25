@@ -883,6 +883,8 @@ class GlueRulesTest {
     assertTrue(Regex("""pinch\.onTouchEvent\(event\)\s+taps\.onTouchEvent\(event\)""").containsMatchIn(gestured), "both detectors see each event: $gestured")
     assertTrue(gestured.trimEnd().removeSuffix("}").trimEnd().endsWith("return true"), "consumed, so StreamPack's onTouchEvent never runs: $gestured")
     assertTrue("touched(CameraTouch.Pinch(detector.scaleFactor))" in body(view, "override fun onScale("), "the pinch's scale")
+    // Quick scale (double-tap-and-drag) is on by default: it would zoom with one finger, and its double tap reset metering.
+    assertTrue(Regex("""\)\.apply \{ isQuickScaleEnabled = false \}""").containsMatchIn(view), "one finger never zooms")
     assertTrue("Metering.point(e.x / preview.width, e.y / preview.height)?.let { touched(CameraTouch.Tap(it)) }" in body(view, "override fun onSingleTapConfirmed("), "a tap's place on the picture, never a double tap's first")
     assertTrue("touched(CameraTouch.Reset)" in body(view, "override fun onDoubleTap("), "a double tap resets")
     assertTrue(Regex("""private fun touched\(touch: CameraTouch\) = guarded\("touch"\) \{ EngineHost\.capture\(context\)\.touch\(touch\) \}""").containsMatchIn(view), "guarded: nothing here may crash the app (I5)")

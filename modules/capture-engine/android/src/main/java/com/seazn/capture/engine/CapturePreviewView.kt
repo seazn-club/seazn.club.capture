@@ -92,7 +92,7 @@ class CapturePreviewView(context: Context, appContext: AppContext) : ExpoView(co
           return true
         }
       },
-    )
+    ).apply { isQuickScaleEnabled = false } // a double tap and drag is one finger: never a zoom, nor a reset
 
   /**
    * Spec §4: a tap, confirmed once it is no double tap's first, and a double tap. A second finger cancels a tap

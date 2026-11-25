@@ -78,9 +78,10 @@ object Metering {
 
   /**
    * The region of [size] (a share of the picture's side) centred where [point] is on [sensor], for a frame encoded at
-   * [frameDegrees] (90 held left, 270 held right). The turn and the front camera's mirror are StreamPack 3.2.1's own tap
-   * rule (`FocusMetering.normalizePoint`, javap); the 16:9 picture is the centre of the sensor that Camera2 crops it
-   * from. A region past the sensor's edge is moved inside it, never cut.
+   * [frameDegrees] (90 held left, 270 held right). The turn is StreamPack 3.2.1's `FocusMetering.getRelativeRotationDegrees`
+   * and the quarter turns and the front camera's mirror its `normalizePoint` (javap). The centred crop is ours, in place
+   * of its `getFovAdjustedPoint`: the 16:9 picture is the centre of the sensor that Camera2 crops it from. A region past
+   * the sensor's edge is moved inside it, never cut.
    */
   fun area(point: MeterPoint, frameDegrees: Int, sensor: SensorFacts, size: Float): MeterArea {
     val turn = turn(sensor, frameDegrees)

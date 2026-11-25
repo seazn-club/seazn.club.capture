@@ -41,6 +41,9 @@ taken as one (`PinchBuffer`): one queue turn, one ratio set.
 A new ratio clears the place tapped (the region would now point at a different part of the scene) and gives the camera
 its own metering back.
 
+Quick scale (a double tap and drag with one finger) is turned off on the detector: one finger never zooms, and the
+double tap only resets the metering.
+
 ### 3.2 The lock
 
 The run asks `broadcastHeld` on every pinch, before anything else. It reads the machine's own word, the last published
@@ -113,6 +116,12 @@ StreamPack 3.2.1's `CameraSettings` setters open a closed device (javap; the sta
 2. **The adapter's gate.** Each part reads the held source of that id while StreamPack reports it open now
    (`isPreviewingFlow` or `isStreamingFlow`), and returns false otherwise.
 
+**An accepted narrow window.** The adapter's check and the set are two steps. A device that closes between them (a
+loss, or another app taking it, in the milliseconds a set takes) can be reopened by the setter. StreamPack 3.2.1 guards
+its own open and close with `CameraSource.streamMutex`, which is private (javap), so the check cannot run under it. The
+run's gate closes on the loss or busy word as soon as StreamPack reports it, so the window is one set, not a state.
+Whether it is ever hit is device-only (§8).
+
 A gesture that finds no open camera is ignored and recorded at most once per opening per gesture and reason:
 `camera-touch {action: zoom|meter, reason: closed|broadcast}`. The release (`closed`) lets the next opening say its own.
 A setter that throws is one `capture-call-failed {action: zoom|metering, error}` line, never the session's failure;
@@ -151,6 +160,8 @@ the picture goes on as it was.
 - A pinch zooms smoothly and the tap's region lands where tapped, held left and held right, on the back and the front
   camera (the mirror is StreamPack's rule, unverified on our phones).
 - Continuous AF and AE follow the region without a hunt, on air too.
-- A two-finger pinch is never also a tap, and a double tap is never also a single tap.
+- A two-finger pinch is never also a tap, a double tap is never also a single tap, and a double tap and drag never
+  zooms.
+- The adapter's check-then-set window (§5) never reopens a camera another app took.
 - The zoom comes back after Settings, the slate and a side change; it goes to 1× after a switch and a new pairing.
 - A pinch from Arming on does nothing visible.

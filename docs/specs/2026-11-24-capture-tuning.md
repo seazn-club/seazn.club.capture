@@ -50,7 +50,9 @@ and at each accepted change, and `CaptureRun` keeps the last one, held or not, c
 
 **Speech processing is ours** (`SpeechEffects`): an `AcousticEchoCanceler` and a `NoiseSuppressor` created on the
 broadcast recording's own audio session (the id `AudioSessionIds` already reads for MicWatch), enabled at once, and
-released when match sound goes back on, at the capture's release, and when the recording's session changes. So a
+released when match sound goes back on, at the capture's release, and when the recording's session changes. Both are
+built or neither: one built before the other threw is released, so a half-built set never reads `on` (`SpeechSet`,
+review minor 6). So a
 change on air is immediate, with no stop, no start and no new recording, and the meter's session never changes.
 `CaptureRun.speak()` applies the choice after each build, after a connect when the build could not read the session
 yet, and on a held capture at each change. One `speech-processing {state: on|off|unavailable}` line when the state
@@ -73,12 +75,19 @@ differs from the last said in an opening, which starts `off` (as built), so the 
 
 The encoder's mode is set only at a build, so it never changes under a held streamer. A change with the capture held
 and nothing on air rebuilds it (`capture-rebuilt {action: tuning}`); under an attempt it waits for the next build (only
-a re-pair could bring one there, since the machine ignores it on air).
+a re-pair could bring one there, since the machine ignores it on air). The held rebuild is near-unreachable in
+practice: the capture is held only while the viewfinder shows (`BridgeCore.noticeCapture`), and both Settings screens
+cover it, so a change made there reaches the next build, when the viewfinder comes back. It stays for a re-pair's
+`Tune` over a held capture.
+
+An encoder that lists CBR and then refuses to configure with it would fail every pair while the choice stays saved.
+So a CBR build whose encoder failed is built once more with VBR and says `bitrate-mode {state: unsupported}`; a VBR
+build's encoder failure fails as before (review, minor 1).
 
 StreamPack 3.2.1 (`MediaCodecUtils.createCodec`) builds the format, our customize keys included, then takes
 `MediaCodecList.findEncoderForFormat(format)`. A `KEY_BITRATE_MODE` of CBR added blind would filter out every encoder
 without CBR, and the pick could fall to a software encoder. So customize asks `findEncoderForFormat` itself first,
-without the key (`EncoderModes.cbrSupported`), and adds `bitrate-mode` = `BITRATE_MODE_CBR` (2) only when that
+without the key and with the surface colour format StreamPack sets after customize (`EncoderModes.cbrSupported`), and adds `bitrate-mode` = `BITRATE_MODE_CBR` (2) only when that
 encoder's `EncoderCapabilities.isBitrateModeSupported(CBR)`: the same encoder then stays the first match. One
 `bitrate-mode {state: cbr|unsupported}` line a build when the operator asked; VBR, the default, writes none.
 

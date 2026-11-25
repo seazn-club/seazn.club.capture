@@ -567,9 +567,11 @@ Three rules travel with these tokens:
   LIVE plate beside the way back so the broadcast is never out of sight. The
   protection belongs on the individual control, not the screen: a setting that
   would disturb a live broadcast is disabled while live with a one-line reason —
-  the encode profile is the first one that will be. The named exception is
-  Settings' automatic switch: it stays usable on air, because it only affects
-  the automatic stop (A4). It lives inside the Live Stream route
+  Constant bitrate is, from Arming on ("After the broadcast"; capture tuning,
+  2026-11-24), and the encode profile will be. The named exceptions are
+  Settings' automatic switch, usable on air because it only affects the
+  automatic stop (A4), and Match sound, which changes the microphone's
+  processing with no stop or start. It lives inside the Live Stream route
   (`app/stream/`), so on air it is only _leaving the mode_ that is blocked:
   Home is hidden and Back says how to stop. A broadcast started remotely moves
   the app to Live Stream from wherever it is (A2).

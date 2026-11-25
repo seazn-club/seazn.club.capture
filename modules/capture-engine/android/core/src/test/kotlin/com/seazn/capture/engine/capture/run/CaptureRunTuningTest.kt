@@ -10,6 +10,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /**
  * [CaptureRun]: the operator's capture choices and the camera's antibanding (spec 2026-11-24-capture-tuning). The
@@ -75,6 +76,35 @@ class CaptureRunTuningTest : CaptureRunTestKit() {
       s.run.open(Configs.pairRequest())
       advanceUntilIdle()
       assertEquals(listOf(mode("unsupported")), modeLines(s))
+    }
+
+  /** Review minor 1: an encoder that lists CBR and refuses to configure with it must not fail every pair. */
+  @Test
+  fun `an encoder that refuses CBR is built once more with VBR, says unsupported, and the pair holds`() =
+    runTest {
+      val s = scene()
+      s.parts.builds += Built.Failed("0", null, encoder = true, error = IllegalArgumentException("codec refused"))
+      does(s, Command.Tune(constant))
+      s.run.open(Configs.pairRequest())
+      advanceUntilIdle()
+      assertEquals(listOf(constant, Tuning.DEFAULT), s.parts.builtWith)
+      assertEquals(listOf(mode("unsupported")), modeLines(s))
+      assertEquals(emptyList(), s.told.pairFailed)
+      assertTrue(s.parts.held)
+    }
+
+  @Test
+  fun `a VBR build's encoder failure is never retried - it fails the pair as before`() =
+    runTest {
+      val s = scene()
+      s.parts.builds += Built.Failed("0", null, encoder = true, error = IllegalArgumentException("codec refused"))
+      s.parts.builds += Built.Failed("0", null, encoder = true, error = IllegalArgumentException("codec refused"))
+      does(s, Command.Tune(constant))
+      s.run.open(Configs.pairRequest())
+      advanceUntilIdle()
+      assertEquals(listOf(constant, Tuning.DEFAULT), s.parts.builtWith, "one retry, with VBR, and no more")
+      assertEquals(1, s.told.pairFailed.size)
+      assertEquals(emptyList(), modeLines(s))
     }
 
   /** The stabilisation spec's trap: Settings covers the viewfinder, the capture closes, the choice changes, it reopens. */

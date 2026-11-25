@@ -188,17 +188,24 @@ class CaptureRun(
     build(asked, EncoderKeys.surfaceRotation(side()))
   }
 
-  private suspend fun build(asked: PairRequest, wanted: Int) {
-    when (val built = parts.build(wanted, tuning)) {
+  /**
+   * Spec 2026-11-24-capture-tuning §3.2: an encoder that lists CBR and then refuses to configure with it would fail
+   * every pair while the choice stays saved, so a build asked for CBR whose encoder failed is built once more with VBR,
+   * and says `unsupported`. Only an encoder failure on a CBR build is retried; anything else fails as before.
+   */
+  private suspend fun build(asked: PairRequest, wanted: Int, with: Tuning = tuning) {
+    when (val built = parts.build(wanted, with)) {
       is Built.Ready -> {
         rotation = wanted
         micNoted = false
-        // Spec 2026-11-24-capture-tuning §3.2: a line only when the operator asked for constant bitrate (cbr or unsupported).
-        if (built.mode != BitrateMode.VBR) calls.line(built.mode.entry())
+        val mode = if (with.constantBitrate == tuning.constantBitrate) built.mode else BitrateMode.UNSUPPORTED
+        // Spec §3.2: a line only when the operator asked for constant bitrate (cbr or unsupported).
+        if (mode != BitrateMode.VBR) calls.line(mode.entry())
         speak()
         watchOpens(built.cameraId)
       }
-      is Built.Failed -> failed(asked, built)
+      is Built.Failed ->
+        if (built.encoder && with.constantBitrate) build(asked, wanted, with.copy(constantBitrate = false)) else failed(asked, built)
     }
   }
 
@@ -572,7 +579,9 @@ class CaptureRun(
    * Spec §3: the pairing's choices, held or not. Match sound reaches a held microphone at once, on air included (owner,
    * 2026-11-24), with no stop or start. Constant bitrate is the encoder's, set only at a build: over a held capture
    * with nothing on air it rebuilds it, and under an attempt it waits for the next build (the machine ignores it while
-   * a broadcast is held, so only a re-pair's could come then).
+   * a broadcast is held, so only a re-pair's could come then). The held rebuild is near-unreachable in practice: the
+   * capture is held only while the viewfinder shows (`BridgeCore.noticeCapture`), and both Settings screens cover it,
+   * so a change made there usually reaches the next build instead. It stays for a re-pair's Tune over a held capture.
    */
   private suspend fun tune(next: Tuning) {
     val before = tuning

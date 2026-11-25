@@ -117,7 +117,7 @@ class StreamerAdapter(
   @Volatile private var sizedCamera: String? = null
 
   /** Spec 2026-11-24-capture-tuning §3.1: our own speech effects on the held recording, none while match sound is on. */
-  private val speechEffects = SpeechEffects()
+  private val speechEffects = SpeechEffects.create()
 
   /**
    * Spec §3.2: the mode the last customize asked the encoder for. Written inside StreamPack's encoder creation, read

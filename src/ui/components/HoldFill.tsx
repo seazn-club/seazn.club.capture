@@ -19,6 +19,8 @@ import { colour } from '@/ui/theme/tokens';
  * setting Reanimated 4.5.1 jumps a timing straight to its end
  * (src/animation/util.ts, `animation.current = animation.toValue`), so a full
  * fill would say "done" three seconds before the hold acts.
+ * Once full it stays full until the finger lifts, which is when the hold acts
+ * (owner, 2026-11-25, option A).
  */
 const FILL = { duration: HOLD_MS, easing: Easing.linear, reduceMotion: ReduceMotion.Never };
 

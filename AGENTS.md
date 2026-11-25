@@ -514,7 +514,10 @@ Three rules travel with these tokens:
   and costs the operator three seconds once a match. One hold length for both, so
   the gesture never has to be relearned mid-match. The hold acts when the
   finger lifts after the full 3 s (owner, 2026-11-25, option A): the fill completes
-  at 3 s and stays full until release, and once full a release always acts.
+  at 3 s and stays full until release, and once full a release always acts (a
+  finger sliding off, or the system taking the touch, counts as a release);
+  disabling, the turn card, the app leaving the foreground or the control
+  unmounting abandons it with no act.
   Acting under the finger left React Native's touch responder stale when the
   control unmounted, swallowing the next tap. A start from the console,
   from automatic mode, or a rejoin needs no hold: the operator is not there to

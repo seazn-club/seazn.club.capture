@@ -415,20 +415,24 @@ describe('useHold, under the control', () => {
     expect(onHeld).toHaveBeenCalledTimes(1);
   });
 
-  it('ignores a second press while the hold is full, and acts once on release', () => {
+  it('drops a full hold whose release was lost when a new press lands, with no act, and holds afresh', () => {
     const onHeld = vi.fn();
     const { result } = renderHook(() => useHold(onHeld, true), { wrapper: wrapper() });
     act(() => result.current.pressIn());
     act(() => vi.advanceTimersByTime(HOLD_MS));
+    act(() => result.current.pressIn());
+    expect(onHeld).not.toHaveBeenCalled();
+    expect(result.current.holding).toBe(true);
+    act(() => vi.advanceTimersByTime(HOLD_MS - 1));
+    act(() => result.current.pressOut());
     expect(onHeld).not.toHaveBeenCalled();
     act(() => result.current.pressIn());
-    act(() => vi.advanceTimersByTime(HOLD_MS * 2));
-    expect(result.current.holding).toBe(true);
+    act(() => vi.advanceTimersByTime(HOLD_MS));
     act(() => result.current.pressOut());
     expect(onHeld).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps the first press’s action when a second press, with a newer one, lands while full', () => {
+  it('acts with the newer press’s action when a fresh press replaces a full one', () => {
     const first = vi.fn();
     const second = vi.fn();
     const { result, rerender } = renderHook(({ onHeld }) => useHold(onHeld, true), {
@@ -439,10 +443,10 @@ describe('useHold, under the control', () => {
     act(() => vi.advanceTimersByTime(HOLD_MS));
     rerender({ onHeld: second });
     act(() => result.current.pressIn());
-    act(() => vi.advanceTimersByTime(HOLD_MS - 1));
+    act(() => vi.advanceTimersByTime(HOLD_MS));
     act(() => result.current.pressOut());
-    expect(first).toHaveBeenCalledTimes(1);
-    expect(second).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledTimes(1);
+    expect(first).not.toHaveBeenCalled();
   });
 
   it('never acts on a release after it unmounted while full', () => {

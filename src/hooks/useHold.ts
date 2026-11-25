@@ -16,8 +16,11 @@ export type Hold = { readonly holding: boolean; pressIn(): void; pressOut(): voi
  * Once full, a release always acts: a completed hold cannot be cancelled by
  * lifting. A release before then, disabling, unmounting, the turn card
  * covering it or the app leaving the foreground, while running or full,
- * abandons it with no act; a second press while one is running or full is
- * ignored, and a second release acts nothing, so it can never act twice. The
+ * abandons it with no act; a second press while one is running is ignored, a
+ * press while full drops the full hold with no act and starts afresh (its
+ * release was lost), and a second release acts nothing, so it can never act
+ * twice. A `Pressable` also sends press-out when the finger slides off or the
+ * system takes the touch; after full, that acts like a release. The
  * hold does what was pressed: the `onHeld` of the render the finger landed on.
  *
  * Leaving the foreground (a call, the lock, Home) cancels at once, in the
@@ -42,7 +45,11 @@ export function useHold(onHeld: () => void, enabledByOwner: boolean): Hold {
     setHolding(false);
   }, []);
   const pressIn = useCallback(() => {
-    if (!enabled || phase.current !== 'idle') return;
+    if (!enabled || phase.current === 'running') return;
+    // A press landing while full means the full hold's release never arrived
+    // (the stale-responder family this hook guards against): drop it with no
+    // act and hold afresh, so a lost release can never leave the control dead.
+    if (phase.current === 'full') cancel();
     phase.current = 'running';
     pressed.current = onHeld;
     setHolding(true);
@@ -50,7 +57,7 @@ export function useHold(onHeld: () => void, enabledByOwner: boolean): Hold {
       timer.current = null;
       phase.current = 'full';
     }, HOLD_MS);
-  }, [enabled, onHeld]);
+  }, [enabled, onHeld, cancel]);
   const pressOut = useCallback(() => {
     const act = phase.current === 'full' ? pressed.current : null;
     cancel();

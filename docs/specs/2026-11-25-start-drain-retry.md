@@ -31,12 +31,14 @@ The owner, 2026-11-25, asked how the phone should answer it: **"Retry once by it
    - Not ready: no start. The line is the start failure, "Couldn't start the stream — try again", and the beat's
      `startFailed` is `start-error`; the chips and the Go live blocker say what is missing. That is the honest line:
      the one before it promised a go-live that is no longer coming, and falling back to "Waiting for Go live" would
-     hide that. Readiness lost and back again before the retry falls due does not stop it.
+     hide that. Readiness lost and back again before the retry falls due does not stop it. Leaving Live Stream during
+     the wait closes the capture, so the retry fails readiness and the line is that start failure: intended.
 4. **Once, never a loop.** A second `Draining` on the retry, or any failure, is today's start failure. Nothing asks a
    third time by itself; the operator's next hold is a fresh start with its own one retry.
 5. **What ends the wait.** The wait is not a start in flight (`StartAsks.awaited` stays false), so:
-   - a **second hold** during the wait is a fresh start: it posts at once and drops the scheduled retry, so there is
-     never a double ask;
+   - a **second hold** during the wait is honoured: it posts at once and drops the scheduled retry, so there is never
+     a double ask. It spends the drain's one retry (review of d9d1e2d1, the controller's ruling, 2026-11-25): a
+     Draining answer to it is the start failure, so a drain earns at most one retry by itself;
    - **Home's Forget, a court's Leave and the notification's Forget** are accepted, not ignored as they are while a
      start is in flight (M1): nothing has been started on the server;
    - a **beat that arms** (the organiser's or the automatic Go live) clears the wait in `Starts.arm`, so it can never

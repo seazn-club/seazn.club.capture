@@ -392,7 +392,11 @@ internal object Verdicts {
     val notReady = pairing.readiness.notReady(pairing.camera, phase.networkValidated)
     if (notReady != null || pairing.starts.awaited) return SessionMachine.ignored(phase, "start")
     val id = pairing.starts.nextId
-    val asked = pairing.copy(starts = StartAsks(id + 1, id, askedAtMs = now.monoMs), refusal = null, startFailed = null, lastEnd = null)
+    // A hold during a drain wait is honoured, but it spends the drain's one retry (review of d9d1e2d1, the controller's
+    // ruling, 2026-11-25): a Draining answer to it is the start failure, so a drain earns at most one retry by itself.
+    val duringDrain = pairing.starts.retryAtMs != null
+    val asks = StartAsks(id + 1, id, askedAtMs = now.monoMs, retried = duringDrain)
+    val asked = pairing.copy(starts = asks, refusal = null, startFailed = null, lastEnd = null)
     val post = Command.PostStart(id, pairing.request.startUrl, pairing.token, Beats.startBody(pairing.phone.phoneId))
     return Step(phase.withPairing(asked), listOf(post, line("start-asked")))
   }

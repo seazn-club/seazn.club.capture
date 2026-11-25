@@ -132,6 +132,19 @@ class StartDrainTest {
     assertTrue(rig.records("start-retry").isEmpty())
   }
 
+  @Test fun `a hold during the wait spends the drain's one retry - a draining answer to it is the start failure`() {
+    val rig = ready().answering(drain, drain)
+    val at = drained(rig)
+    rig.at(at + 2_000)
+    rig.send(Input.Start)
+    assertEquals(2, posts(rig).size, "the hold is honoured")
+    assertEquals(Refusal.START_FAILED, rig.snapshot.refusal)
+    assertEquals(StartFailure.START_ERROR, pairing(rig).startFailed)
+    assertEquals(1, rig.records("start-draining").size)
+    rig.advance(60_000)
+    assertEquals(2, posts(rig).size, "at most one retry by itself per drain")
+  }
+
   @Test fun `a fresh hold after a drain that failed has its own one retry`() {
     val rig = ready().answering(drain, drain, drain)
     drained(rig)

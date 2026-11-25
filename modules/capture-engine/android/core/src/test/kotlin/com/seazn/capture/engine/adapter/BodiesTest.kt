@@ -711,6 +711,10 @@ class BodiesTest {
     // Web #1301: 503 unavailable with a Retry-After of 1 to 20 s is the phone's own session still ending; without one it fails.
     assertEquals(StartAnswer.Draining(5), Bodies.start(503, """{"code":"unavailable","message":"m"}""", 5))
     assertEquals(StartAnswer.Failed("503"), Bodies.start(503, """{"code":"unavailable","message":"m"}"""))
+    // Outside 1 to 20 s, or a header no rule reads as seconds (an HTTP-date), is no wait the phone keeps.
+    for (header in listOf("0", "21", "Wed, 21 Oct 2026 07:28:00 GMT")) {
+      assertEquals(StartAnswer.Failed("503"), Bodies.start(503, """{"code":"unavailable","message":"m"}""", Bodies.retryAfter(header)), header)
+    }
     assertEquals(StartAnswer.Failed("409"), Bodies.start(409, "<html>"))
     assertEquals(StartAnswer.Failed("409"), Bodies.start(409, """{"code":7,"message":"m"}"""))
     assertEquals(StartAnswer.Failed("302"), Bodies.start(302, """{"code":"no_credit","message":"m"}"""))

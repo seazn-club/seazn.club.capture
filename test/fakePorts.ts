@@ -41,6 +41,7 @@ import { createRingRecord, parseRecordLine, type SessionRecord } from '@/service
 import { createStreamSettingsStore } from '@/services/streamSettingsStore';
 import { createTapQueueStore, type TapQueueStore } from '@/services/tapQueueStore';
 import type { UploadCredentialStore } from '@/services/uploadCredentialStore';
+import { createFakeIncomingLink, type FakeIncomingLink } from '@/services/fakeIncomingLink';
 import { createFakeLinkPort, type FakeLinkPort } from './fakeLinkPort';
 import { createFakePhotoPort, type FakePhotoPort } from './fakePhotoPort';
 import { createFakeScoringLinkPort, type FakeScoringLinkPort } from './fakeScoringLinkPort';
@@ -80,6 +81,7 @@ export type FakePorts = {
   /** `calls` lists every dim and restore, in order; `dimmed` is the window now. */
   readonly screen: FakeScreen;
   readonly navigation: NavigationPort & { readonly history: readonly Route[] };
+  readonly incomingLink: FakeIncomingLink;
   readonly splash: SplashPort & { readonly hides: number };
   readonly surfaces: FakeSurfaces;
   /** The session record the ports' logger writes to; read it with `readRecord`. */
@@ -170,6 +172,7 @@ export function createFakePorts(overrides: FakePortsOverrides = {}): FakePorts {
     foreground: fakeForeground(),
     screen: fakeScreen(),
     navigation: fakeNavigation(),
+    incomingLink: createFakeIncomingLink(),
     splash: fakeSplash(),
     surfaces: createFakeSurfaces(),
     record,

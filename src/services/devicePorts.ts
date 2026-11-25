@@ -21,6 +21,15 @@ export interface BackPort {
   subscribe(onBack: () => boolean): () => void;
 }
 
+/**
+ * The links the phone opens this app with (Open in app, spec 2026-11-25 §6). `subscribe` delivers the one the app was
+ * started with once, after subscribing, then each later one; the same URL twice within 2 s is one. A URL may hold a
+ * code's token in its fragment: never log or keep it. Returns the unsubscribe.
+ */
+export interface IncomingLinkPort {
+  subscribe(listener: (url: string) => void): () => void;
+}
+
 /** The app coming back to the foreground, and leaving it, and whether it is there now. */
 export interface ForegroundPort {
   subscribe(onForeground: () => void): () => void;

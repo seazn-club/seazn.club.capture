@@ -151,7 +151,7 @@
 
 - [ ] **Step 1: Build and install.** Build the dev twin: arm64, `assembleRelease`, `EXPO_PUBLIC_SEAZN_ENV` unset (so staging). Check it isn't live, then install it with `adb`.
 - [ ] **Step 2: Check verification.** Run `adb shell pm get-app-links com.seazn.capture.dev`. Expected: `stg.seazn.club: verified`. A value other than `verified` means the web's `assetlinks.json` or the debug fingerprint is wrong; stop and tell the web session.
-- [ ] **Step 3: The owner's steps, listed, not simulated.** On the same phone, signed in on stg in Chrome:
+- [ ] **Step 3: The owner's steps, listed, not simulated.** On the same phone, signed in on stg in Chrome: 0. Do each of 1–3 in Chrome and again in Samsung Internet (same-host App Link hand-off, spec §10).
   1. Stream code → Open in app → the pairing panel appears.
   2. Scoring link → Open in app → the pad; Score in browser → the web pad.
   3. Match Day → Open in app → the list.

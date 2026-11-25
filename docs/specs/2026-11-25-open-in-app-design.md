@@ -158,7 +158,20 @@ An opened link is treated as a scan that arrives on its own:
 - **Record.** `link-opened {mode}` is a new kind, and kinds are open on the wire. `mode` is a listed key, so the
   contract needs no change. Then the scan's own lines follow.
 
-## 10. Left to the builder
+## 10. The web's answers (openapp session, 2026-11-25)
+
+- The link shapes are accepted unchanged.
+- `assetlinks.json` is a route handler that chooses by the request's origin, because staging and production are built from the same
+  source. The URL and the JSON are the same as a static file would give. Staging lists the dev twin's SHA-256
+  `FA:C6:17:45:…:91:03:3B:9C`, the stock React Native debug key, which is for staging only.
+- The `/app/*` pages are bare HTML with no app bundle. The normal layout mounts PostHog, whose `$current_url` would
+  carry the fragment.
+- The button shows only on Android and on a phone-sized screen. A court stream sheet's second QR (the same v2, plus `exp`)
+  gets it too.
+- The device check must tap a real link in both Chrome and Samsung Internet, because the same-host App Link hand-off is
+  unproven.
+
+## 11. Left to the builder
 
 - The exact base64url form of the stream code in the fragment, provided it round-trips the QR's JSON exactly.
 - Whether the button checks for Android or only for screen size.

@@ -9,7 +9,7 @@ import fr from '@/i18n/fr.json';
 import nl from '@/i18n/nl.json';
 import type { FakePorts } from '../../../test/fakePorts';
 import { savedCourtCode } from '../../../test/fixtures/savedStream';
-import { pressIn } from '../../../test/press';
+import { pressIn, pressOut } from '../../../test/press';
 import { renderViewfinder } from '../../../test/renderViewfinder';
 
 const plate = () => screen.getByTestId('tally-plate').textContent;
@@ -146,6 +146,9 @@ describe('on air (spec §6, through the fake)', () => {
     act(() => vi.advanceTimersByTime(HOLD_MS - 1));
     expect(sent(view, 'stop')).toHaveLength(0);
     act(() => vi.advanceTimersByTime(1));
+    // Full, and still under the finger: it acts on release (owner, 2026-11-25).
+    expect(sent(view, 'stop')).toHaveLength(0);
+    pressOut(stop());
     expect(sent(view, 'stop')).toHaveLength(1);
     // Ended: the hold control is gone.
     expect(screen.queryByRole('button', { name: /^Stop\./ })).toBeNull();
@@ -264,6 +267,7 @@ describe('the hold under a moving state', () => {
     act(() => view.engine.scene('fell-back'));
     expect(fill()).toBe('true');
     act(() => vi.advanceTimersByTime(HOLD_MS - 1000));
+    pressOut(stop());
     expect(sent(view, 'stop')).toHaveLength(1);
   });
 });
@@ -432,6 +436,7 @@ describe('Stop on a court code', () => {
     if (hold === null) throw new Error('no court Stop');
     pressIn(hold);
     act(() => vi.advanceTimersByTime(HOLD_MS));
+    pressOut(hold);
     expect(sent(view, 'stop')).toHaveLength(1);
     expect(view.engine.getSnapshot().state).toEqual({ kind: 'paired' });
     expect(view.navigation.current()).toBe('stream');

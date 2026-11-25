@@ -8,7 +8,7 @@ import type { Lang } from '@/i18n/language';
 import nl from '@/i18n/nl.json';
 import { captureRaw, epochSeconds } from './fixtures/wire';
 import { TEST_NOW } from './fakePorts';
-import { pressIn } from './press';
+import { pressIn, pressOut } from './press';
 import { flush, type LaunchedApp } from './routedApp';
 
 /** The copy a language shows, read from its dictionary and never through `t()` (AGENTS §10). */
@@ -53,6 +53,7 @@ export async function scanAndGoLive(app: LaunchedApp, lang: Lang = 'en'): Promis
 export async function holdControl(name: string | RegExp): Promise<void> {
   pressIn(screen.getByRole('button', { name }));
   await flush(HOLD_MS);
+  pressOut(screen.getByRole('button', { name }));
   await flush();
 }
 

@@ -512,7 +512,11 @@ Three rules travel with these tokens:
   starting as stopping. A tap cannot be distinguished from an accident; three
   seconds under a moving fill cannot be mistaken for one, in either direction,
   and costs the operator three seconds once a match. One hold length for both, so
-  the gesture never has to be relearned mid-match. A start from the console,
+  the gesture never has to be relearned mid-match. The hold acts when the
+  finger lifts after the full 3 s (owner, 2026-11-25, option A): the fill completes
+  at 3 s and stays full until release, and once full a release always acts.
+  Acting under the finger left React Native's touch responder stale when the
+  control unmounted, swallowing the next tap. A start from the console,
   from automatic mode, or a rejoin needs no hold: the operator is not there to
   hold it, and the server's Go live is the decision (A2, A10). The Stop hold
   ends the broadcast and unpairs (A3). On a court code it ends this match only

@@ -77,6 +77,7 @@ describe('the paired viewfinder (spec §1)', () => {
     const view = await renderPaired();
     pressIn(goLive());
     act(() => vi.advanceTimersByTime(HOLD_MS));
+    pressOut(goLive());
     expect(view.engine.intents.filter((intent) => intent.kind === 'start')).toHaveLength(1);
     // Connecting now: Stop has taken Go live's place (A3); never live, it does not say it unpairs (owner decision 1).
     expect(stop()).toBeTruthy();
@@ -98,6 +99,7 @@ describe('the paired viewfinder (spec §1)', () => {
       expect(screen.getByText(WAITING)).toBeTruthy();
       pressIn(goLive());
       act(() => vi.advanceTimersByTime(HOLD_MS));
+      pressOut(goLive());
       expect(view.engine.intents.some((intent) => intent.kind === 'start')).toBe(false);
     },
   );
@@ -115,6 +117,7 @@ describe('the paired viewfinder (spec §1)', () => {
     expect(screen.getByLabelText('Network: ready')).toBeTruthy();
     pressIn(goLive());
     act(() => vi.advanceTimersByTime(HOLD_MS));
+    pressOut(goLive());
     expect(view.engine.intents.some((intent) => intent.kind === 'start')).toBe(false);
   });
 
@@ -212,6 +215,7 @@ describe('the paired viewfinder (spec §1)', () => {
     expect(screen.getByLabelText('Camera: not ready')).toBeTruthy();
     pressIn(goLive());
     act(() => vi.advanceTimersByTime(HOLD_MS));
+    pressOut(goLive());
     expect(view.engine.intents.some((intent) => intent.kind === 'start')).toBe(false);
   });
 
@@ -228,6 +232,7 @@ describe('the paired viewfinder (spec §1)', () => {
     expect(screen.getByText('Camera not ready')).toBeTruthy();
     pressIn(goLive());
     act(() => vi.advanceTimersByTime(HOLD_MS));
+    pressOut(goLive());
     expect(view.engine.intents.some((intent) => intent.kind === 'start')).toBe(false);
   });
 
@@ -299,6 +304,7 @@ describe('the operator’s Go live in flight (court stream Task 13, P2)', () => 
     act(() => view.engine.setStartAnswer('started'));
     pressIn(goLive());
     act(() => vi.advanceTimersByTime(HOLD_MS));
+    pressOut(goLive());
     expect(starts(view)).toBe(2);
     expect(stop()).toBeTruthy();
   });

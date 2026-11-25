@@ -157,6 +157,8 @@ describe('ToolRow with a held tool', () => {
     expect(onTool).not.toHaveBeenCalled();
     pressIn(button);
     act(() => vi.advanceTimersByTime(HOLD_MS));
+    expect(onTool).not.toHaveBeenCalled();
+    pressOut(button);
     expect(onTool).toHaveBeenCalledExactlyOnceWith('period');
   });
 
@@ -169,6 +171,7 @@ describe('ToolRow with a held tool', () => {
       <ToolRow tools={[{ ...period, enabled: false }]} onTool={onTool} holdTool="period" />,
     );
     act(() => vi.advanceTimersByTime(HOLD_MS));
+    pressOut(screen.getByRole('button', { name: heldName }));
     expect(onTool).not.toHaveBeenCalled();
   });
 

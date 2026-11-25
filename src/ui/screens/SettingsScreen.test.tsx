@@ -21,7 +21,7 @@ import { createFakeUploadCredential, readRecord, type TestEngine } from '../../.
 import { savedStreamCode } from '../../../test/fixtures/savedStream';
 import { FIXTURE_SECRETS } from '../../../test/fixtures/wire';
 import { pairCode } from '../../../test/pairCode';
-import { pressIn } from '../../../test/press';
+import { pressIn, pressOut } from '../../../test/press';
 import { renderViewfinder } from '../../../test/renderViewfinder';
 import { renderWithPorts } from '../../../test/renderWithPorts';
 import { restoreWindowSize, setWindowSize } from '../../../test/windowSize';
@@ -103,6 +103,7 @@ async function startedViewfinder() {
     const view = await renderViewfinder();
     pressIn(screen.getByRole('button', { name: 'Go live. Press and hold for 3 seconds.' }));
     act(() => vi.advanceTimersByTime(HOLD_MS));
+    pressOut(screen.getByRole('button', { name: 'Go live. Press and hold for 3 seconds.' }));
     return view;
   } finally {
     vi.useRealTimers();

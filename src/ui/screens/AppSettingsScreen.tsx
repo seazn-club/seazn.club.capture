@@ -129,8 +129,8 @@ function StreamSection() {
 }
 
 /**
- * Spec 2026-11-24-capture-tuning §2: match sound and constant bitrate, as rows. Constant bitrate is off while a
- * broadcast is held, its helper saying when it can change. A fragment, so the group draws a hairline between each.
+ * Spec 2026-11-24-capture-tuning §2: match sound and constant bitrate, as rows. Each has the same hint as Live Stream's
+ * Settings (owner, 2026-11-25); constant bitrate is off while a broadcast is held, its helper then saying when it can change. A fragment, so the group draws a hairline between each.
  */
 function CaptureRows() {
   const { t } = useT();
@@ -149,13 +149,14 @@ function CaptureRows() {
         label={t('settings.matchSound.label')}
         checked={settings.matchSound}
         onPress={toggleMatchSound}
+        helper={t('settings.matchSound.hint')}
       />
       <SettingsRow
         label={t('settings.constantBitrate.label')}
         checked={settings.constantBitrate}
         onPress={toggleConstant}
         disabled={held}
-        helper={held ? t('settings.constantBitrate.onAir') : null}
+        helper={t(held ? 'settings.constantBitrate.onAir' : 'settings.constantBitrate.hint')}
       />
     </>
   );

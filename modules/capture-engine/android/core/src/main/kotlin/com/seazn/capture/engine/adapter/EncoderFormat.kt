@@ -28,11 +28,23 @@ object EncoderFormat {
       66 -> if ((sps.constraints and CONSTRAINT_SET1) != 0) "constrained-baseline" else "baseline"
       77 -> "main"
       88 -> "extended"
-      100 -> "high"
+      100 -> high(sps.constraints)
       110 -> "high10"
       122 -> "high422"
       244 -> "high444"
       else -> "profile${sps.profileIdc}"
+    }
+
+  /**
+   * Review of #72, Minor 3: High's own subsets by its constraint flags. constraint_set4 is Progressive High (A.2.4.1,
+   * no field coding); with constraint_set5 too it is Constrained High (A.2.4.2, no B slices either). Both cut what a
+   * decoder must do, so the relay's cost reads differently for each.
+   */
+  private fun high(constraints: Int): String =
+    when {
+      (constraints and CONSTRAINT_SET4) == 0 -> "high"
+      (constraints and CONSTRAINT_SET5) != 0 -> "constrained-high"
+      else -> "progressive-high"
     }
 
   /** level_idc is ten times the level (41 is 4.1); Level 1b is 9, or 11 with constraint_set3 below High (A.3.1). */
@@ -45,6 +57,8 @@ object EncoderFormat {
 
   private const val CONSTRAINT_SET1 = 0x40
   private const val CONSTRAINT_SET3 = 0x10
+  private const val CONSTRAINT_SET4 = 0x08
+  private const val CONSTRAINT_SET5 = 0x04
   private val BELOW_HIGH = setOf(66, 77, 88)
 }
 

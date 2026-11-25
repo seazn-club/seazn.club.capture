@@ -2,6 +2,7 @@ package com.seazn.capture.engine.endpoints
 
 import android.media.MediaFormat
 import com.seazn.capture.engine.adapter.EncoderFormatLine
+import com.seazn.capture.engine.adapter.QuietAfterThrow
 import com.seazn.capture.engine.core.BitrateMode
 import com.seazn.capture.engine.core.RecordEntry
 import io.github.thibaultbee.streampack.core.elements.data.Frame
@@ -12,8 +13,10 @@ import java.nio.ByteBuffer
  * the frame on. StreamPack 3.2.1 (javap, `MediaCodecEncoder$FrameFactory`): a frame's `format` is the codec's
  * `getOutputFormat()`, which holds `csd-0` and `csd-1`, and its raw buffer is the codec's output buffer, the parameter
  * sets removed from a key frame. Both are read through duplicates, so the frame's position and limit, which the
- * network endpoint reads, never move. Nothing here may stop the frame: a throw is said once
- * (`capture-call-failed {action: encoder-tap}`) and the tap goes quiet for the process.
+ * network endpoint reads, never move. Nothing here may stop the frame: the format read and the dump each have a guard of
+ * their own ([QuietAfterThrow], review of #72), so a throw of either, an `Error` included, is said once
+ * (`capture-call-failed {action: encoder-format}` or `{action: encoder-dump}`) and only that one goes quiet for the
+ * process. The endpoint writes the frame on whatever happens here (`tapThenWrite`).
  */
 class EncoderTap(
   private val format: EncoderFormatLine,
@@ -23,17 +26,16 @@ class EncoderTap(
   private val codec: () -> String?,
   private val line: (RecordEntry) -> Unit,
 ) {
-  @Volatile private var broken = false
+  private val formatGuard = QuietAfterThrow()
+  private val dumpGuard = QuietAfterThrow()
 
   fun videoFrame(frame: Frame) {
-    if (broken) return
-    try {
-      if (format.wanted) format.read(mode(), codec(), csd(frame.format))
-      dump?.frame(frame)
-    } catch (e: Exception) {
-      broken = true
-      line(RecordEntry("capture-call-failed", listOf("action" to "encoder-tap", "error" to e.javaClass.simpleName)))
-    }
+    formatGuard.run { if (format.wanted) format.read(mode(), codec(), csd(frame.format)) }?.let { said("encoder-format", it) }
+    dump?.let { held -> dumpGuard.run { held.frame(frame) }?.let { said("encoder-dump", it) } }
+  }
+
+  private fun said(action: String, thrown: Throwable) {
+    line(RecordEntry("capture-call-failed", listOf("action" to action, "error" to thrown.javaClass.simpleName)))
   }
 
   companion object {

@@ -35,9 +35,12 @@ one said, so a reconnect on the same encoder writes none and a change of mode wr
 
 - `mode`: the bitrate mode the encoder was asked for (vbr, cbr or unsupported).
 - `state`: the stream's format from its SPS and PPS, `<profile>-<level>-<entropy>`. The profile is Annex A's name
-  (constrained-baseline, baseline, main, extended, high, high10, high422, high444, else `profile<idc>`), the level
-  `level_idc` in tenths (1b where Annex A says so), the entropy `cabac` or `cavlc` from the PPS's
-  `entropy_coding_mode_flag`. A part is `unread` when its set is missing or too short.
+  (constrained-baseline, baseline, main, extended, high, progressive-high and constrained-high by High's
+  constraint_set4 and set5, high10, high422, high444, else `profile<idc>`), the level `level_idc` in tenths (1b where
+  Annex A says so), the entropy `cabac` or `cavlc` from the PPS's `entropy_coding_mode_flag`. A part is `unread` when
+  its set is missing or too short. An attempt whose first video frame's format holds no `csd-0` or `csd-1` says
+  `unread-unread-unread` and is not read again: the format is read once an attempt, at its first frame, never retried
+  on a later one (the next attempt reads afresh).
 - `source`: the codec's name (`IEncoder.info.name`), or null.
 
 **Why one word under `state`, not `profile`, `level` and `entropy` keys.** The web's record contract
@@ -74,11 +77,15 @@ from the key frame's own buffer, `removePrefixes`, javap), so the file decodes f
 deleted. No token, URL or code is in the name or the file, which holds the encoder's bytes only.
 
 **Never on the encode path.** The tap reads the frame through duplicates, so the network endpoint sees the frame as it
-came, and the endpoint writes it on unconditionally, after the tap (`GlueRulesTest`). The endpoint's thread decides
+came, and the endpoint writes it on whatever the tap did, after it (`tapThenWrite`: an `Error` from the tap, such as an
+out-of-memory copy, is thrown again only after the frame is written; `TapGuardsTest`, `GlueRulesTest`). The endpoint's
+thread decides
 (`DumpBudget`, pure) and copies the frame's bytes; the file is opened, written and closed on one writer thread of its
 own. Copies not yet written are bounded at 2 MB: past that the dump ends as `overflow` and the rest is dropped, since a
-file with a hole would decode wrongly from the hole on. A throw in the tap is one
-`capture-call-failed {action: encoder-tap}` line and the tap goes quiet; the frame is still written.
+file with a hole would decode wrongly from the hole on. The format read and the dump each have a guard of their own
+(`QuietAfterThrow`): a throw of either, an `Error` included, is one `capture-call-failed {action: encoder-format}` or
+`{action: encoder-dump}` line and only that one goes quiet for the process, so a failed dump never silences the format
+line. The frame is still written.
 
 **Record.** One `encoder-dump {state, mode, count, bytes, ms}` line when a dump ends: `written` (10 s), `full` (8 MB),
 `overflow`, `cut` (the attempt stopped first; nothing when it took no frame) or `failed` (with `error`, a class name).
@@ -113,14 +120,15 @@ filler NAL units or SEI in the CBR file is the cost the relay pays.
 
 Two kinds, in `allow-list.json` (both sides read it; 112 to 114): `encoder-format` and `encoder-dump`. Their keys were
 already allowed; the reasons of `mode`, `state`, `source`, `count`, `ms`, `error` and `bytes` now name them, and
-`capture-call-failed`'s names `encoder-tap`.
+`capture-call-failed`'s names `encoder-format` and `encoder-dump` as actions.
 
 ## 5. Tests
 
 Kotlin: `H264ParameterSetsTest` (the parser on real vectors, start codes, emulation prevention, Exp-Golomb, truncation,
 the words, the line's first-frame and change rules), `EncoderDumpRulesTest` (gate, names, keep, chunk and its size,
 arming, budget: key frame, span, cap, queue bound, said once), `EncoderLinesVectorsTest` (the lines as written),
-`ScrubParityTest` (114 kinds), `GlueRulesTest` (the gate's one site, the tap's order, catch and duplicates). JS:
+`ScrubParityTest` (114 kinds), `TapGuardsTest` (the write after a throwing tap, the guards apart), `GlueRulesTest` (the
+gate's one site, the tap's order, its two guards and duplicates). JS:
 `encoderLines.contract.test.ts` (the contract admits the lines, refuses a `profile` key), `scrubParity.test.ts` (114),
 `test/encoderDumpGate.test.ts`. Each guard was mutated once and a test failed. The glue (`EncoderTap`, `EncoderDump`,
 `CountingEndpoint`, `CaptureEndpointFactory`, `StreamerAdapter`) compiles on CI only.

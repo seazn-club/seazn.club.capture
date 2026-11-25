@@ -1289,10 +1289,16 @@ class GlueRulesTest {
   @Test
   fun `encoder diagnostics the tap reads through duplicates and the frame is always written on`() {
     val write = body(glue("CountingEndpoint.kt"), "override suspend fun write(")
-    assertTrue(write.indexOf("encoder.videoFrame(frame)") in 0 until write.indexOf("inner.write(frame, streamPid)"), write)
-    assertTrue(write.trimEnd('}').trimEnd().endsWith("inner.write(frame, streamPid)"), "the write is the body's last statement: $write")
+    // Review of #72, Important 1: the write runs whatever the tap threw, an Error included (TapGuardsTest runs the rule).
+    assertTrue("tapThenWrite({ if (video) encoder.videoFrame(frame) }, { inner.write(frame, streamPid) })" in write, write)
+    assertEquals(1, Regex("""inner\.write\(""").findAll(write).count(), "one write, inside tapThenWrite: $write")
+    assertEquals(1, Regex("""encoder\.videoFrame\(""").findAll(write).count(), "one tap, inside tapThenWrite: $write")
     val tap = glue("EncoderTap.kt")
-    assertTrue(Regex("""catch \(e: Exception\)""").containsMatchIn(body(tap, "fun videoFrame(")), "the tap never throws into the endpoint")
+    // Minor 2: the format read and the dump each go quiet on their own throw only.
+    val frame = body(tap, "fun videoFrame(")
+    assertTrue("formatGuard.run { if (format.wanted) format.read(" in frame, frame)
+    assertTrue("dumpGuard.run { held.frame(frame) }" in frame, frame)
+    assertTrue("private val formatGuard = QuietAfterThrow()" in tap && "private val dumpGuard = QuietAfterThrow()" in tap, "two guards")
     for (helper in listOf("private fun whole(", "fun remaining(")) assertTrue("buffer.duplicate()" in body(tap, helper), helper)
     for ((name, text) in listOf("EncoderTap.kt" to tap, "EncoderDump.kt" to glue("EncoderDump.kt"))) {
       val uses = Regex("""rawBuffer\b.{0,14}""").findAll(text).map { it.value }.toList()

@@ -101,6 +101,21 @@ class H264ParameterSetsTest {
     assertEquals("1.1", level(100, 0x10, 11), "High's constraint_set3 is not 1b")
   }
 
+  /**
+   * Review of #72, Minor 3: libx264's High 4.1 SPS above with only its constraint byte changed (libx264 does not write
+   * these flags): 0x08 is constraint_set4 (Progressive High, A.2.4.1), 0x0c set4 and set5 (Constrained High, A.2.4.2).
+   */
+  @Test
+  fun `High with constraint_set4 is Progressive High, and with set5 too Constrained High`() {
+    val pps = csd("68ebe3cb22c0")
+    fun word(constraintByte: String) =
+      EncoderFormat.word(H264ParameterSets.sps(listOf(csd("6764${constraintByte}29acd9405005bb0110000003001000000303c0f1831960"))), H264ParameterSets.pps(listOf(pps)))
+    assertEquals("progressive-high-4.1-cabac", word("08"))
+    assertEquals("constrained-high-4.1-cabac", word("0c"))
+    assertEquals("high-4.1-cabac", word("04"), "set5 alone names no subset of High")
+    assertEquals("high-4.1-cabac", word("00"))
+  }
+
   @Test
   fun `the profile word names Annex A's profiles, and an unknown one by number`() {
     fun profile(idc: Int, constraints: Int = 0) = EncoderFormat.profile(H264ParameterSets.Sps(idc, constraints, 40))

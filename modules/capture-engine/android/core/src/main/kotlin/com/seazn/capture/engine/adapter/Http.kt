@@ -119,13 +119,13 @@ object HttpAnswers {
       },
     )
 
-  /** A start is the operator's to try again, so it reads no Retry-After. */
+  /** A start reads its Retry-After for a 503 `unavailable` alone: the phone's own session still ending (web #1301). */
   fun start(requestId: Int, outcome: HttpOutcome): Input.StartAnswered =
     Input.StartAnswered(
       requestId,
       when (outcome) {
         is HttpOutcome.Failed -> StartAnswer.Failed(StartAnswer.Failed.NO_ANSWER + outcome.message)
-        is HttpOutcome.Answered -> Bodies.start(outcome.status, outcome.body)
+        is HttpOutcome.Answered -> Bodies.start(outcome.status, outcome.body, Bodies.retryAfter(outcome.retryAfter))
       },
     )
 }

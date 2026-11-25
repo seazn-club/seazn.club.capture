@@ -647,7 +647,7 @@ internal object Timers {
       is Phase.Connecting -> connecting(phase, now)
       is Phase.OnAir -> onAir(phase, now)
       is Phase.Arming -> Starts.tick(phase, now)
-      is Phase.Paired -> Verdicts.unconfirmed(phase, now)
+      is Phase.Paired -> Verdicts.tick(phase, now)
       is Phase.Idle, is Phase.Pairing, is Phase.Armed, is Phase.Ended -> Step(phase)
     }
 

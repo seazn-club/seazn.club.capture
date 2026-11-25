@@ -203,16 +203,31 @@ class HttpTest {
   }
 
   @Test
-  fun `a start's 503 unavailable, with the Retry-After the web sends while the phone's own session still ends, fails the start as it always did`() {
-    // capture-start.v1 `$defs.refusal` (web 55d5bcc87d, #1301): 503 unavailable carries Retry-After, 1 to 20 s. The phone
-    // reads the status alone: the operator tries again, and the wait is not kept (no automatic retry is built).
-    for (wait in listOf("1", "20", null)) {
-      assertEquals(
-        StartAnswer.Failed("503"),
-        HttpAnswers.start(7, HttpOutcome.Answered(503, """{"code":"unavailable","message":"m"}""", retryAfter = wait)).answer,
-        "Retry-After $wait",
-      )
+  fun `a start's 503 unavailable with a Retry-After of 1 to 20 s is the phone's own session still ending - Draining, read from the header`() {
+    // capture-start.v1 `$defs.refusal` (web 55d5bcc87d, #1301): 503 unavailable carries Retry-After, 1 to 20 s, when it
+    // is the phone's own session still ending. Owner ruling (2026-11-25): "Retry once by itself", so the wait is kept.
+    val unavailable = """{"code":"unavailable","message":"m"}"""
+    for ((wait, seconds) in listOf("1" to 1, "20" to 20, " 7 " to 7)) {
+      assertEquals(StartAnswer.Draining(seconds), HttpAnswers.start(7, HttpOutcome.Answered(503, unavailable, retryAfter = wait)).answer, "Retry-After $wait")
     }
+    // Anything else fails the start exactly as it always did: no header, 0, past 20, garbled, a date, another status or code.
+    val failed =
+      listOf(
+        HttpOutcome.Answered(503, unavailable),
+        HttpOutcome.Answered(503, unavailable, retryAfter = "0"),
+        HttpOutcome.Answered(503, unavailable, retryAfter = "21"),
+        HttpOutcome.Answered(503, unavailable, retryAfter = "99999999999"),
+        HttpOutcome.Answered(503, unavailable, retryAfter = "-5"),
+        HttpOutcome.Answered(503, unavailable, retryAfter = "5s"),
+        HttpOutcome.Answered(503, unavailable, retryAfter = "Wed, 21 Oct 2026 07:28:00 GMT"),
+        HttpOutcome.Answered(503, unavailable, retryAfter = ""),
+        HttpOutcome.Answered(503, """{"code":"maintenance","message":"m"}""", retryAfter = "5"),
+        HttpOutcome.Answered(503, PORTAL, retryAfter = "5"),
+        HttpOutcome.Answered(503, "", retryAfter = "5"),
+        HttpOutcome.Answered(500, unavailable, retryAfter = "5"),
+        HttpOutcome.Answered(502, unavailable, retryAfter = "5"),
+      )
+    for (outcome in failed) assertEquals(StartAnswer.Failed("${outcome.status}"), HttpAnswers.start(7, outcome).answer, "$outcome")
   }
 
   @Test

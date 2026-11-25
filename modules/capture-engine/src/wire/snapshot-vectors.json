@@ -31,7 +31,8 @@
       "not_entitled",
       "no_match",
       "unknown",
-      "start-failed"
+      "start-failed",
+      "start-draining"
     ],
     "lastEnd": [
       "stopped-by-organiser",

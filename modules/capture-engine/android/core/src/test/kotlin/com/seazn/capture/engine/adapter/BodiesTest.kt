@@ -708,6 +708,9 @@ class BodiesTest {
     assertEquals(StartAnswer.Failed("404"), Bodies.start(404, ""))
     assertEquals(StartAnswer.Failed("200"), Bodies.start(200, "{}"))
     assertEquals(StartAnswer.Failed("500"), Bodies.start(500, """{"code":"no_credit","message":"m"}"""))
+    // Web #1301: 503 unavailable with a Retry-After of 1 to 20 s is the phone's own session still ending; without one it fails.
+    assertEquals(StartAnswer.Draining(5), Bodies.start(503, """{"code":"unavailable","message":"m"}""", 5))
+    assertEquals(StartAnswer.Failed("503"), Bodies.start(503, """{"code":"unavailable","message":"m"}"""))
     assertEquals(StartAnswer.Failed("409"), Bodies.start(409, "<html>"))
     assertEquals(StartAnswer.Failed("409"), Bodies.start(409, """{"code":7,"message":"m"}"""))
     assertEquals(StartAnswer.Failed("302"), Bodies.start(302, """{"code":"no_credit","message":"m"}"""))

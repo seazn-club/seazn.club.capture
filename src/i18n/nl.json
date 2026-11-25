@@ -112,6 +112,7 @@
   "stream.status.refusedNoMatch": "Geen uitgezonden wedstrijd bezig op deze baan",
   "stream.status.refusedUnknown": "Live gaan lukt niet: vraag de organisator",
   "stream.status.startFailed": "Stream starten mislukt: probeer het opnieuw",
+  "stream.status.startDraining": "Even voorbereiden: zo meteen live",
   "stream.status.startRetrying": "Starten: Seazn onbereikbaar, opnieuw proberen",
   "stream.status.goingLiveOrganiser": "Live gaan: gestart door de organisator",
   "stream.status.goingLiveMatch": "Live gaan: de wedstrijd is begonnen",

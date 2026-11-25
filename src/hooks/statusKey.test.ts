@@ -207,6 +207,8 @@ describe('the paired and starting lines (amendment §2)', () => {
     ['no_match', 'stream.status.refusedNoMatch'],
     ['unknown', 'stream.status.refusedUnknown'],
     ['start-failed', 'stream.status.startFailed'],
+    // Owner, 2026-11-25: the server still ends this phone's last session; native asks once more by itself.
+    ['start-draining', 'stream.status.startDraining'],
   ];
   const LAST_END: readonly (readonly [LastEnd, StatusKey])[] = [
     ['stopped-by-organiser', 'stream.status.stoppedOrganiser'],
@@ -313,7 +315,7 @@ describe('the paired and starting lines (amendment §2)', () => {
   ];
 
   it('sweeps every row of the table (PV12: zero rows is a failure)', () => {
-    expect(ROWS).toHaveLength(46);
+    expect(ROWS).toHaveLength(47);
   });
 
   it.each(ROWS)('%s says %s', (_name, change, key) => {
@@ -366,12 +368,16 @@ describe('every native reason has a line', () => {
     },
   );
   // The amendment's wire strings (Vocabulary.kt), copied by hand.
-  it.each(['no_destination', 'no_credit', 'not_entitled', 'unknown', 'start-failed'])(
-    'refused %s',
-    (refusal) => {
-      expect(KEYS.has(selectStatusKey(paired({ refusal: refusal as Refusal })))).toBe(true);
-    },
-  );
+  it.each([
+    'no_destination',
+    'no_credit',
+    'not_entitled',
+    'unknown',
+    'start-failed',
+    'start-draining',
+  ])('refused %s', (refusal) => {
+    expect(KEYS.has(selectStatusKey(paired({ refusal: refusal as Refusal })))).toBe(true);
+  });
   it.each([
     'stopped-by-organiser',
     'stopped-automatically',

@@ -57,10 +57,13 @@ object Bodies {
   /**
    * `POST start` statuses that fail the start whatever their `code` (amendment, the answer table; D7,
    * D18): 404 `not_a_stream_code`, 422 `invalid` and 429 `rate_limited`. A 5xx fails it too. A start is
-   * the operator's to try again: no Retry-After. A 401 is not here: the server's `code_ended` ends the
+   * the operator's to try again: no Retry-After, but for a 503 `unavailable`'s ([start], [DRAINING]). A 401 is not here: the server's `code_ended` ends the
    * code (D5), and any other 401 fails the start (X1).
    */
   private val START_FAILS = setOf(404, 422, 429)
+
+  /** capture-start.v1 (web #1301): the 503 whose `code` and Retry-After say the phone's own session is still ending. */
+  private const val DRAINING = 503
 
   /** Why a 2xx is no answer: its body is no JSON object. A literal, never the body: the record carries it. */
   private const val NOT_JSON = "not-json"
@@ -315,18 +318,21 @@ object Bodies {
   /**
    * By status and `code`. A refusal's line is its `code`'s, never its status's (amendment §2): any
    * other 4xx with a `code` is [Refusal.of]'s, so an unknown one is [Refusal.UNKNOWN], "Can't go live —
-   * ask the organiser", its `message` for the record.
+   * ask the organiser", its `message` for the record. A 503 `unavailable` with a [retryAfterS] inside
+   * [StartAnswer.Draining.RETRY_AFTER_S] is the phone's own session still ending (web #1301); any other 503 fails.
    */
-  fun start(status: Int, body: String): StartAnswer {
+  fun start(status: Int, body: String, retryAfterS: Int? = null): StartAnswer {
     val fields = obj(body)
     val code = fields?.get("code") as? String
     val sid = uuid(fields?.get("sid"))
     val failed = StartAnswer.Failed("$status")
+    val drainS = retryAfterS?.takeIf { status == DRAINING && code == "unavailable" && it in StartAnswer.Draining.RETRY_AFTER_S }
     return when {
       status in 200..299 -> if (fields == null) StartAnswer.Failed(NOT_JSON) else sid?.let { StartAnswer.Started(it) } ?: failed
       status == 401 -> if (unconfirmed(status, fields)) StartAnswer.Failed(notRefusal(status)) else StartAnswer.CodeEnded
       status == 409 && code == "already_live" -> sid?.let { StartAnswer.AlreadyLive(it, word(fields?.get("startedBy"), STARTED_BY)) } ?: failed
       status == 409 && code == "replaced" -> StartAnswer.Replaced
+      drainS != null -> StartAnswer.Draining(drainS)
       status in START_FAILS -> failed
       status in 400..499 && code != null -> StartAnswer.Refused(Refusal.of(code), fields?.get("message") as? String)
       else -> failed

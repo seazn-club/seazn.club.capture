@@ -121,6 +121,18 @@ sealed interface StartAnswer {
   data class Refused(val refusal: Refusal, val message: String? = null) : StartAnswer
 
   /**
+   * 503 `unavailable` with a Retry-After of 1 to 20 s (capture-start.v1, web #1301): the phone's own session is still
+   * ending on the server, [retryAfterS] whole seconds more. The owner's ruling (2026-11-25, "Retry once by itself"): the
+   * machine asks once more after it ([Verdicts.started]). Any other 503 is [Failed].
+   */
+  data class Draining(val retryAfterS: Int) : StartAnswer {
+    companion object {
+      /** capture-start.v1's bounds on that Retry-After; a value outside them is no wait the phone keeps. */
+      val RETRY_AFTER_S = 1..20
+    }
+  }
+
+  /**
    * No answer, 404, 422, 429, 5xx, or a body no rule can read. [detail] is a status or a reason, never a value; no
    * answer at all is [NO_ANSWER] and the client's word, which [noAnswer] reads (N48: pending, not failed).
    */

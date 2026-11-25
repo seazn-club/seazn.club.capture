@@ -54,6 +54,8 @@ const REFUSED: Readonly<Record<Refusal, StatusKey>> = {
   no_match: 'stream.status.refusedNoMatch',
   unknown: 'stream.status.refusedUnknown',
   'start-failed': 'stream.status.startFailed',
+  // Owner, 2026-11-25 ("Retry once by itself"): native waits out the server's drain and asks once more, by itself.
+  'start-draining': 'stream.status.startDraining',
 };
 
 /**
@@ -282,6 +284,10 @@ export const LINE_TIER: Readonly<Record<LineKey, LineTier>> = {
   'stream.status.courtAutomaticOff': 'routine',
   // E2 (2026-11-17): the server's automatic start failed for a passing reason, and it retries every 60 s by itself.
   'stream.status.courtStartRetrying': 'routine',
+  // Owner, 2026-11-25 ("Retry once by itself"): the server still ends this phone's last session, and native asks once
+  // more by itself within 21 s. Plain progress like "Opening the link.": nobody needs to act. If the retry fails, the
+  // urgent "Couldn't start the stream" takes the line.
+  'stream.status.startDraining': 'routine',
   // E2: the server refused the court's automatic start, and nothing goes live until the organiser acts.
   'stream.status.courtRefusedDestination': 'urgent',
   'stream.status.courtDestinationBusy': 'urgent',

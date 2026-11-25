@@ -112,6 +112,7 @@
   "stream.status.refusedNoMatch": "Ningún partido emitido en juego en esta pista",
   "stream.status.refusedUnknown": "No se puede emitir: habla con el organizador",
   "stream.status.startFailed": "No se pudo emitir: inténtalo de nuevo",
+  "stream.status.startDraining": "Preparando: en directo en breve",
   "stream.status.startRetrying": "Iniciando: sin conexión con Seazn, reintentando",
   "stream.status.goingLiveOrganiser": "Pasando a directo: lo inicia el organizador",
   "stream.status.goingLiveMatch": "Pasando a directo: el partido ha empezado",

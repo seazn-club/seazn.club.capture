@@ -182,8 +182,8 @@ internal object Starts {
     val ids = phase.ids
     val waiting = if (pairing.isCourt) pairing.waiting.copy(stageLabel = null, stageFor = null) else pairing.waiting
     // I1: whatever arms the broadcast retires the hold's POST start, so its answer, arriving after, is late. A start
-    // pending a beat (N48) is confirmed here: whatever arms the broadcast ends it.
-    val cleared = pairing.copy(waiting = waiting, refusal = null, startFailed = null, lastEnd = null, starts = pairing.starts.copy(inFlightId = null, pending = false))
+    // pending a beat (N48) is confirmed here: whatever arms the broadcast ends it, and so it ends a drain retry's wait.
+    val cleared = pairing.copy(waiting = waiting, refusal = null, startFailed = null, lastEnd = null, starts = pairing.starts.copy(inFlightId = null, pending = false, retryAtMs = null))
     val (asks, id) = DescriptorAsks(nextId = ids.descriptor).asked(now.monoMs)
     val arming = Phase.Arming(cleared, sid, cause, ids, phase.networkValidated, phase.micSilenced, asks, defaultNetwork = phase.defaultNetwork)
     return Step(arming, listOf(line("broadcast-start", "sid" to sid, "cause" to cause), fetchCode(pairing, id)))
@@ -431,12 +431,54 @@ internal object Verdicts {
           if (answer.noAnswer) {
             val pending = answered.withPairing(p.copy(starts = p.starts.copy(pending = true)))
             Heartbeats.atOnce(Step(pending, listOf(line("start-pending"))), now)
-          } else Step(answered.withPairing(p.copy(refusal = Refusal.START_FAILED, startFailed = StartFailure.START_ERROR)))
+          } else Step(answered.withPairing(p.failedStart()))
         // Read before this `when`, whenever it lands (codeEnded).
         StartAnswer.CodeEnded -> Step(answered)
+        is StartAnswer.Draining -> draining(answered, p, answer, now)
       }
     return step.copy(commands = listOf(noted) + step.commands)
   }
+
+  /**
+   * The owner's ruling (2026-11-25, "Retry once by itself"; spec 2026-11-25-start-drain-retry): the server's 503
+   * `unavailable` while this phone's own session still ends. The first for a hold waits, saying so ([Refusal.DRAINING]),
+   * and asks once more [StartAnswer.Draining.retryAfterS] and [StartAsks.RETRY_MARGIN_MS] later ([tick]). The hold is
+   * free meanwhile, so a second hold is a fresh start that drops the wait, and Home's Forget or the notification's is
+   * accepted. One on the retry is the start failure, as any failed answer is: never a loop.
+   */
+  private fun draining(answered: Phase.Paired, p: PairingState, answer: StartAnswer.Draining, now: Now): Step {
+    if (p.starts.retried) return Step(answered.withPairing(p.failedStart()))
+    val retryAt = now.monoMs + answer.retryAfterS * 1_000L + StartAsks.RETRY_MARGIN_MS
+    val waiting = p.copy(starts = p.starts.copy(retryAtMs = retryAt), refusal = Refusal.DRAINING)
+    return Step(answered.withPairing(waiting), listOf(line("start-draining", "retryAfterS" to answer.retryAfterS)))
+  }
+
+  /** The tick in Paired: the drain retry when one waits, otherwise a pending start's deadline. They never stand together. */
+  fun tick(phase: Phase.Paired, now: Now): Step = if (phase.pairing.starts.retryAtMs != null) retry(phase, now) else unconfirmed(phase, now)
+
+  /**
+   * The drain retry falls due. A11 holds for it as for a hold: not ready then (the readiness or the network), it starts
+   * nothing and is the start failure, "Couldn't start the stream — try again", with the chips saying what is missing; the
+   * line it replaces promised a go-live that is no longer coming. Ready, it is the hold's `POST start` again, with a new
+   * request id, and [StartAsks.retried] so it is the last.
+   */
+  private fun retry(phase: Phase.Paired, now: Now): Step {
+    val pairing = phase.pairing
+    val due = pairing.starts.retryAtMs ?: return Step(phase)
+    if (now.monoMs < due) return Step(phase)
+    val notReady = pairing.readiness.notReady(pairing.camera, phase.networkValidated)
+    if (notReady != null) {
+      val dropped = pairing.copy(starts = pairing.starts.copy(retryAtMs = null)).failedStart()
+      return Step(phase.withPairing(dropped), listOf(line("start-retry", "notReady" to notReady)))
+    }
+    val id = pairing.starts.nextId
+    val asked = pairing.copy(starts = StartAsks(id + 1, id, askedAtMs = now.monoMs, retried = true), refusal = null)
+    val post = Command.PostStart(id, pairing.request.startUrl, pairing.token, Beats.startBody(pairing.phone.phoneId))
+    return Step(phase.withPairing(asked), listOf(post, line("start-retry")))
+  }
+
+  /** A start that failed: "Couldn't start the stream — try again", and the beat's `startFailed`. */
+  private fun PairingState.failedStart(): PairingState = copy(refusal = Refusal.START_FAILED, startFailed = StartFailure.START_ERROR)
 
   /**
    * The tick in Paired (N48; owner, 2026-11-23, "Pending until beat"): a start with no answer that no beat has armed
@@ -446,7 +488,7 @@ internal object Verdicts {
   fun unconfirmed(phase: Phase.Paired, now: Now): Step {
     val pairing = phase.pairing
     if (!pairing.starts.unconfirmed(now.monoMs)) return Step(phase)
-    val failed = pairing.copy(starts = pairing.starts.copy(pending = false), refusal = Refusal.START_FAILED, startFailed = StartFailure.START_ERROR)
+    val failed = pairing.copy(starts = pairing.starts.copy(pending = false)).failedStart()
     return Step(phase.withPairing(failed), listOf(line("start-unconfirmed")))
   }
 

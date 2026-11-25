@@ -112,6 +112,7 @@
   "stream.status.refusedNoMatch": "No streamed match in play on this court",
   "stream.status.refusedUnknown": "Can't go live — ask the organiser",
   "stream.status.startFailed": "Couldn't start the stream — try again",
+  "stream.status.startDraining": "Getting ready — going live shortly",
   "stream.status.startRetrying": "Starting — can't reach Seazn, retrying",
   "stream.status.goingLiveOrganiser": "Going live — started by the organiser",
   "stream.status.goingLiveMatch": "Going live — the match has started",

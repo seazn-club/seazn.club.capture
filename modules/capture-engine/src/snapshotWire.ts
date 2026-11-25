@@ -58,6 +58,7 @@ export const WIRE_VOCABULARY = {
     'no_match',
     'unknown',
     'start-failed',
+    'start-draining',
   ]),
   lastEnd: new Set([
     'stopped-by-organiser',

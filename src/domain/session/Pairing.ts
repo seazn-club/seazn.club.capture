@@ -108,7 +108,10 @@ export type Refusal =
   | 'not_entitled'
   | 'no_match' // capture-start.v1's 409: a court with no streamed match in play
   | 'unknown'
-  | 'start-failed';
+  | 'start-failed'
+  // Not a refusal for good: the phone's own session still ending on the server (503 unavailable), while native's one
+  // retry waits (owner, 2026-11-25, "Retry once by itself"; spec 2026-11-25-start-drain-retry).
+  | 'start-draining';
 
 /** Why the last broadcast ended without the operator, while back in Paired. */
 export type LastEnd =

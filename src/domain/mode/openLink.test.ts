@@ -58,7 +58,7 @@ describe('unwrapLink', () => {
       raw: `${B}/score/dl_Fake-Score_0123`,
     });
     // A double-encoded `%` is not decoded again: it stays an illegal character.
-    expect(unwrapLink(`${B}/app/score#dl%255Fx`, HOSTS)).toEqual({ mode: null });
+    expect(unwrapLink(`${B}/app/score#dl%255Fx`, HOSTS)).toEqual({ mode: null, named: 'scoring' });
   });
 
   it('matches the host case-insensitively', () => {
@@ -69,34 +69,41 @@ describe('unwrapLink', () => {
 
   const good = b64url(qr);
   it.each([
-    ['no fragment', `${B}/app/stream`],
-    ['an empty fragment', `${B}/app/stream#`],
-    ['an unknown path', `${B}/app/x#${good}`],
-    ['an extra path segment', `${B}/app/stream/extra#${good}`],
-    ['a trailing slash', `${B}/app/stream/#${good}`],
-    ['a query string', `${B}/app/stream?x=1#${good}`],
-    ['the other build host', `https://seazn.club/app/stream#${good}`],
-    ['http', `http://stg.seazn.club/app/stream#${good}`],
-    ['userinfo', `https://a@stg.seazn.club/app/stream#${good}`],
-    ['a port', `https://stg.seazn.club:8443/app/stream#${good}`],
-    ['base64 that is not JSON', `${B}/app/stream#${b64url('hello there')}`],
-    ['base64 that is not JSON but starts with a brace', `${B}/app/stream#${b64url('{not json}')}`],
-    ['a stray fifth base64 character', `${B}/app/stream#${b64url('{"a": 1 }')}A`],
-    ['base64 that is a JSON array', `${B}/app/stream#${b64url('[1]')}`],
-    ['invalid base64 length', `${B}/app/stream#abcde`],
-    ['a fragment over 4096 characters', `${B}/app/score#dl_${'a'.repeat(4097)}`],
-    ['a /score/ link, not /app/', `${B}/score/${SCORE_TOKEN}`],
-    ['a path-like scoring fragment', `${B}/app/score#dl_a/../b`],
-    ['a second fragment', `${B}/app/score#dl_a#b`],
-    ['whitespace in the fragment', `${B}/app/day#md_a b`],
-    ['not a URL', 'hello'],
-    ['empty', ''],
-  ])('is foreign for %s', (_name, url) => {
-    expect(unwrapLink(url, HOSTS)).toEqual({ mode: null });
+    ['no fragment', `${B}/app/stream`, 'stream'],
+    ['an empty fragment', `${B}/app/stream#`, 'stream'],
+    ['an unknown path', `${B}/app/x#${good}`, null],
+    ['an extra path segment', `${B}/app/stream/extra#${good}`, null],
+    ['a trailing slash', `${B}/app/stream/#${good}`, null],
+    ['a query string', `${B}/app/stream?x=1#${good}`, null],
+    ['the other build host', `https://seazn.club/app/stream#${good}`, null],
+    ['http', `http://stg.seazn.club/app/stream#${good}`, null],
+    ['userinfo', `https://a@stg.seazn.club/app/stream#${good}`, null],
+    ['a port', `https://stg.seazn.club:8443/app/stream#${good}`, null],
+    ['base64 that is not JSON', `${B}/app/stream#${b64url('hello there')}`, 'stream'],
+    [
+      'base64 that is not JSON but starts with a brace',
+      `${B}/app/stream#${b64url('{not json}')}`,
+      'stream',
+    ],
+    ['a stray fifth base64 character', `${B}/app/stream#${b64url('{"a": 1 }')}A`, 'stream'],
+    ['base64 that is a JSON array', `${B}/app/stream#${b64url('[1]')}`, 'stream'],
+    ['invalid base64 length', `${B}/app/stream#abcde`, 'stream'],
+    ['a fragment over 4096 characters', `${B}/app/score#dl_${'a'.repeat(4097)}`, 'scoring'],
+    ['a /score/ link, not /app/', `${B}/score/${SCORE_TOKEN}`, null],
+    ['a path-like scoring fragment', `${B}/app/score#dl_a/../b`, 'scoring'],
+    ['a second fragment', `${B}/app/score#dl_a#b`, 'scoring'],
+    ['whitespace in the fragment', `${B}/app/day#md_a b`, 'matchday'],
+    ['not a URL', 'hello', null],
+    ['empty', '', null],
+  ])('is foreign for %s', (_name, url, named) => {
+    expect(unwrapLink(url, HOSTS)).toEqual({ mode: null, named });
   });
 
   it('is foreign for any host when none is built in', () => {
-    expect(unwrapLink(`${B}/app/day#${FIXTURE_DAY_TOKEN}`, [])).toEqual({ mode: null });
+    expect(unwrapLink(`${B}/app/day#${FIXTURE_DAY_TOKEN}`, [])).toEqual({
+      mode: null,
+      named: null,
+    });
   });
 
   it('never throws, on 200 random strings', () => {

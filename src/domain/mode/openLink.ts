@@ -4,11 +4,19 @@ import type { Mode } from '@/domain/mode/Mode';
 /**
  * What an Open in app link turned out to be (spec 2026-11-25 §4): the text a scan of the same code would have read,
  * for `recognise()` unchanged, or `mode: null` for anything that is not one of the three links on one of this build's
- * hosts. `raw` carries a credential: never log it, store it or put it in a record line.
+ * hosts (`named` is the mode the path names, when it is a link of this build, so the record can say which link was refused). `raw` carries a credential: never log it, store it or put it in a record line.
  */
-export type OpenLink = { readonly mode: Mode; readonly raw: string } | { readonly mode: null };
+export type OpenLink =
+  | { readonly mode: Mode; readonly raw: string }
+  | { readonly mode: null; readonly named: Mode | null };
 
-const FOREIGN: OpenLink = { mode: null };
+const FOREIGN: OpenLink = { mode: null, named: null };
+const foreignNamed = (named: Mode): OpenLink => ({ mode: null, named });
+const MODE_OF: Readonly<Record<string, Mode>> = {
+  stream: 'stream',
+  score: 'scoring',
+  day: 'matchday',
+};
 
 /** The three paths the web's button builds. */
 const APP_PATH = /^\/app\/(stream|score|day)$/;
@@ -25,22 +33,20 @@ const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789
 export function unwrapLink(url: string, hosts: readonly string[]): OpenLink {
   if (url.length === 0 || url.length > MAX_RAW_LENGTH + 64) return FOREIGN;
   const hash = url.indexOf('#');
-  if (hash < 0) return FOREIGN;
-  const head = url.slice(0, hash);
+  const head = hash < 0 ? url : url.slice(0, hash);
   const match = HTTPS_LINK.exec(head);
   if (match === null || head.includes('?')) return FOREIGN;
   const host = (match[1] ?? '').toLowerCase();
   const kind = APP_PATH.exec(match[2] ?? '')?.[1];
   if (kind === undefined || !hosts.includes(host)) return FOREIGN;
-  const fragment = decodeOnce(url.slice(hash + 1));
+  const named = MODE_OF[kind] ?? 'stream';
+  const fragment = hash < 0 ? null : decodeOnce(url.slice(hash + 1));
   if (fragment === null || fragment.length === 0 || fragment.length > MAX_RAW_LENGTH) {
-    return FOREIGN;
+    return foreignNamed(named);
   }
   if (kind === 'stream') return streamLink(fragment);
-  if (!TOKEN_CHARS.test(fragment)) return FOREIGN;
-  return kind === 'score'
-    ? { mode: 'scoring', raw: `https://${host}/score/${fragment}` }
-    : { mode: 'matchday', raw: `https://${host}/day/${fragment}` };
+  if (!TOKEN_CHARS.test(fragment)) return foreignNamed(named);
+  return { mode: named, raw: `https://${host}/${kind === 'score' ? 'score' : 'day'}/${fragment}` };
 }
 
 function decodeOnce(fragment: string): string | null {
@@ -52,9 +58,9 @@ function decodeOnce(fragment: string): string | null {
 }
 
 function streamLink(fragment: string): OpenLink {
-  if (!BASE64URL.test(fragment)) return FOREIGN;
+  if (!BASE64URL.test(fragment)) return foreignNamed('stream');
   const text = decodeBase64UrlText(fragment.replace(/=+$/, ''));
-  if (text === null || !text.startsWith('{') || !isJson(text)) return FOREIGN;
+  if (text === null || !text.startsWith('{') || !isJson(text)) return foreignNamed('stream');
   return { mode: 'stream', raw: text };
 }
 

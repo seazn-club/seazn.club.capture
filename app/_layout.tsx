@@ -5,6 +5,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { createNativePorts } from '@/hooks/nativePorts';
 import { useAppFonts } from '@/hooks/useAppFonts';
 import { useEngineFollow } from '@/hooks/useEngineFollow';
+import { useIncomingLink } from '@/hooks/useIncomingLink';
 import { useEngineSync } from '@/hooks/useEngineSync';
 import { LanguageProvider } from '@/hooks/useLanguage';
 import { routeTarget, useOrientationGate } from '@/hooks/useOrientationGate';
@@ -51,7 +52,7 @@ function Shell() {
   // Expo Router refuses navigation before the root navigator has mounted.
   const navigatorReady = useRootNavigationState()?.key !== undefined;
   // The gate decides where to land, then hides the splash (spec §4).
-  useReopenGate(navigatorReady);
+  const settled = useReopenGate(navigatorReady);
   // Native's word on the saved code, and the route rule (amendment, Process death and reopen).
   useEngineFollow();
   // Native's copy of the automatic switch and the language (amendment §2, P3).
@@ -63,11 +64,18 @@ function Shell() {
   const { card } = useOrientationGate(routeTarget(usePathname()));
   return (
     <ShellFrame>
+      {settled ? <IncomingLinks /> : null}
       <OrientationGate card={card}>
         <Stack screenOptions={{ headerShown: false, animation: 'none', gestureEnabled: false }} />
       </OrientationGate>
     </ShellFrame>
   );
+}
+
+/** Open in app (spec 2026-11-25): listens for tapped links once the gate has decided where the app is. */
+function IncomingLinks() {
+  useIncomingLink();
+  return null;
 }
 
 function BootFailureShown() {

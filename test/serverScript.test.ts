@@ -68,6 +68,8 @@ const NEVER_SAID: ReadonlySet<string> = new Set([
   'stopped',
   'unknown',
   'start-failed',
+  // The phone's own word for a 503 `unavailable` with Retry-After (start-drain-retry spec); the server says `unavailable`.
+  'start-draining',
 ]);
 const detail = (says: ServerSays) =>
   'lastEnd' in says ? says.lastEnd : 'refusal' in says ? says.refusal : '';
@@ -82,9 +84,9 @@ function schemaOf(path: 'beat' | 'start', status: number): [Record<string, unkno
 }
 
 describe('the server script (Task 27)', () => {
-  it('sweeps every ServerSays: 9 last ends, 6 refusals, 22 in all, 18 scripted and 4 refused', () => {
-    expect([LAST_ENDS.length, REFUSALS.length]).toEqual([9, 6]);
-    expect([EVERY_SAYING.length, scripted.length, refused.length]).toEqual([22, 18, 4]);
+  it('sweeps every ServerSays: 9 last ends, 7 refusals, 23 in all, 18 scripted and 5 refused', () => {
+    expect([LAST_ENDS.length, REFUSALS.length]).toEqual([9, 7]);
+    expect([EVERY_SAYING.length, scripted.length, refused.length]).toEqual([23, 18, 5]);
   });
 
   // N46 (court device check, 2026-11-19, web #1265): a court claim from a build below the server's court minimum, in

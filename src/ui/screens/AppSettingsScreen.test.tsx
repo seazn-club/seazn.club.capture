@@ -110,12 +110,14 @@ describe('the app’s Settings: rows, not paragraphs (owner, 2026-11-02)', () =>
       expect(screen.queryByText(new RegExp(t(key).slice(0, 20)))).toBeNull();
   });
 
-  it('every line of text is short: at most six words', async () => {
+  it('every line of text is short: at most six words, but the two capture hints', async () => {
     await renderSettings({ uploadCredential: createFakeUploadCredential(CREDENTIAL) });
+    const { t } = createTranslator('en');
+    const hints = [t('settings.matchSound.hint'), t('settings.constantBitrate.hint')];
     const texts = [...document.querySelectorAll('div')]
       .filter((node) => node.children.length === 0)
       .map((node) => node.textContent ?? '')
-      .filter((text) => text.trim() !== '');
+      .filter((text) => text.trim() !== '' && !hints.includes(text));
     expect(texts.length).toBeGreaterThan(8); // anti-vacuity: the leaves were read
     for (const text of texts)
       expect({ text, short: text.split(/\s+/).length <= 6 }).toEqual({ text, short: true });
@@ -295,12 +297,19 @@ describe('Live Stream, the capture choices', () => {
   const matchSound = () => screen.getByRole('switch', { name: /^Match sound/ });
   const constant = () => screen.getByRole('switch', { name: /^Constant bitrate/ });
 
-  it('match sound reads on, constant bitrate off, each named by its label alone, and each change is kept', async () => {
+  it('match sound reads on, constant bitrate off, each with the Live Stream hint under it, and each change is kept', async () => {
     const view = await renderSettings();
+    const { t } = createTranslator('en');
     expect(matchSound().getAttribute('aria-checked')).toBe('true');
-    expect(matchSound().getAttribute('aria-label')).toBe('Match sound');
+    expect(screen.getByText(t('settings.matchSound.hint'))).toBeTruthy();
+    expect(matchSound().getAttribute('aria-label')).toBe(
+      `Match sound · ${t('settings.matchSound.hint')}`,
+    );
     expect(constant().getAttribute('aria-checked')).toBe('false');
-    expect(constant().getAttribute('aria-label')).toBe('Constant bitrate');
+    expect(screen.getByText(t('settings.constantBitrate.hint'))).toBeTruthy();
+    expect(constant().getAttribute('aria-label')).toBe(
+      `Constant bitrate · ${t('settings.constantBitrate.hint')}`,
+    );
     fireEvent.click(matchSound());
     fireEvent.click(constant());
     await settle();
@@ -321,7 +330,9 @@ describe('Live Stream, the capture choices', () => {
     expect(constant().getAttribute('aria-checked')).toBe('false');
     expect(matchSound().getAttribute('aria-checked')).toBe('false');
     act(() => view.engine.scene('stopped'));
-    expect(constant().getAttribute('aria-label')).toBe('Constant bitrate');
+    expect(constant().getAttribute('aria-label')).toBe(
+      `Constant bitrate · ${createTranslator('en').t('settings.constantBitrate.hint')}`,
+    );
     fireEvent.click(constant());
     await settle();
     expect(constant().getAttribute('aria-checked')).toBe('true');

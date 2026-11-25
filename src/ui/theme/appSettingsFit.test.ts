@@ -49,6 +49,11 @@ function oneLine(what: string, string: string, width: number, measure: (s: strin
   });
 }
 
+/** Landscape: two halves side by side at 640 dp, the narrowest sideways, each a column of its own. */
+const HALF_ROW = (640 - 3 * space.md) / 2 - 2 * space.md;
+/** A hint is a helper that may wrap: the row is a minimum height and grows, so it must only never exceed this. */
+const HINT_LINES = 3;
+
 describe.each(LANGS)('the app’s Settings at 320 dp, in %s', (lang) => {
   it('the title is one line beside Back, and each section heading is one line', () => {
     // Back is a `touch` square, a gap of `space.md` after it (SubScreenHeader); no LIVE plate outside a mode.
@@ -143,6 +148,23 @@ describe.each(LANGS)('the app’s Settings at 320 dp, in %s', (lang) => {
       ROW - BESIDE_SWITCH,
       inGeist('controlSmall'),
     );
+  });
+
+  // Owner, 2026-11-25: the same hints as Live Stream's Settings. A hint wraps in the words column and the row grows
+  // with it, so the rule is a bounded line count, upright (320 dp) and sideways (a 640 dp half).
+  it('the capture hints wrap to at most three lines in the words column, upright and sideways', () => {
+    for (const [what, row] of [
+      ['upright', ROW],
+      ['sideways', HALF_ROW],
+    ] as const)
+      for (const key of ['settings.matchSound.hint', 'settings.constantBitrate.hint'] as const) {
+        const string = text(lang, key);
+        fits += 1;
+        expect(linesOf(string, row - BESIDE_SWITCH, inGeist('controlSmall'))).toBeLessThanOrEqual(
+          HINT_LINES,
+        );
+        expect({ what, key }).toBeTruthy();
+      }
   });
 
   it('Controls: its name fits on one line beside the pair, whose width is the segments’', () => {

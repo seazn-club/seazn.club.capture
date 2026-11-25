@@ -1,0 +1,21 @@
+{
+  "about": "Spec 2026-11-25-encoder-diagnostics: the encoder-format and encoder-dump lines exactly as native's SessionRecord writes them (EncoderLinesVectorsTest builds each from its case and compares), and as the web's record contract must admit them (encoderLines.contract.test.ts validates each against the vendored contracts/capture-record.v1.json). at is 2026-11-25T12:00:00.000Z, epoch 1795608000000.",
+  "lines": [
+    {
+      "why": "CBR on a High CABAC encoder, libx264's -profile:v high -level 4.1 -coder 1 parameter sets, with a codec name",
+      "line": "{\"at\":\"2026-11-25T12:00:00.000Z\",\"kind\":\"encoder-format\",\"mode\":\"cbr\",\"state\":\"high-4.1-cabac\",\"source\":\"c2.qti.avc.encoder\"}"
+    },
+    {
+      "why": "VBR with no parameter sets and no codec held: unread, and a null source",
+      "line": "{\"at\":\"2026-11-25T12:00:00.000Z\",\"kind\":\"encoder-format\",\"mode\":\"vbr\",\"state\":\"unread-unread-unread\",\"source\":null}"
+    },
+    {
+      "why": "a dump that wrote its ten seconds",
+      "line": "{\"at\":\"2026-11-25T12:00:00.000Z\",\"kind\":\"encoder-dump\",\"state\":\"written\",\"mode\":\"cbr\",\"count\":300,\"bytes\":3801234,\"ms\":9966}"
+    },
+    {
+      "why": "a dump whose file write threw",
+      "line": "{\"at\":\"2026-11-25T12:00:00.000Z\",\"kind\":\"encoder-dump\",\"state\":\"failed\",\"mode\":\"vbr\",\"count\":0,\"bytes\":0,\"ms\":0,\"error\":\"IOException\"}"
+    }
+  ]
+}

@@ -1016,7 +1016,7 @@ class GlueRulesTest {
     assertTrue("private val service: TSServiceInfo," in factory, "the factory is given the service")
     assertEquals(listOf("CompositeEndpoint(TsMuxer().apply { addService(service) }, sink)"), Regex("""CompositeEndpoint\([^\n]*""").findAll(factory).map { it.value }.toList())
     val adapter = glue("StreamerAdapter.kt")
-    assertTrue("CaptureEndpointFactory(tally, sink, RtmpDispatcher.create(), clock, SERVICE)" in adapter, "the adapter's one service")
+    assertTrue("CaptureEndpointFactory(tally, sink, RtmpDispatcher.create(), clock, SERVICE, encoder)" in adapter, "the adapter's one service")
     assertEquals(listOf("serviceInfo = SERVICE"), Regex("""serviceInfo = \w+""").findAll(adapter).map { it.value }.toList(), "the descriptor names the same")
   }
 
@@ -1260,5 +1260,44 @@ class GlueRulesTest {
   fun `M10 SoundMeter releases an AudioRecord whose start threw`() {
     val start = body(glue("SoundMeter.kt"), "fun start()")
     assertTrue(Regex("""catch \(e: Exception\) \{\s+it\.release\(\)""").containsMatchIn(start), start)
+  }
+
+  /**
+   * Spec 2026-11-25-encoder-diagnostics §3: the dump is built in one place, behind the dev twin's gate on the app's own
+   * package, so the production app (`com.seazn.capture`) never holds one; `EncoderDumpRulesTest` pins the gate itself,
+   * and `test/encoderDumpGate.test.ts` pins its package to `app.config.ts`'s dev twin.
+   */
+  @Test
+  fun `encoder diagnostics the dump is built once, only behind the dev twin's package gate`() {
+    val built = Regex("""(?<!class )\bEncoderDump\(""")
+    val sites = sources().flatMap { file -> file.readLines().filter { built.containsMatchIn(it) }.map { file.name to it.trim() } }
+    assertEquals(1, sites.size, "one construction: $sites")
+    val (name, line) = sites.single()
+    assertEquals("StreamerAdapter.kt", name)
+    assertTrue(
+      line.startsWith("private val dump = if (EncoderDumpRules.allowed(context.packageName)) EncoderDump(") && line.endsWith(") else null"),
+      line,
+    )
+    // The file name is written by the rules alone, in the dump's own folder: no other glue names a dump.
+    for (file in sources()) if (file.name != "EncoderDump.kt") assertFalse("encoder-dump-" in file.readText(), file.path)
+  }
+
+  /**
+   * Spec §2, §3: the tap never moves what goes to the network. The endpoint shows the frame to the tap and then writes it,
+   * unconditionally; the tap and the dump read the frame's buffers only through duplicates.
+   */
+  @Test
+  fun `encoder diagnostics the tap reads through duplicates and the frame is always written on`() {
+    val write = body(glue("CountingEndpoint.kt"), "override suspend fun write(")
+    assertTrue(write.indexOf("encoder.videoFrame(frame)") in 0 until write.indexOf("inner.write(frame, streamPid)"), write)
+    assertTrue(write.trimEnd('}').trimEnd().endsWith("inner.write(frame, streamPid)"), "the write is the body's last statement: $write")
+    val tap = glue("EncoderTap.kt")
+    assertTrue(Regex("""catch \(e: Exception\)""").containsMatchIn(body(tap, "fun videoFrame(")), "the tap never throws into the endpoint")
+    for (helper in listOf("private fun whole(", "fun remaining(")) assertTrue("buffer.duplicate()" in body(tap, helper), helper)
+    for ((name, text) in listOf("EncoderTap.kt" to tap, "EncoderDump.kt" to glue("EncoderDump.kt"))) {
+      val uses = Regex("""rawBuffer\b.{0,14}""").findAll(text).map { it.value }.toList()
+      assertTrue(uses.all { it.startsWith("rawBuffer.remaining()") || it.startsWith("rawBuffer)") }, "$name: $uses")
+    }
+    assertTrue("EncoderTap.remaining(frame.rawBuffer)" in glue("EncoderDump.kt"), "the dump copies through the duplicating helper")
   }
 }

@@ -146,3 +146,11 @@ None of these is provable in jsdom or on the JVM:
 4. A still picture with constant bitrate on climbs off the floor (N41).
 5. `antibanding` reads `auto` (or `50hz`) at each open, and a scene under mains lighting shows no banding.
 6. The first frame after a reconnect is an IDR (N51).
+
+## 8. CBR's cost at the relay (2026-11-25)
+
+The owner's A/B (record R-NBM8, NE2211, the same relay): VBR held the relay at 30 fps and 65 % CPU with nothing dropped;
+CBR at 27 fps average and 80 % CPU, the relay's ladder stepping to overlay_half_rate, 567 dropped. The phone's input
+frame rate was fine both times. Ruling (owner, 2026-11-25): "Keep it, investigate now". Constant bitrate stays as built;
+the investigation (an `encoder-format` line in every build, a dump of the encoded stream in the dev twin) is
+[encoder diagnostics](2026-11-25-encoder-diagnostics.md).

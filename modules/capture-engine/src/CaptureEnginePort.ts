@@ -49,6 +49,9 @@ export type PairIntent = {
   readonly court?: string;
   readonly language: string;
   readonly automatic: boolean;
+  /** Spec 2026-11-24-capture-tuning §2: the operator's saved capture choices, which the pairing starts with. */
+  readonly matchSound: boolean;
+  readonly constantBitrate: boolean;
   readonly claim: Claim;
   readonly environment: Environment;
 };
@@ -71,6 +74,10 @@ export type EngineIntent =
   | { readonly kind: 'reset' }
   | { readonly kind: 'setAutomatic'; readonly on: boolean }
   | { readonly kind: 'setLanguage'; readonly language: string }
+  /** Spec 2026-11-24-capture-tuning §2: any paired phase, on air included. */
+  | { readonly kind: 'setMatchSound'; readonly on: boolean }
+  /** Spec §2: native ignores it while a broadcast is held (Arming on). */
+  | { readonly kind: 'setConstantBitrate'; readonly on: boolean }
   | { readonly kind: 'switchCamera' };
 
 /**

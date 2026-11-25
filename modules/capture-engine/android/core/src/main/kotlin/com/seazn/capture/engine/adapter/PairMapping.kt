@@ -23,6 +23,9 @@ object PairMapping {
       language = WireValues.text(wire["language"]),
       // A4: the Settings switch is on unless the operator turned it off.
       automatic = WireValues.flag(wire["automatic"]) ?: true,
+      // Spec 2026-11-24-capture-tuning §2: match sound is on, and constant bitrate off, unless the operator chose.
+      matchSound = WireValues.flag(wire["matchSound"]) ?: true,
+      constantBitrate = WireValues.flag(wire["constantBitrate"]) ?: false,
       // Absent or unknown is `resume` (controller ruling, review 11 I1): JS always names the claim, so a
       // lost word is a bug, and it takes the safe side. A `resume` never takes the slot from a newer
       // pairing (amendment, _Pairing, takeover and rejoin_); only a scan's own `new` can.

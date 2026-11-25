@@ -61,7 +61,7 @@ names the gear "Settings", and it always shows, cards or not. Settings has two
 sections of short rows, a label and a value, with no explanatory sentences
 (owner, same day: "make sure that it is clean display instead of printing
 text"): General (the language, the battery row and the record row) and Live
-Stream (its two phone settings). This supersedes the gear on the Live Stream
+Stream (its four phone settings; match sound and constant bitrate joined on 2026-11-24). This supersedes the gear on the Live Stream
 tile that opened Stream Settings (R2 of the D3 findings design, owner,
 2026-10-11, made a gear on 2026-10-12) and the rule that hid it while a card
 stood above the tiles (the D3 fixes plan's ruling P6). The language picker

@@ -31,7 +31,7 @@ object Projection {
       camera = phase.camera,
       // Court stream Task 13 (P2): only Paired posts the hold's start, and an end keeps the pairing with it unanswered.
       // N48: a start with no answer, pending a beat, is still starting.
-      pairing = phase.pairing?.let { PairingView(it.name, it.automatic, it.waiting, starting = phase is Phase.Paired && it.starts.awaited) },
+      pairing = phase.pairing?.let { PairingView(it.name, it.automatic, it.waiting, starting = phase is Phase.Paired && it.starts.awaited, tuning = it.tuning) },
       broadcast = session?.let { broadcastView(it) },
       ready = ready(phase),
       refusal = phase.pairing?.refusal,

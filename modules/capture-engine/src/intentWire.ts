@@ -13,7 +13,7 @@ export function intentWire(intent: EngineIntent): Record<string, unknown> {
     case 'pair': {
       const { code, slot, token, codeUrl, heartbeatUrl, startUrl } = intent;
       const { venueTimezone, stageLabel, stageMatch, court, language, automatic, claim } = intent;
-      const { environment } = intent;
+      const { environment, matchSound, constantBitrate } = intent;
       return {
         kind: 'pair',
         code,
@@ -27,12 +27,18 @@ export function intentWire(intent: EngineIntent): Record<string, unknown> {
         ...(court === undefined ? {} : { court }),
         language,
         automatic,
+        matchSound,
+        constantBitrate,
         claim,
         environment,
       };
     }
     case 'setAutomatic':
       return { kind: 'setAutomatic', on: intent.on };
+    case 'setMatchSound':
+      return { kind: 'setMatchSound', on: intent.on };
+    case 'setConstantBitrate':
+      return { kind: 'setConstantBitrate', on: intent.on };
     case 'setLanguage':
       return { kind: 'setLanguage', language: intent.language };
     default:

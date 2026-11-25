@@ -224,6 +224,12 @@ class SnapshotWireTest {
           bare(SnapshotState.Paired, 1_790_000_010_000).copy(pairing = PairingView(name, true, waiting(), starting = true), ready = allReady, camera = CameraState.OWN)
         SnapshotWire.of(snapshot, PlatformFacts(survivesBackground = true), clean)
       },
+      // Spec 2026-11-24-capture-tuning §2: the operator's capture choices, each off its default.
+      "paired-tuned" to {
+        val tuned = PairingView(name, true, waiting(), tuning = Tuning(matchSound = false, constantBitrate = true))
+        val snapshot = bare(SnapshotState.Paired, 1_790_000_012_000).copy(pairing = tuned, ready = allReady, camera = CameraState.OWN)
+        SnapshotWire.of(snapshot, PlatformFacts(survivesBackground = true), clean)
+      },
     )
 
   /** `{ ...base, ...overrides }` when the case's value is an object; `null` stays `null`. */
@@ -287,7 +293,7 @@ class SnapshotWireTest {
   @Test
   fun `carries 3, 5, 6 each native snapshot becomes the shared wire`() {
     val cases = cases()
-    assertEquals(24, cases.size, "the vector file's twenty-four cases")
+    assertEquals(25, cases.size, "the vector file's twenty-five cases")
     assertEquals(cases.map { it.first }.toSet(), builders.keys, "one builder per case")
     for ((name, expected) in cases) assertJsonEquals(expected, JSONObject(WireJson.encode(builders.getValue(name)())), name)
   }
@@ -579,6 +585,8 @@ class SnapshotWireTest {
       "pairing.name.tokenTag" to { s -> s.pairingName { copy(tokenTag = "95e90931") } },
       "pairing.automatic" to { s -> s.pairing { copy(automatic = false) } },
       "pairing.starting" to { s -> s.pairing { copy(starting = false) } },
+      "pairing.tuning.matchSound" to { s -> s.pairing { copy(tuning = tuning.copy(matchSound = false)) } },
+      "pairing.tuning.constantBitrate" to { s -> s.pairing { copy(tuning = tuning.copy(constantBitrate = true)) } },
       "pairing.waiting.label" to { s -> s.waiting { copy(label = "Sample CC v Example Town") } },
       "pairing.waiting.venueTimezone" to { s -> s.waiting { copy(venueTimezone = "Europe/Amsterdam") } },
       "pairing.waiting.scheduledStartEpochS" to { s -> s.waiting { copy(scheduledStartEpochS = 1_790_003_660) } },

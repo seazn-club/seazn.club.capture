@@ -42,13 +42,16 @@ internal object Pairings {
           ),
         automatic = input.request.automatic,
         language = input.request.language,
+        tuning = Tuning(matchSound = input.request.matchSound, constantBitrate = input.request.constantBitrate),
         heartbeat = HeartbeatState(nextId = ids.beat),
         stopped = stopped,
         refused = setOfNotNull(stopped?.sid),
         starts = StartAsks(nextId = ids.start),
       )
     val asked = line("pair", "claim" to input.request.claim, "slot" to name.slot, "tokenTag" to name.tokenTag, "stopped" to (stopped != null))
-    return Step(Phase.Pairing(pairing, ids, phase.networkValidated, phase.micSilenced, phase.defaultNetwork), left + asked + Command.AskPermissions)
+    // Spec 2026-11-24-capture-tuning §3: the capture holds the pairing's choices before it opens for it.
+    val tune = Command.Tune(pairing.tuning)
+    return Step(Phase.Pairing(pairing, ids, phase.networkValidated, phase.micSilenced, phase.defaultNetwork), left + asked + tune + Command.AskPermissions)
   }
 
   fun permissions(phase: Phase, granted: Boolean, now: Now): Step {
@@ -119,6 +122,29 @@ internal object Pairings {
     val pairing = phase.pairing?.takeIf { phase !is Phase.Ended } ?: return SessionMachine.ignored(phase, "set-automatic")
     return Step(phase.withPairing(pairing.copy(automatic = on)), listOf(line("automatic", "on" to on)))
   }
+
+  /**
+   * Spec 2026-11-24-capture-tuning §2: match sound changes in any paired phase, on air included (owner, 2026-11-24),
+   * and the capture applies it to the held microphone at once. The same choice again is nothing.
+   */
+  fun matchSound(phase: Phase, on: Boolean): Step {
+    val pairing = phase.pairing?.takeIf { phase !is Phase.Ended } ?: return SessionMachine.ignored(phase, "set-match-sound")
+    if (pairing.tuning.matchSound == on) return Step(phase)
+    return tuned(phase, pairing, pairing.tuning.copy(matchSound = on), line("match-sound", "on" to on))
+  }
+
+  /**
+   * Spec §2, AGENTS §6: constant bitrate would change the encoder under a broadcast, so it is ignored while one is held,
+   * from Arming on; Settings says "After the broadcast". The same choice again is nothing.
+   */
+  fun constantBitrate(phase: Phase, on: Boolean): Step {
+    val pairing = phase.pairing?.takeIf { phase !is Phase.Ended && !phase.holdsBroadcast } ?: return SessionMachine.ignored(phase, "set-constant-bitrate")
+    if (pairing.tuning.constantBitrate == on) return Step(phase)
+    return tuned(phase, pairing, pairing.tuning.copy(constantBitrate = on), line("constant-bitrate", "on" to on))
+  }
+
+  private fun tuned(phase: Phase, pairing: PairingState, tuning: Tuning, said: Command): Step =
+    Step(phase.withPairing(pairing.copy(tuning = tuning)), listOf(said, Command.Tune(tuning)))
 
   fun language(phase: Phase, language: String): Step {
     val pairing = phase.pairing?.takeIf { phase !is Phase.Ended } ?: return SessionMachine.ignored(phase, "set-language")

@@ -57,6 +57,8 @@ const pairIntent = (code: string, slot: number, token: string): PairIntent => {
     venueTimezone: 'Europe/London',
     language: 'en',
     automatic: true,
+    matchSound: true,
+    constantBitrate: false,
     claim: 'new',
     environment: 'staging',
   };

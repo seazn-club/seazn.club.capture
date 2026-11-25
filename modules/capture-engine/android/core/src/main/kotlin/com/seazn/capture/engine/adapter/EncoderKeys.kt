@@ -1,5 +1,6 @@
 package com.seazn.capture.engine.adapter
 
+import com.seazn.capture.engine.core.BitrateMode
 import com.seazn.capture.engine.core.Side
 
 /** The encoder's fixed keys, and the encoded rotation. */
@@ -9,6 +10,16 @@ object EncoderKeys {
    * so every supported phone is asked. The glue uses the constant, and Task 36 checks it with javap.
    */
   val VIDEO: Map<String, Int> = mapOf("max-bframes" to 0)
+
+  /**
+   * Spec 2026-11-24-capture-tuning §3.2: [VIDEO], and `MediaFormat.KEY_BITRATE_MODE` (`"bitrate-mode"`) set to
+   * `BITRATE_MODE_CBR` (2) only when [mode] is CBR. CBR_FD (3) is not used: it lets the encoder drop frames to hold the
+   * rate, and a dropped frame is a stutter in a moving ball.
+   */
+  fun video(mode: BitrateMode): Map<String, Int> = if (mode == BitrateMode.CBR) VIDEO + (BITRATE_MODE to CBR) else VIDEO
+
+  const val BITRATE_MODE = "bitrate-mode"
+  const val CBR = 2
 
   /**
    * F-P5-6, A11: the side the accelerometer read when Armed turned to Connecting (`Command.Orient`),

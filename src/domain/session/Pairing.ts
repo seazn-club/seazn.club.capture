@@ -51,6 +51,12 @@ export type PairingInfo = {
   readonly slot: number;
   readonly tokenTag: string;
   readonly automatic: boolean;
+  /**
+   * The pairing's capture choices (spec 2026-11-24-capture-tuning §2), as native holds them: match sound on keeps the
+   * ground's sound with no speech processing; constant bitrate asks the encoder for CBR where it lists it.
+   */
+  readonly matchSound: boolean;
+  readonly constantBitrate: boolean;
   readonly label: string;
   readonly venueTimezone: string;
   readonly scheduledStart: Date | null;

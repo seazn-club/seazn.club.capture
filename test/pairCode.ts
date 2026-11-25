@@ -7,6 +7,8 @@ export function pairCode(engine: FakeCaptureEngine, saved: SavedCode): void {
   const intent = pairIntentFor(saved, {
     language: 'en',
     automatic: true,
+    matchSound: true,
+    constantBitrate: false,
     environment: 'staging',
     claim: 'new',
   });

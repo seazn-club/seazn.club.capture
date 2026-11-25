@@ -48,6 +48,9 @@ object SnapshotWire {
       "slot" to num(view.name.slot),
       "tokenTag" to view.name.tokenTag,
       "automatic" to view.automatic,
+      // Spec 2026-11-24-capture-tuning §2: the pairing's capture choices, which JS reconciles against.
+      "matchSound" to view.tuning.matchSound,
+      "constantBitrate" to view.tuning.constantBitrate,
       "label" to w.label,
       "venueTimezone" to w.venueTimezone,
       "scheduledStart" to w.scheduledStartEpochS?.let(::num),

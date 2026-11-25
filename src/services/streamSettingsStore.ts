@@ -9,11 +9,20 @@ export type ControlSide = 'left' | 'right';
 export type StreamSettings = {
   readonly side: ControlSide;
   readonly automatic: boolean;
+  /**
+   * Spec 2026-11-24-capture-tuning §2 (owner, 2026-11-24): match sound on keeps the ground's sound, with no speech
+   * processing; off turns speech processing on. Changeable on air.
+   */
+  readonly matchSound: boolean;
+  /** Spec §2: asks the encoder for constant bitrate where it lists it. Off by default; never changed on air. */
+  readonly constantBitrate: boolean;
 };
 
 export const DEFAULT_STREAM_SETTINGS: StreamSettings = {
   side: 'right',
   automatic: true,
+  matchSound: true,
+  constantBitrate: false,
 };
 export const SETTINGS_KEY = 'settings.stream';
 
@@ -97,8 +106,8 @@ function serialSaves(
   };
 }
 
-function encode({ side, automatic }: StreamSettings): string {
-  return JSON.stringify({ v: 3, side, automatic });
+function encode({ side, automatic, matchSound, constantBitrate }: StreamSettings): string {
+  return JSON.stringify({ v: 4, side, automatic, matchSound, constantBitrate });
 }
 
 async function read(kv: KeyValueStore, logger: Logger): Promise<StreamSettings> {
@@ -116,7 +125,8 @@ async function read(kv: KeyValueStore, logger: Logger): Promise<StreamSettings> 
 }
 
 /**
- * v3 whole. A v2 record has the score preview's `overlay` too, which is dropped (D2 §4.1), and a v1 record has no
+ * v4 whole (spec 2026-11-24-capture-tuning §2: the capture choices). A v3 record has none, so they read as their
+ * defaults. A v2 record has the score preview's `overlay` too, which is dropped (D2 §4.1), and a v1 record has no
  * `automatic` (on, its default), so an operator's side and automatic survive the upgrade. Anything else is
  * unreadable. A v1 or v2 record is read whatever its `overlay` says, but it must still have one, so a record that
  * never was v1 or v2 is not taken for one.
@@ -125,12 +135,24 @@ function decode(text: string): StreamSettings | null {
   try {
     const data: unknown = JSON.parse(text);
     if (typeof data !== 'object' || data === null) return null;
-    const { v, overlay, side, automatic } = data as Record<string, unknown>;
+    const { v, overlay, side, automatic, matchSound, constantBitrate } = data as Record<
+      string,
+      unknown
+    >;
     if (side !== 'left' && side !== 'right') return null;
-    if (v === 3) return typeof automatic === 'boolean' ? { side, automatic } : null;
+    const tuning = {
+      matchSound: DEFAULT_STREAM_SETTINGS.matchSound,
+      constantBitrate: DEFAULT_STREAM_SETTINGS.constantBitrate,
+    };
+    if (v === 4) {
+      if (typeof automatic !== 'boolean' || typeof matchSound !== 'boolean') return null;
+      if (typeof constantBitrate !== 'boolean') return null;
+      return { side, automatic, matchSound, constantBitrate };
+    }
+    if (v === 3) return typeof automatic === 'boolean' ? { side, automatic, ...tuning } : null;
     if (typeof overlay !== 'boolean') return null;
-    if (v === 1) return { side, automatic: DEFAULT_STREAM_SETTINGS.automatic };
-    if (v === 2 && typeof automatic === 'boolean') return { side, automatic };
+    if (v === 1) return { side, automatic: DEFAULT_STREAM_SETTINGS.automatic, ...tuning };
+    if (v === 2 && typeof automatic === 'boolean') return { side, automatic, ...tuning };
     return null;
   } catch {
     return null;

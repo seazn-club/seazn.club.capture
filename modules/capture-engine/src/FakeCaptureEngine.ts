@@ -233,6 +233,8 @@ export const FAKE_PAIRING: PairingInfo = {
   slot: 1,
   tokenTag: 'b24bb97b',
   automatic: true,
+  matchSound: true,
+  constantBitrate: false,
   label: 'Seazn XI v Fake CC',
   venueTimezone: 'Europe/London',
   scheduledStart: null,
@@ -615,6 +617,8 @@ export function createFakeCaptureEngine(now: () => number = Date.now): FakeCaptu
       // E2: a court's refused automatic start, as a beat would bring it; a fixture's pair holds none.
       autoRefusal: intent.court === undefined ? null : (waiting.autoRefusal ?? null),
       automatic: intent.automatic,
+      matchSound: intent.matchSound,
+      constantBitrate: intent.constantBitrate,
     };
     sceneUndo = {};
     if (permissions === 'hold') {
@@ -768,6 +772,17 @@ export function createFakeCaptureEngine(now: () => number = Date.now): FakeCaptu
       publish({ pairing: { ...pairing, automatic: on } });
   };
 
+  /**
+   * Spec 2026-11-24-capture-tuning §2, as native's `Pairings`: match sound in any paired phase, on air included;
+   * constant bitrate ignored while a broadcast is held.
+   */
+  const tune = (change: Partial<Pick<PairingInfo, 'matchSound' | 'constantBitrate'>>): void => {
+    const { pairing, state } = snapshot;
+    if (pairing === null || state.kind === 'ended') return;
+    if (change.constantBitrate !== undefined && BROADCAST.has(state.kind)) return;
+    publish({ pairing: { ...pairing, ...change } });
+  };
+
   const play = (scene: Scene): void => {
     cancelPending();
     const resting = scene.state.kind === 'idle';
@@ -821,6 +836,10 @@ export function createFakeCaptureEngine(now: () => number = Date.now): FakeCaptu
         return reset();
       case 'setAutomatic':
         return automatic(intent.on);
+      case 'setMatchSound':
+        return tune({ matchSound: intent.on });
+      case 'setConstantBitrate':
+        return tune({ constantBitrate: intent.on });
       case 'setLanguage':
       case 'switchCamera':
         return;

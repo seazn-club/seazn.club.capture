@@ -123,19 +123,86 @@ const SERVER_FACTS = {
 describe('Settings has no score preview control (D2 §4.1)', () => {
   // The four removed Score preview labels, one a language, copied here because the dictionaries no longer hold them.
   it.each(LANGS)(
-    '%s: the automatic switch is the only switch, and no copy names a score preview',
+    '%s: the switches are automatic, match sound and constant bitrate, and no copy names a score preview',
     (lang) => {
       renderSettings({ deviceLanguages: [lang] });
-      expect(screen.getAllByRole('switch')).toHaveLength(1);
-      // The positive pair: the one switch is the automatic one, named in this language.
-      const label = { en, es, fr, nl }[lang]['settings.automatic.label'];
-      expect(screen.getByRole('switch', { name: label })).toBeTruthy();
+      // The positive pair: the switches are the automatic one and the two capture choices (spec 2026-11-24-capture-
+      // tuning), named in this language.
+      const words = { en, es, fr, nl }[lang];
+      expect(screen.getAllByRole('switch').map((s) => s.getAttribute('aria-label'))).toEqual([
+        words['settings.automatic.label'],
+        words['settings.matchSound.label'],
+        words['settings.constantBitrate.label'],
+      ]);
       expect(screen.queryByText('Score preview')).toBeNull();
       expect(screen.queryByText('Vista previa del marcador')).toBeNull();
       expect(screen.queryByText('Aperçu du score')).toBeNull();
       expect(screen.queryByText('Scorevoorbeeld')).toBeNull();
     },
   );
+});
+
+/** Spec 2026-11-24-capture-tuning §2 (owner, 2026-11-24). */
+describe('Settings: match sound and constant bitrate', () => {
+  const matchSound = () => screen.getByRole('switch', { name: 'Match sound' });
+  const constant = () => screen.getByRole('switch', { name: 'Constant bitrate' });
+
+  it('match sound is on by default, with its line, and a press turns it off and saves it', async () => {
+    const view = renderSettings();
+    expect(matchSound().getAttribute('aria-checked')).toBe('true');
+    expect(screen.getByText(en['settings.matchSound.hint'])).toBeTruthy();
+    fireEvent.click(matchSound());
+    expect(matchSound().getAttribute('aria-checked')).toBe('false');
+    await waitFor(() => expect(view.kv.entries.get(SETTINGS_KEY)).toContain('"matchSound":false'));
+  });
+
+  it('constant bitrate is off by default, with its line, and two presses bring it back off', async () => {
+    const view = renderSettings();
+    expect(constant().getAttribute('aria-checked')).toBe('false');
+    expect(screen.getByText(en['settings.constantBitrate.hint'])).toBeTruthy();
+    fireEvent.click(constant());
+    expect(constant().getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(constant());
+    await waitFor(() =>
+      expect(view.kv.entries.get(SETTINGS_KEY)).toContain(
+        '"matchSound":true,"constantBitrate":false',
+      ),
+    );
+  });
+
+  // AGENTS §6: the protection is on the control. Match sound never stops the broadcast; constant bitrate would
+  // change the encoder under it, so it is disabled from Arming on with a one-line reason.
+  it('on air, match sound still works, and constant bitrate is disabled and says after the broadcast', async () => {
+    const view = renderSettings();
+    act(() => view.engine.scene('live'));
+    expect(screen.getByText('After the broadcast')).toBeTruthy();
+    expect(screen.queryByText(en['settings.constantBitrate.hint'])).toBeNull();
+    fireEvent.click(constant());
+    fireEvent.click(matchSound());
+    expect(constant().getAttribute('aria-checked')).toBe('false');
+    expect(matchSound().getAttribute('aria-checked')).toBe('false');
+    act(() => view.engine.scene('stopped'));
+    expect(screen.queryByText('After the broadcast')).toBeNull();
+    fireEvent.click(constant());
+    expect(constant().getAttribute('aria-checked')).toBe('true');
+    await waitFor(() =>
+      expect(view.kv.entries.get(SETTINGS_KEY)).toContain('"constantBitrate":true'),
+    );
+  });
+
+  it('reaches native through the shell sync: match sound on air, constant bitrate once off air', async () => {
+    const view = renderWithPorts(<SyncedSettings />);
+    view.navigation.go('stream');
+    view.navigation.go('streamSettings');
+    pairCode(view.engine, savedStreamCode());
+    act(() => view.engine.scene('live'));
+    await act(() => Promise.resolve());
+    fireEvent.click(matchSound());
+    await waitFor(() => expect(view.engine.getSnapshot().pairing?.matchSound).toBe(false));
+    act(() => view.engine.scene('paired-ready'));
+    fireEvent.click(constant());
+    await waitFor(() => expect(view.engine.getSnapshot().pairing?.constantBitrate).toBe(true));
+  });
 });
 
 describe('Settings (spec §4)', () => {
@@ -145,7 +212,9 @@ describe('Settings (spec §4)', () => {
     fireEvent.click(automaticSwitch());
     expect(automaticSwitch().getAttribute('aria-checked')).toBe('true');
     await waitFor(() =>
-      expect(view.kv.entries.get(SETTINGS_KEY)).toBe('{"v":3,"side":"right","automatic":true}'),
+      expect(view.kv.entries.get(SETTINGS_KEY)).toBe(
+        '{"v":4,"side":"right","automatic":true,"matchSound":true,"constantBitrate":false}',
+      ),
     );
   });
 
@@ -240,7 +309,9 @@ describe('Settings (spec §4)', () => {
     fireEvent.click(screen.getByRole('radio', { name: 'Left' }));
     expect(automaticSwitch().getAttribute('aria-checked')).toBe('false');
     await waitFor(() =>
-      expect(view.kv.entries.get(SETTINGS_KEY)).toBe('{"v":3,"side":"left","automatic":false}'),
+      expect(view.kv.entries.get(SETTINGS_KEY)).toBe(
+        '{"v":4,"side":"left","automatic":false,"matchSound":true,"constantBitrate":false}',
+      ),
     );
   });
 
@@ -252,7 +323,9 @@ describe('Settings (spec §4)', () => {
     fireEvent.click(automaticSwitch());
     expect(automaticSwitch().getAttribute('aria-checked')).toBe('false');
     await waitFor(() =>
-      expect(view.kv.entries.get(SETTINGS_KEY)).toBe('{"v":3,"side":"right","automatic":false}'),
+      expect(view.kv.entries.get(SETTINGS_KEY)).toBe(
+        '{"v":4,"side":"right","automatic":false,"matchSound":true,"constantBitrate":false}',
+      ),
     );
   });
 
@@ -834,7 +907,8 @@ describe('where Diagnostics sits (spec §6)', () => {
     expect(layoutOf()).toBe('portrait');
     fireEvent.click(automaticSwitch());
     fireEvent.click(screen.getByRole('radio', { name: 'Left' }));
-    const saved = '{"v":3,"side":"left","automatic":false}';
+    const saved =
+      '{"v":4,"side":"left","automatic":false,"matchSound":true,"constantBitrate":false}';
     await waitFor(() => expect(view.kv.entries.get(SETTINGS_KEY)).toBe(saved));
     for (const [width, height, layout] of [
       [844, 390, 'landscape'],
@@ -907,8 +981,13 @@ const cornersOf = (style: CSSStyleDeclaration) => [
 ];
 const ROUND = (dp: number) => [`${dp}px`, `${dp}px`, `${dp}px`, `${dp}px`];
 
-const SWITCHES = [['Start and stop automatically', 'start and stop automatically']] as const;
-/** The one switch, named once for the tests below that press it. */
+const SWITCHES = [
+  ['Start and stop automatically', 'start and stop automatically'],
+  // Spec 2026-11-24-capture-tuning §2: the capture choices wear the same row.
+  ['Match sound', 'match sound'],
+  ['Constant bitrate', 'constant bitrate'],
+] as const;
+/** The automatic switch, named once for the tests below that press it. */
 const AUTOMATIC = 'Start and stop automatically';
 const switchNamed = (name: string) => screen.getByRole('switch', { name });
 const trackOf = (name: string) => within(switchNamed(name)).getByTestId('switch-track');
@@ -956,7 +1035,9 @@ describe('the switch rows wear the board (filled row, pill switch)', () => {
     ['off', false],
   ] as const)('is a 40 x 24 pill with an 18 dp knob 3 dp in, %s', async (_state, on) => {
     renderSettings({
-      kvSeed: { [SETTINGS_KEY]: `{"v":3,"side":"right","automatic":${on}}` },
+      kvSeed: {
+        [SETTINGS_KEY]: `{"v":4,"side":"right","automatic":${on},"matchSound":${on},"constantBitrate":${on}}`,
+      },
     });
     await waitFor(() =>
       expect(switchNamed(AUTOMATIC).getAttribute('aria-checked')).toBe(String(on)),
@@ -1022,7 +1103,7 @@ describe('the switch rows wear the board (filled row, pill switch)', () => {
 
   it('is still one control: the whole row presses, and the switch is hidden from a screen reader', async () => {
     renderSettings();
-    expect(screen.getAllByRole('switch')).toHaveLength(1);
+    expect(screen.getAllByRole('switch')).toHaveLength(SWITCHES.length);
     for (const [name] of SWITCHES) {
       // Decorative: hidden from the accessibility tree, and no role of its own to be reached as a second control.
       const track = trackOf(name);
@@ -1038,9 +1119,9 @@ describe('the switch rows wear the board (filled row, pill switch)', () => {
   });
 
   it('checked the row, on and off (anti-vacuity)', () => {
-    // 1 row in the card test + 1 row x 2 states in the pill test, run before this one.
-    expect(SWITCHES).toHaveLength(1);
-    expect(switchesChecked).toBe(1 + 1 * 2);
+    // 3 rows in the card test + 3 rows x 2 states in the pill test, run before this one.
+    expect(SWITCHES).toHaveLength(3);
+    expect(switchesChecked).toBe(3 + 3 * 2);
   });
 });
 

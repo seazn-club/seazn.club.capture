@@ -143,6 +143,83 @@ describe('useEngineSync: the automatic switch (A4)', () => {
   });
 });
 
+/** Spec 2026-11-24-capture-tuning §2: native's copy of the capture choices follows JS's, constant bitrate off air only. */
+describe('useEngineSync: match sound and constant bitrate', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('sends nothing while native holds the saved choices', async () => {
+    const fakes = createFakePorts();
+    pairCode(fakes.engine, code);
+    await sync(fakes);
+    await flush(3_000);
+    expect(kinds(fakes)).toEqual(['pair']);
+  });
+
+  it('tells native each change while paired, once, and native holds it', async () => {
+    const fakes = createFakePorts();
+    pairCode(fakes.engine, code);
+    await sync(fakes);
+    act(() => void fakes.ports.streamSettings.set({ matchSound: false }));
+    act(() => void fakes.ports.streamSettings.set({ constantBitrate: true }));
+    await flush(3_000);
+    expect(fakes.engine.intents.slice(1)).toEqual([
+      { kind: 'setMatchSound', on: false },
+      { kind: 'setConstantBitrate', on: true },
+    ]);
+    expect(fakes.engine.getSnapshot().pairing).toMatchObject({
+      matchSound: false,
+      constantBitrate: true,
+    });
+    expect(readRecord(fakes.record)).toContainEqual(
+      expect.objectContaining({ event: 'intent.setMatchSound', fields: { action: 'off' } }),
+    );
+  });
+
+  // A cold start's pair sent before the store loaded carried the defaults.
+  it('brings native to the saved choices once the settings load', async () => {
+    const saved =
+      '{"v":4,"side":"right","automatic":true,"matchSound":false,"constantBitrate":true}';
+    const fakes = createFakePorts({ kvSeed: { [SETTINGS_KEY]: saved } });
+    pairCode(fakes.engine, code);
+    await sync(fakes);
+    await flush(3_000);
+    expect(fakes.engine.intents.slice(1)).toEqual([
+      { kind: 'setMatchSound', on: false },
+      { kind: 'setConstantBitrate', on: true },
+    ]);
+  });
+
+  // The owner's ruling: match sound changes on air; constant bitrate waits (native ignores it while a broadcast is held).
+  it('sends match sound on air, and holds constant bitrate back until the broadcast is over', async () => {
+    const fakes = createFakePorts();
+    pairCode(fakes.engine, code);
+    await sync(fakes);
+    act(() => fakes.engine.scene('live'));
+    act(() => void fakes.ports.streamSettings.set({ matchSound: false, constantBitrate: true }));
+    await flush(3_000);
+    expect(fakes.engine.intents.slice(1)).toEqual([{ kind: 'setMatchSound', on: false }]);
+    act(() => fakes.engine.scene('paired-ready'));
+    await flush(10);
+    expect(last(fakes)).toEqual({ kind: 'setConstantBitrate', on: true });
+    expect(fakes.engine.getSnapshot().pairing?.constantBitrate).toBe(true);
+  });
+
+  it('sends nothing with no pairing, nor once Ended', async () => {
+    const fakes = createFakePorts();
+    await sync(fakes);
+    act(() => void fakes.ports.streamSettings.set({ matchSound: false, constantBitrate: true }));
+    await flush(3_000);
+    expect(kinds(fakes)).toEqual([]);
+    pairCode(fakes.engine, code);
+    act(() => fakes.engine.scene('stopped'));
+    const sent = fakes.engine.intents.length;
+    act(() => void fakes.ports.streamSettings.set({ matchSound: true, constantBitrate: false }));
+    await flush(3_000);
+    expect(fakes.engine.intents.length).toBe(sent);
+  });
+});
+
 describe('useEngineSync: the notification’s language (P3)', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());

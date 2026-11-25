@@ -5,6 +5,8 @@ import com.seazn.capture.engine.adapter.CameraAvailability
 import com.seazn.capture.engine.adapter.EncoderKeys
 import com.seazn.capture.engine.adapter.PermanentPlatformFailure
 import com.seazn.capture.engine.adapter.StartEnd
+import com.seazn.capture.engine.core.Antibanding
+import com.seazn.capture.engine.core.BitrateMode
 import com.seazn.capture.engine.core.Command
 import com.seazn.capture.engine.core.ConnectFailure
 import com.seazn.capture.engine.core.Input
@@ -12,8 +14,11 @@ import com.seazn.capture.engine.core.PairRequest
 import com.seazn.capture.engine.core.RecordEntry
 import com.seazn.capture.engine.core.SessionMachine
 import com.seazn.capture.engine.core.Side
+import com.seazn.capture.engine.core.SpeechProcessing
+import com.seazn.capture.engine.core.SpeechState
 import com.seazn.capture.engine.core.Stabilisation
 import com.seazn.capture.engine.core.Stabiliser
+import com.seazn.capture.engine.core.Tuning
 import java.io.IOException
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicInteger
@@ -120,6 +125,24 @@ class CaptureRun(
   /** Spec 2026-11-24-camera-stabilisation §4: the camera and OIS state the last `stabilisation` line said, in this opening. */
   private var stabilisedLine: Pair<String, Stabiliser>? = null
 
+  /**
+   * Spec 2026-11-24-capture-tuning §3: the pairing's latest capture choices, from its last [Command.Tune], kept while
+   * closed too, so every build reads them: the camera-stabilisation spec's trap (§6) was a choice that reached no open.
+   */
+  private var tuning = Tuning.DEFAULT
+
+  /**
+   * Spec §3.1: the speech processing the last `speech-processing` line said, in this opening; null when unknown. An
+   * opening starts OFF, the microphone as built (no effects), so match sound on, the default, writes no line.
+   */
+  private var speechLine: SpeechState? = SpeechState.OFF
+
+  /** Spec §3.1: whether a speech call has answered in this opening; until one has, the connect asks again. */
+  private var speechSet = false
+
+  /** Spec §3.3: the camera and antibanding the last `antibanding` line said, in this opening. */
+  private var bandedLine: Pair<String, Antibanding>? = null
+
   fun open(asked: PairRequest) = serial.submit { opened(asked) }
 
   /** Re-review 2 (R2-M2 ruling): the unpair never waits behind a probe ([abandonProbe]). */
@@ -166,10 +189,13 @@ class CaptureRun(
   }
 
   private suspend fun build(asked: PairRequest, wanted: Int) {
-    when (val built = parts.build(wanted)) {
+    when (val built = parts.build(wanted, tuning)) {
       is Built.Ready -> {
         rotation = wanted
         micNoted = false
+        // Spec 2026-11-24-capture-tuning §3.2: a line only when the operator asked for constant bitrate (cbr or unsupported).
+        if (built.mode != BitrateMode.VBR) calls.line(built.mode.entry())
+        speak()
         watchOpens(built.cameraId)
       }
       is Built.Failed -> failed(asked, built)
@@ -199,7 +225,10 @@ class CaptureRun(
               openSeen()
               // Every camera source opened, a switch's, a reopen's and the slate's fall included; never a busy open's
               // false report, as a setting against a device not open opens it outside the take and the probe.
-              if (accepted) stabilise(id)
+              if (accepted) {
+                stabilise(id)
+                antiband(id)
+              }
             }
           }
         }
@@ -492,6 +521,9 @@ class CaptureRun(
     attempt = null
     rotation = null
     stabilisedLine = null
+    speechLine = SpeechState.OFF
+    speechSet = false
+    bandedLine = null
     parts.release()
   }
 
@@ -517,7 +549,62 @@ class CaptureRun(
     }
   }
 
+  /**
+   * Spec 2026-11-24-capture-tuning §3.3: camera [camera], just reported open, gets antibanding AUTO where it lists it,
+   * at the same gate as OIS (never a busy open's false report). One line when the camera or the state read differs from
+   * the last said in this opening; a throw is one `capture-call-failed` line, never the session's failure.
+   */
+  private suspend fun antiband(camera: String) {
+    try {
+      val state = parts.antibanding(camera) ?: return
+      if (bandedLine == camera to state) return
+      bandedLine = camera to state
+      calls.line(state.entry())
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      bandedLine = null
+      calls.line(RecordEntry("capture-call-failed", listOf("action" to "antibanding", "error" to e.javaClass.simpleName)))
+    }
+  }
+
+  /**
+   * Spec §3: the pairing's choices, held or not. Match sound reaches a held microphone at once, on air included (owner,
+   * 2026-11-24), with no stop or start. Constant bitrate is the encoder's, set only at a build: over a held capture
+   * with nothing on air it rebuilds it, and under an attempt it waits for the next build (the machine ignores it while
+   * a broadcast is held, so only a re-pair's could come then).
+   */
+  private suspend fun tune(next: Tuning) {
+    val before = tuning
+    tuning = next
+    if (!parts.held) return
+    if (before.matchSound != next.matchSound) speak()
+    if (before.constantBitrate != next.constantBitrate && attempt == null) rebuild("tuning")
+  }
+
+  /**
+   * Spec §3.1: speech processing as [tuning] wants it on the held microphone. One line when the state differs from the
+   * last said in this opening, which starts OFF. Null from the parts (the recording's session not known yet) says nothing, and the
+   * connect asks again ([connect]). A throw is one `capture-call-failed` line and leaves the state unknown.
+   */
+  private suspend fun speak() {
+    try {
+      val state = parts.speech(SpeechProcessing.wanted(tuning)) ?: return
+      speechSet = true
+      if (state == speechLine) return
+      speechLine = state
+      calls.line(SpeechProcessing.entry(state))
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      speechLine = null
+      speechSet = false
+      calls.line(RecordEntry("capture-call-failed", listOf("action" to "speech-processing", "error" to e.javaClass.simpleName)))
+    }
+  }
+
   private suspend fun run(command: Command) {
+    if (command is Command.Tune) return tune(command.tuning)
     if (!parts.held) return unheld(command)
     when (command) {
       is Command.Orient -> orient(command.side)
@@ -633,6 +720,7 @@ class CaptureRun(
     if (!started) return calls.report(Input.ConnectFailed(id, ConnectFailure.OTHER, "srt url does not parse"))
     signals.connected(id)?.let(calls.report)
     noteMicSession()
+    if (!speechSet) speak() // spec §3.1: a recording whose session the build could not read is set now
     watchClose(id)
   }
 

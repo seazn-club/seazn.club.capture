@@ -26,7 +26,13 @@ type Input = {
   readonly qr: { readonly code: string; readonly slot: number; readonly tok: string };
   /** The server's answer to the scan's `GET code` (capture-descriptor.v1, a waiting code). */
   readonly answer: Record<string, unknown>;
-  readonly facts: { readonly language: string; readonly automatic: boolean; readonly claim: Claim };
+  readonly facts: {
+    readonly language: string;
+    readonly automatic: boolean;
+    readonly matchSound: boolean;
+    readonly constantBitrate: boolean;
+    readonly claim: Claim;
+  };
   /**
    * The cold-start re-pair pairs from the code read back from the store, not the one in hand
    * (review C4c M-5): it goes through the store's own encode and decode first.
@@ -72,7 +78,13 @@ const INPUTS: Readonly<Record<string, Input>> = {
       'https://stg.seazn.club/api/v1/capture/codes/fx42hmnp7k2q/start',
       QF,
     ),
-    facts: { language: 'en', automatic: true, claim: 'new' },
+    facts: {
+      language: 'en',
+      automatic: true,
+      matchSound: true,
+      constantBitrate: false,
+      claim: 'new',
+    },
     fromStore: false,
   },
   'production, the cold-start re-pair': {
@@ -84,7 +96,13 @@ const INPUTS: Readonly<Record<string, Input>> = {
       'https://seazn.club/api/v1/capture/codes/0123456789ab/beats',
       'https://seazn.club/api/v1/capture/codes/0123456789ab/start',
     ),
-    facts: { language: 'nl', automatic: false, claim: 'resume' },
+    facts: {
+      language: 'nl',
+      automatic: false,
+      matchSound: false,
+      constantBitrate: true,
+      claim: 'resume',
+    },
     fromStore: true,
   },
   // Review Focus 2: process death on a court phone, then the cold-start re-pair before any GET. The court read at the
@@ -100,7 +118,13 @@ const INPUTS: Readonly<Record<string, Input>> = {
       undefined,
       COURT,
     ),
-    facts: { language: 'es', automatic: true, claim: 'resume' },
+    facts: {
+      language: 'es',
+      automatic: true,
+      matchSound: true,
+      constantBitrate: true,
+      claim: 'resume',
+    },
     fromStore: true,
   },
 };

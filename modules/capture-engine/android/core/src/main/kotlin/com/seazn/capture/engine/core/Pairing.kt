@@ -231,6 +231,10 @@ class PairRequest(
    * any GET. Not a secret. Held to 1 to 80 characters by [problems]: a malformed court refuses the pair, never no court.
    */
   val court: String? = null,
+  /** Spec 2026-11-24-capture-tuning §2: the operator's match sound, on unless they turned it off. */
+  val matchSound: Boolean = true,
+  /** Spec §2: the operator's constant bitrate, off unless they turned it on. */
+  val constantBitrate: Boolean = false,
 ) {
   val name: PairingName
     get() = PairingName(code, slot, TokenTag.of(token))

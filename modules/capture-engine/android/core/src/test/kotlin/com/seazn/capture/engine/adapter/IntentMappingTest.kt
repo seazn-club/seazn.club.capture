@@ -30,6 +30,17 @@ class IntentMappingTest {
     assertEquals(Input.SetAutomatic(false), input("kind" to "setAutomatic", "on" to false))
     assertEquals(Input.SetAutomatic(true), input("kind" to "setAutomatic", "on" to true))
     assertEquals(Input.SetLanguage("nl"), input("kind" to "setLanguage", "language" to "nl"))
+    assertEquals(Input.SetMatchSound(false), input("kind" to "setMatchSound", "on" to false))
+    assertEquals(Input.SetMatchSound(true), input("kind" to "setMatchSound", "on" to true))
+    assertEquals(Input.SetConstantBitrate(true), input("kind" to "setConstantBitrate", "on" to true))
+    assertEquals(Input.SetConstantBitrate(false), input("kind" to "setConstantBitrate", "on" to false))
+  }
+
+  @Test
+  fun `a tuning intent with no flag is no input - the pairing keeps its choice`() {
+    assertEquals(null, input("kind" to "setMatchSound"))
+    assertEquals(null, input("kind" to "setMatchSound", "on" to "false"))
+    assertEquals(null, input("kind" to "setConstantBitrate", "on" to 1.0))
   }
 
   /** Every value differs from its default, so a request built from anything but this wire shows. */

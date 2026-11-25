@@ -386,7 +386,8 @@ class PairingTest {
     val rig = MachineRig().apply { permissions = null }
     rig.send(Input.Pair(Configs.pairRequest(), Configs.PHONE, null))
     val commands = rig.send(Input.Pair(Configs.pairRequest(slot = 2), Configs.PHONE, null))
-    assertEquals(listOf(Command.AskPermissions), commands.filterNot { it is Command.Record })
+    // Spec 2026-11-24-capture-tuning §3: the new pairing's choices go to the capture before it opens for it.
+    assertEquals(listOf(Command.Tune(Tuning.DEFAULT), Command.AskPermissions), commands.filterNot { it is Command.Record })
     assertEquals("re-pair", rig.records("unpaired").single().field("reason"))
   }
 

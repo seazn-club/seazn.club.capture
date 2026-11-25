@@ -2,10 +2,14 @@ package com.seazn.capture.engine.capture.run
 
 import com.seazn.capture.engine.adapter.CameraAvailability
 import com.seazn.capture.engine.adapter.CameraFailures
+import com.seazn.capture.engine.core.Antibanding
+import com.seazn.capture.engine.core.BitrateMode
 import com.seazn.capture.engine.core.Command
 import com.seazn.capture.engine.core.Input
 import com.seazn.capture.engine.core.PairRequest
 import com.seazn.capture.engine.core.RecordEntry
+import com.seazn.capture.engine.core.SpeechState
+import com.seazn.capture.engine.core.Tuning
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -80,11 +84,18 @@ class FakeParts : CaptureParts {
   /** The held build's camera, as the adapter keeps its `cameraId`. */
   private var camera: String? = null
 
-  override suspend fun build(rotation: Int): Built {
+  /** Spec 2026-11-24-capture-tuning §3: the choices each build was given, in order. */
+  val builtWith = mutableListOf<Tuning>()
+
+  /** Spec §3.2: whether the encoder StreamPack picks lists CBR; null when none is found. */
+  var cbrSupported: Boolean? = true
+
+  override suspend fun build(rotation: Int, tuning: Tuning): Built {
     log += "build $rotation"
+    builtWith += tuning
     delay(STEP_MS)
     log += "build done"
-    val built = builds.removeFirstOrNull() ?: Built.Ready("0")
+    val built = builds.removeFirstOrNull() ?: Built.Ready("0", BitrateMode.of(tuning.constantBitrate, cbrSupported))
     held = built is Built.Ready
     camera = (built as? Built.Ready)?.cameraId
     return built
@@ -286,6 +297,45 @@ class FakeParts : CaptureParts {
   override suspend fun stabilise(cameraId: String) {
     stabiliseFailure?.let { throw it }
     stabilised += cameraId
+  }
+
+  /** Spec §3.1: each speech processing asked of a held microphone, on or off, in order. */
+  val speeches = mutableListOf<Boolean>()
+
+  /** Spec §3.1: whether StreamPack's microphone session can be read; false is the adapter's null. */
+  var speechKnown = true
+
+  /** Spec §3.1: whether the phone has the speech effects. */
+  var speechAvailable = true
+
+  /** Spec §3.1: a speech change that throws this. */
+  var speechFailure: Exception? = null
+
+  override suspend fun speech(on: Boolean): SpeechState? {
+    if (!held || !speechKnown) return null
+    speechFailure?.let { throw it }
+    speeches += on
+    return when {
+      !on -> SpeechState.OFF
+      speechAvailable -> SpeechState.ON
+      else -> SpeechState.UNAVAILABLE
+    }
+  }
+
+  /** Spec §3.3: what each camera's result reads after AUTO, by id; absent is a camera whose source is not held now. */
+  val antibands = mutableMapOf("0" to Antibanding.AUTO, "1" to Antibanding.UNAVAILABLE)
+
+  /** Spec §3.3: an antibanding setter that throws this. */
+  var antibandFailure: Exception? = null
+
+  /** Spec §3.3: each camera antibanding was asked of, in order. */
+  val antibanded = mutableListOf<String>()
+
+  override suspend fun antibanding(cameraId: String): Antibanding? {
+    val state = antibands[cameraId] ?: return null
+    antibandFailure?.let { throw it }
+    antibanded += cameraId
+    return state
   }
 
   companion object {

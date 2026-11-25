@@ -841,12 +841,33 @@ class GlueRulesTest {
    * signal is the source's previewing or streaming flow (3.2.1, javap); the readiness reads the open's outcome;
    * and the preview's open failure, which 3.2.1's PreviewView hands its listener, reaches the capture.
    */
+  /** Spec 2026-11-24-capture-tuning §3: the glue's half of the operator's capture choices and the antibanding. */
+  @Test
+  fun `capture tuning - a microphone with no effects of StreamPack's, CBR only where the encoder lists it, AUTO antibanding`() {
+    val adapter = glue("StreamerAdapter.kt")
+    assertTrue(
+      "audioSourceFactory = MicrophoneSourceFactory(MediaRecorder.AudioSource.CAMCORDER, emptySet())" in adapter,
+      "CAMCORDER with none of StreamPack's default effects: match sound is the ground's sound",
+    )
+    assertTrue("val mode = BitrateMode.of(constant, if (constant) EncoderModes.cbrSupported(this) else null)" in adapter, "CBR only where listed")
+    assertTrue("EncoderKeys.video(mode).forEach { (key, value) -> setInteger(key, value) }" in adapter, "the keys follow the mode")
+    assertFalse("EncoderKeys.VIDEO.forEach" in adapter, "never the fixed keys alone")
+    assertTrue("speechEffects.release()" in adapter.substringAfter("override suspend fun release()").substringBefore("override fun beforeConnect"), "the release drops our effects")
+    assertTrue("heldCamera(cameraId)?.let { Antibands.set(it) }" in adapter, "only the source held now, of that id")
+    val modes = glue("EncoderModes.kt")
+    assertTrue("isBitrateModeSupported(EncoderCapabilities.BITRATE_MODE_CBR)" in modes)
+    assertTrue("list.findEncoderForFormat(format)" in modes, "the encoder StreamPack's own lookup would pick")
+    val bands = glue("Antibands.kt")
+    assertTrue("withTimeoutOrNull(RESULT_MS) { settings.applyRepeatingSessionSync() }" in bands, "bounded: a stalled session never holds the queue")
+    assertTrue("if (!Antibanding.autoListed(available)) return Antibanding.UNAVAILABLE" in bands, "nothing set on a camera without AUTO")
+  }
+
   @Test
   fun `I-2 M-4 the glue holds no camera before StreamPack opens it, announces each camera source, and reads its open`() {
     val adapter = glue("StreamerAdapter.kt")
     assertEquals(listOf("cameras.held(null)"), Regex("""cameras\.held\([^)]*\)""").findAll(adapter).map { it.value }.toList(), "only the release sets what is held")
     assertFalse("sessionStarted" in adapter, "the run starts the camera's session, at the build")
-    assertEquals(1, Regex("""return Built\.Ready\(id\)""").findAll(adapter).count(), "the build names the camera it asked for")
+    assertEquals(1, Regex("""return Built\.Ready\(id\b""").findAll(adapter).count(), "the build names the camera it asked for")
     val sources = Regex("""setVideoSource\(CameraSourceFactory\((\w+)\)\)""").findAll(adapter).toList()
     assertEquals(3, sources.size, "the switch, the reopen and the slate's end")
     for (source in sources) {

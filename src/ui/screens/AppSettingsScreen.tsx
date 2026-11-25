@@ -28,7 +28,7 @@ type AppSettingsScreenProps = {
  * its name at the left and its value or control at the right, in two grouped cards under short headings.
  *
  * General is what belongs to the phone and the app: Language, Battery (Android only), Share record and, with its switch
- * on, Send record to Seazn. Live Stream is the two phone settings of the viewfinder: the automatic switch and the side
+ * on, Send record to Seazn. Live Stream is the four phone settings: the automatic switch, match sound, constant bitrate and the side
  * of the controls. The Live Stream route's own Settings (with Diagnostics and the on-air rules) is unchanged.
  *
  * Portrait is one scrolling column. Landscape is two halves, each scrolling on its own: General at the left, Live Stream
@@ -94,7 +94,7 @@ function GeneralSection({ recordSend }: { recordSend: boolean }) {
   );
 }
 
-/** The two phone settings, the licences after them, and the one line for a refused save. */
+/** The four phone settings, the licences after them, and the one line for a refused save. */
 function StreamSection() {
   const { t } = useT();
   const { settings, change, saveFailed } = useStreamSettings();
@@ -112,6 +112,7 @@ function StreamSection() {
           checked={settings.automatic}
           onPress={toggleAutomatic}
         />
+        <CaptureRows />
         <SettingsRow
           label={sideLabel}
           right={
@@ -123,6 +124,39 @@ function StreamSection() {
       <SettingsGroup>
         <LicencesRow />
       </SettingsGroup>
+    </>
+  );
+}
+
+/**
+ * Spec 2026-11-24-capture-tuning §2: match sound and constant bitrate, as rows. Constant bitrate is off while a
+ * broadcast is held, its helper saying when it can change. A fragment, so the group draws a hairline between each.
+ */
+function CaptureRows() {
+  const { t } = useT();
+  const { settings, change, held } = useStreamSettings();
+  const toggleMatchSound = useCallback(
+    () => change({ matchSound: !settings.matchSound }),
+    [change, settings.matchSound],
+  );
+  const toggleConstant = useCallback(
+    () => change({ constantBitrate: !settings.constantBitrate }),
+    [change, settings.constantBitrate],
+  );
+  return (
+    <>
+      <SettingsRow
+        label={t('settings.matchSound.label')}
+        checked={settings.matchSound}
+        onPress={toggleMatchSound}
+      />
+      <SettingsRow
+        label={t('settings.constantBitrate.label')}
+        checked={settings.constantBitrate}
+        onPress={toggleConstant}
+        disabled={held}
+        helper={held ? t('settings.constantBitrate.onAir') : null}
+      />
     </>
   );
 }

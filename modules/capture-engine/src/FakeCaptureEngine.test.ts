@@ -430,6 +430,21 @@ describe('the paired phase', () => {
     expect(snapshot().pairing?.automatic).toBe(true);
   });
 
+  // Spec 2026-11-24-capture-tuning §2: the pair's choices, then each change, as native's Pairings answers them.
+  it('pairs with the intent’s capture choices, echoes match sound on air, and ignores constant bitrate there', () => {
+    engine.send({ kind: 'setMatchSound', on: false });
+    expect(snapshot().pairing).toBeNull();
+    pair({ ...KIT_CODE_A, matchSound: false, constantBitrate: true });
+    expect(snapshot().pairing).toMatchObject({ matchSound: false, constantBitrate: true });
+    engine.send({ kind: 'setConstantBitrate', on: false });
+    expect(snapshot().pairing?.constantBitrate).toBe(false);
+    engine.send({ kind: 'start' });
+    wait(1000);
+    engine.send({ kind: 'setMatchSound', on: true });
+    engine.send({ kind: 'setConstantBitrate', on: true });
+    expect(snapshot().pairing).toMatchObject({ matchSound: true, constantBitrate: false });
+  });
+
   it('hears nothing once ended: no word moves an Ended engine', () => {
     onAirLive();
     engine.send({ kind: 'stop' });

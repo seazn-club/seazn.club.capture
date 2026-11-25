@@ -13,6 +13,9 @@ import { clearingUnderWay } from '@/hooks/useUnpair';
 export type PairFacts = {
   readonly language: string;
   readonly automatic: boolean;
+  /** Spec 2026-11-24-capture-tuning §2: the saved capture choices, which the new pairing starts with. */
+  readonly matchSound: boolean;
+  readonly constantBitrate: boolean;
   readonly environment: Environment;
   readonly claim: Claim;
 };
@@ -55,9 +58,12 @@ export function usePairing(): (saved: SavedCode, claim: Claim) => void {
   const { lang } = useLanguage();
   return useCallback(
     (saved: SavedCode, claim: Claim) => {
+      const { automatic, matchSound, constantBitrate } = streamSettings.getSnapshot();
       const facts = {
         language: lang,
-        automatic: streamSettings.getSnapshot().automatic,
+        automatic,
+        matchSound,
+        constantBitrate,
         environment,
         claim,
       };

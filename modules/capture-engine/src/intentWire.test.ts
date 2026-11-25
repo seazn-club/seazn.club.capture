@@ -12,6 +12,8 @@ const KINDS: Readonly<Record<EngineIntent['kind'], true>> = {
   reset: true,
   setAutomatic: true,
   setLanguage: true,
+  setMatchSound: true,
+  setConstantBitrate: true,
   switchCamera: true,
 };
 
@@ -29,6 +31,14 @@ const OTHERS = [
     { kind: 'setLanguage', language: 'nl' },
     { kind: 'setLanguage', language: 'nl' },
   ],
+  [
+    { kind: 'setMatchSound', on: false },
+    { kind: 'setMatchSound', on: false },
+  ],
+  [
+    { kind: 'setConstantBitrate', on: true },
+    { kind: 'setConstantBitrate', on: true },
+  ],
 ] as const;
 
 describe('the intents as native reads them (Task 11)', () => {
@@ -44,6 +54,8 @@ describe('the intents as native reads them (Task 11)', () => {
       venueTimezone: 'Europe/London',
       language: 'fr',
       automatic: false,
+      matchSound: false,
+      constantBitrate: true,
       claim: 'resume',
       environment: 'staging',
     });
@@ -86,10 +98,10 @@ describe('the intents as native reads them (Task 11)', () => {
   });
 
   // The table's size, so a kind dropped from it reds here rather than going untested (PV12).
-  it('covers all 8 intent kinds: pair above, the other 7 below', () => {
+  it('covers all 10 intent kinds: pair above, the other 9 below', () => {
     const kinds = ['pair', ...OTHERS.map(([intent]) => intent.kind)];
     expect(kinds.sort()).toEqual(Object.keys(KINDS).sort());
-    expect(kinds).toHaveLength(8);
+    expect(kinds).toHaveLength(10);
   });
 
   it.each(OTHERS)('sends %o as %o', (intent, wire) => {

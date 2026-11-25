@@ -132,6 +132,19 @@ describe.each(LANGS)('the app’s Settings at 320 dp, in %s', (lang) => {
     );
   });
 
+  // Spec 2026-11-24-capture-tuning §2: each capture choice's name beside its switch, and constant bitrate's on-air helper
+  // in the words column the switch narrows.
+  it('Match sound and Constant bitrate: each name, and the on-air helper, fit on one line beside the switch', () => {
+    for (const key of ['settings.matchSound.label', 'settings.constantBitrate.label'] as const)
+      oneLine(key, text(lang, key), ROW - BESIDE_SWITCH, inGeist('controlInk'));
+    oneLine(
+      'constant bitrate on air',
+      text(lang, 'settings.constantBitrate.onAir'),
+      ROW - BESIDE_SWITCH,
+      inGeist('controlSmall'),
+    );
+  });
+
   it('Controls: its name fits on one line beside the pair, whose width is the segments’', () => {
     const segment = (key: 'settings.side.rowLeft' | 'settings.side.rowRight') =>
       Math.max(layout.segmentMin, inGeist('control')(text(lang, key)) + 2 * layout.segmentPadX);

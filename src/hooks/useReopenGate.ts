@@ -9,6 +9,7 @@ import {
   type ReopenTarget,
   type SavedState,
 } from '@/domain/mode/reopen';
+import { pendingLink } from '@/hooks/pendingLink';
 import { selectEngineStatus, selectUnpairedName } from '@/hooks/engineSelectors';
 import { usePairing } from '@/hooks/usePairing';
 import { usePorts } from '@/hooks/usePorts';
@@ -56,7 +57,10 @@ export function useReopenGate(navigatorReady: boolean): boolean {
   useEffect(
     () =>
       foreground.subscribe(() => {
-        if (!scanFlight.appReturned() && decided.current) settle(false);
+        // Both are asked on every return, so each claim is spent: a scan's, and an opened link's (it went Home itself).
+        const scans = scanFlight.appReturned();
+        const links = pendingLink.claimsReturn();
+        if (!scans && !links && decided.current) settle(false);
       }),
     [foreground, settle, scanFlight],
   );
@@ -138,7 +142,11 @@ function useSettle(): (coldStart: boolean) => void {
         (target.go === 'stream' && isStreamSubRoute(here)) ||
         (target.go === 'stream' && here === 'settings' && facts.engine === 'paired') ||
         (target.go === 'home' && isHomeSubRoute(here));
-      if (!staying) navigation.go(target.go);
+      // A link parked for Home is stale once the app is sent elsewhere: it never acts on a later arrival at Home.
+      if (!staying) {
+        if (target.go !== 'home') pendingLink.clear();
+        navigation.go(target.go);
+      }
     },
     [modeStore, clock, engine, navigation, logger, unpair, pair, probeFlight, matchDayStore],
   );

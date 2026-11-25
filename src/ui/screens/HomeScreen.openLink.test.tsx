@@ -1,8 +1,9 @@
-import { act, cleanup, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { encodeSavedCode } from '@/domain/mode/savedCode';
 import { pendingLink } from '@/hooks/pendingLink';
 import { useIncomingLink } from '@/hooks/useIncomingLink';
+import { useReopenGate } from '@/hooks/useReopenGate';
 import en from '@/i18n/en.json';
 import es from '@/i18n/es.json';
 import fr from '@/i18n/fr.json';
@@ -15,7 +16,7 @@ import { dayLink, FIXTURE_DAY_TOKEN } from '../../../test/fixtures/dayCode';
 import { savedStreamCode } from '../../../test/fixtures/savedStream';
 import { captureRaw, epochSeconds, FIXTURE_TOKEN } from '../../../test/fixtures/wire';
 import { pairCode } from '../../../test/pairCode';
-import { renderWithPorts } from '../../../test/renderWithPorts';
+import { renderWithPorts, wrapperFor } from '../../../test/renderWithPorts';
 import { FAKE_MATCH, TOKEN } from '../../../test/scoringHomeFixtures';
 
 /** Home with the root's link hook, as the layout mounts them once the gate has settled. */
@@ -226,5 +227,91 @@ describe('Home with an Open in app link at awkward moments', () => {
     expect(home.incomingLink.listeners).toBe(1);
     home.unmount();
     expect(home.incomingLink.listeners).toBe(0);
+  });
+});
+
+/** The layout's pair: the reopen gate, and the link hook once it has settled. */
+function GateHomeWithLinks() {
+  const settled = useReopenGate(true);
+  return settled ? <HomeWithLinks /> : <HomeScreen />;
+}
+
+async function pairedGateHome() {
+  const stream = savedStreamCode();
+  const fakes = createFakePorts({
+    kvSeed: {
+      [STORE_KEYS.active]: 'stream',
+      [STORE_KEYS.code('stream')]: encodeSavedCode(stream),
+    },
+  });
+  render(<GateHomeWithLinks />, { wrapper: wrapperFor(fakes) });
+  await waitFor(() => expect(fakes.splash.hides).toBe(1));
+  act(() => fakes.engine.forceState({ kind: 'paired' }));
+  await waitFor(() => expect(fakes.incomingLink.listeners).toBe(1));
+  return fakes;
+}
+
+describe('an Open in app link on a paired phone that is not held', () => {
+  it('is not bounced back to Live Stream by the foreground return it causes', async () => {
+    const fakes = await pairedGateHome();
+    await waitFor(() => expect(fakes.navigation.current()).toBe('stream'));
+    // Android: the `url` event (onNewIntent) first, then the return to the foreground.
+    act(() => fakes.incomingLink.deliver(dayAppLink()));
+    // Home has dealt with the link (its scan flight is down) when the return arrives, so only the claim can skip it.
+    await screen.findByRole('button', { name: 'Unpair & open' });
+    await waitFor(() => expect(fakes.ports.scanFlight.active()).toBe(false));
+    act(() => fakes.foreground.fire());
+    expect(fakes.navigation.current()).toBe('home');
+  });
+
+  it('spends its claim on that one return: the next return settles as it always does', async () => {
+    const fakes = await pairedGateHome();
+    act(() => fakes.incomingLink.deliver(dayAppLink()));
+    // Home has dealt with the link (its scan flight is down) when the return arrives, so only the claim can skip it.
+    await screen.findByRole('button', { name: 'Unpair & open' });
+    await waitFor(() => expect(fakes.ports.scanFlight.active()).toBe(false));
+    act(() => fakes.foreground.fire());
+    act(() => fakes.foreground.fire());
+    await waitFor(() => expect(fakes.navigation.current()).toBe('stream'));
+  });
+
+  it('is dropped when the gate sends the app elsewhere before Home takes it', async () => {
+    const fakes = await pairedGateHome();
+    const hold = vi.spyOn(fakes.ports.scanFlight, 'active').mockReturnValue(true);
+    act(() => fakes.incomingLink.deliver(dayAppLink()));
+    act(() => fakes.foreground.fire());
+    act(() => fakes.foreground.fire());
+    await waitFor(() => expect(fakes.navigation.current()).toBe('stream'));
+    hold.mockRestore();
+    act(() => fakes.ports.scanFlight.end());
+    await act(async () => undefined);
+    expect(screen.queryByRole('button', { name: 'Unpair & open' })).toBeNull();
+    expect(pendingLink.take()).toBeNull();
+  });
+
+  it('is dropped when a remote Go live arrives after it parked', async () => {
+    const home = await renderHome();
+    home.ports.scanFlight.begin();
+    await arrive(home, dayAppLink());
+    act(() => home.engine.forceState({ kind: 'publishing', transport: 'srt', sinceEpochMs: 1 }));
+    act(() => home.ports.scanFlight.end());
+    await act(async () => undefined);
+    expect(home.kv.entries.has(STORE_KEYS.code('matchday'))).toBe(false);
+    expect(home.matchDay.calls).toEqual([]);
+  });
+
+  it('is never acted on once it has waited more than 10 s', async () => {
+    const home = await renderHome();
+    const real = Date.now;
+    let offset = 0;
+    vi.spyOn(Date, 'now').mockImplementation(() => real() + offset);
+    home.ports.scanFlight.begin();
+    await arrive(home, dayAppLink());
+    offset = 10_001;
+    act(() => home.ports.scanFlight.end());
+    await act(async () => undefined);
+    expect(home.matchDay.calls).toEqual([]);
+    expect(home.navigation.current()).toBe('home');
+    vi.restoreAllMocks();
   });
 });

@@ -17,6 +17,14 @@ import { usePorts } from '@/hooks/usePorts';
  */
 export function useIncomingLink(): void {
   const { incomingLink, hosts, engine, navigation, logger } = usePorts();
+  // A broadcast that becomes held (a remote Go live) takes the app to Live Stream: a link still parked is dropped.
+  useEffect(
+    () =>
+      engine.subscribe(() => {
+        if (selectBroadcastHeld(engine.getSnapshot())) pendingLink.clear();
+      }),
+    [engine],
+  );
   useEffect(
     () =>
       incomingLink.subscribe((url) => {

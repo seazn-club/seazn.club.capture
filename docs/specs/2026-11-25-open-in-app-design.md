@@ -76,7 +76,7 @@ where it is.
 **On the web page (signed in, on a phone):** beside each code, a button.
 
 - Stream code (the session page): **Open in app**.
-- Scoring link: **Open in app** and the existing **Score in browser** (the web pad, unchanged).
+- Scoring link: **Open in app** and **Score in browser** (the web pad). The web says that button does not exist today; the web adds it as a new link.
 - Match Day code: **Open in app**.
 
 The button shows only on a phone-sized screen. On a laptop the QR is the way. Whether it also checks for Android
@@ -111,8 +111,10 @@ An opened link is treated as a scan that arrives on its own:
 - It goes through `recognise()` and then the same handling the scanner result gets for that mode (the saved-code
   rules, the code check, the mode's own screen). A foreign, garbled or expired link gives the same outcome a bad
   scan gives.
-- **Busy:** if a broadcast is held (Arming or live), the link is refused with the line a scan would get in that
-  state. Other modes follow the existing rules for scanning a second code: a Match Day code with matches still
+- **Busy:** while a broadcast is held (Arming or live), a link is ignored and recorded (`link-opened {mode,
+state:'held'}`), with no line, because Live Stream's strip shows native status only (the controller's call,
+  2026-11-25). A link also claims the foreground return it causes, so the reopen gate does not bounce it back, and
+  one nobody took within 10 s is dropped. Other modes follow the existing rules for scanning a second code: a Match Day code with matches still
   sending, or a scoring pad with unsent taps, asks before switching, as a scan does.
 - The record gets one line, `link-opened {mode}` or the scan's own outcome lines. It never contains the URL, the
   fragment or the token.

@@ -7,31 +7,48 @@ import type { Mode } from '@/domain/mode/Mode';
  */
 export type PendingLink = { readonly mode: Mode; readonly raw: string };
 
+/** A link nobody took in this long is stale: the operator has moved on, and an old link never acts by itself. */
+export const LINK_TTL_MS = 10_000;
+
 /**
  * The one slot a link waits in between the root hook and Home: in memory only, never stored, never logged. A later link
  * replaces an earlier one that nobody has taken (the operator tapped twice; the last is the one they mean), and it is
- * taken exactly once. `subscribe` tells Home a link arrived while it was already up.
+ * taken exactly once, and only within `LINK_TTL_MS` of arriving. `subscribe` tells Home a link arrived while it was
+ * already up.
+ *
+ * A link also claims the foreground return it causes: Android fires the `url` event from `onNewIntent`, before
+ * `AppState` says `active`, so without the claim the reopen gate would settle that return, see a paired phone and send
+ * the app back to Live Stream. `claimsReturn` is asked on each return (as `ScanFlight.appReturned` is) and is true once.
  */
 export type PendingLinkSlot = {
   put(link: PendingLink): void;
   take(): PendingLink | null;
+  /** True once, for the first foreground return within `LINK_TTL_MS` of a link arriving: the gate skips that return. */
+  claimsReturn(): boolean;
   subscribe(listener: () => void): () => void;
-  /** Empties the slot, for tests and for a restart of the root navigator. */
+  /** Empties the slot and the claim: the app moved on its own (the gate went somewhere, a broadcast was held). */
   clear(): void;
 };
 
-export function createPendingLink(): PendingLinkSlot {
-  let slot: PendingLink | null = null;
+export function createPendingLink(now: () => number = () => Date.now()): PendingLinkSlot {
+  let slot: { readonly link: PendingLink; readonly at: number } | null = null;
+  let claimedAt: number | null = null;
   const listeners = new Set<() => void>();
   return {
     put: (link) => {
-      slot = link;
+      slot = { link, at: now() };
+      claimedAt = slot.at;
       for (const listener of [...listeners]) listener();
     },
     take: () => {
-      const link = slot;
+      const held = slot;
       slot = null;
-      return link;
+      return held !== null && now() - held.at <= LINK_TTL_MS ? held.link : null;
+    },
+    claimsReturn: () => {
+      const at = claimedAt;
+      claimedAt = null;
+      return at !== null && now() - at <= LINK_TTL_MS;
     },
     subscribe: (listener) => {
       listeners.add(listener);
@@ -41,6 +58,7 @@ export function createPendingLink(): PendingLinkSlot {
     },
     clear: () => {
       slot = null;
+      claimedAt = null;
     },
   };
 }

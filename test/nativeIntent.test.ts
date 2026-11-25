@@ -7,6 +7,8 @@ describe('redirectSystemPath (R22)', () => {
     'seazn-capture:///stream?x=1',
     '/stream',
     'https://stg.seazn.club/anything',
+    'https://seazn.club/app/stream#e30',
+    'https://stg.seazn.club/app/score#dl_x',
   ])('starts a cold launch from %s at Home', (path) => {
     expect(redirectSystemPath({ path, initial: true })).toBe('/');
   });
@@ -14,5 +16,8 @@ describe('redirectSystemPath (R22)', () => {
   it('never navigates on a link that arrives while the app is running', () => {
     expect(redirectSystemPath({ path: 'seazn-capture://stream', initial: false })).toBeNull();
     expect(redirectSystemPath({ path: '/', initial: false })).toBeNull();
+    expect(
+      redirectSystemPath({ path: 'https://stg.seazn.club/app/day#md_x', initial: false }),
+    ).toBeNull();
   });
 });

@@ -72,13 +72,28 @@ describe('HoldAction (AGENTS §6: a 3 s hold, both ways)', () => {
     expect(HOLD_MS).toBe(3000);
   });
 
-  it('acts once after a full 3 s hold, not a moment before', () => {
+  // Owner, 2026-11-25, option A: acting under the finger unmounted Stop with
+  // the touch still down and left RN's responder stale. It acts on release.
+  it('acts once when the finger lifts after a full 3 s, and not at 3 s while held', () => {
+    const hold = renderHold();
+    pressIn(hold.button());
+    act(() => vi.advanceTimersByTime(HOLD_MS));
+    expect(hold.onHeld).not.toHaveBeenCalled();
+    act(() => vi.advanceTimersByTime(HOLD_MS * 2));
+    expect(hold.onHeld).not.toHaveBeenCalled();
+    pressOut(hold.button());
+    expect(hold.onHeld).toHaveBeenCalledTimes(1);
+    act(() => vi.advanceTimersByTime(HOLD_MS * 2));
+    expect(hold.onHeld).toHaveBeenCalledTimes(1);
+  });
+
+  it('does nothing when let go one millisecond short of the full hold', () => {
     const hold = renderHold();
     pressIn(hold.button());
     act(() => vi.advanceTimersByTime(HOLD_MS - 1));
+    pressOut(hold.button());
+    act(() => vi.advanceTimersByTime(HOLD_MS));
     expect(hold.onHeld).not.toHaveBeenCalled();
-    act(() => vi.advanceTimersByTime(1));
-    expect(hold.onHeld).toHaveBeenCalledTimes(1);
   });
 
   it('does nothing when let go early: a mis-tap is not a decision', () => {
@@ -96,6 +111,7 @@ describe('HoldAction (AGENTS §6: a 3 s hold, both ways)', () => {
     act(() => vi.advanceTimersByTime(1000));
     pressIn(hold.button());
     act(() => vi.advanceTimersByTime(6000));
+    pressOut(hold.button());
     expect(hold.onHeld).toHaveBeenCalledTimes(1);
   });
 
@@ -106,8 +122,11 @@ describe('HoldAction (AGENTS §6: a 3 s hold, both ways)', () => {
     pressOut(hold.button());
     pressIn(hold.button());
     act(() => vi.advanceTimersByTime(HOLD_MS - 1));
+    pressOut(hold.button());
     expect(hold.onHeld).toHaveBeenCalledTimes(1);
-    act(() => vi.advanceTimersByTime(1));
+    pressIn(hold.button());
+    act(() => vi.advanceTimersByTime(HOLD_MS));
+    pressOut(hold.button());
     expect(hold.onHeld).toHaveBeenCalledTimes(2);
   });
 
@@ -158,7 +177,30 @@ describe('HoldAction (AGENTS §6: a 3 s hold, both ways)', () => {
     pressOut(hold.button());
     pressIn(hold.button());
     act(() => vi.advanceTimersByTime(HOLD_MS));
+    pressOut(hold.button());
     expect(hold.onHeld).toHaveBeenCalledTimes(1);
+  });
+
+  // A hold already full when the control is disabled is abandoned: the
+  // release acts nothing.
+  it('does not act on release when disabled after the hold was full', () => {
+    const hold = renderHold();
+    pressIn(hold.button());
+    act(() => vi.advanceTimersByTime(HOLD_MS));
+    hold.rerender(<HoldAction {...hold.all} disabled />);
+    pressOut(hold.button());
+    expect(hold.onHeld).not.toHaveBeenCalled();
+    expect(screen.getByTestId('hold-fill').dataset.holding).toBe('false');
+  });
+
+  it('does not act on release when unmounted after the hold was full', () => {
+    const hold = renderHold();
+    pressIn(hold.button());
+    act(() => vi.advanceTimersByTime(HOLD_MS));
+    const button = hold.button();
+    hold.unmount();
+    pressOut(button);
+    expect(hold.onHeld).not.toHaveBeenCalled();
   });
 
   // The hold does what was pressed (useHold): a parent re-rendering mid-hold,
@@ -170,9 +212,9 @@ describe('HoldAction (AGENTS §6: a 3 s hold, both ways)', () => {
     const later = vi.fn();
     hold.rerender(<HoldAction {...hold.all} onHeld={later} reason="Uplink weak" />);
     expect(screen.getByTestId('hold-fill').dataset.holding).toBe('true');
-    act(() => vi.advanceTimersByTime(1499));
+    act(() => vi.advanceTimersByTime(1500));
     expect(hold.onHeld).not.toHaveBeenCalled();
-    act(() => vi.advanceTimersByTime(1));
+    pressOut(hold.button());
     expect(hold.onHeld).toHaveBeenCalledTimes(1);
     act(() => vi.advanceTimersByTime(HOLD_MS * 2));
     expect(hold.onHeld).toHaveBeenCalledTimes(1);
@@ -193,12 +235,27 @@ describe('HoldAction (AGENTS §6: a 3 s hold, both ways)', () => {
     expect(screen.getByTestId('hold-fill').dataset.holding).toBe('false');
     act(() => hold.foreground.fire());
     act(() => vi.advanceTimersByTime(HOLD_MS * 2));
+    pressOut(hold.button());
     expect(hold.onHeld).not.toHaveBeenCalled();
     // A fresh full hold after the return acts as usual.
-    pressOut(hold.button());
     pressIn(hold.button());
     act(() => vi.advanceTimersByTime(HOLD_MS));
+    pressOut(hold.button());
     expect(hold.onHeld).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['go', 'Go live'],
+    ['stop', 'Stop'],
+  ] as const)('never acts on release when the app left while a %s hold was full', (tone, label) => {
+    const hold = renderHold({ tone, label });
+    pressIn(hold.button());
+    act(() => vi.advanceTimersByTime(HOLD_MS));
+    act(() => hold.foreground.leave());
+    expect(screen.getByTestId('hold-fill').dataset.holding).toBe('false');
+    act(() => hold.foreground.fire());
+    pressOut(hold.button());
+    expect(hold.onHeld).not.toHaveBeenCalled();
   });
 
   // N1: the cancel runs inside the port's own callback, not a render and an
@@ -218,6 +275,7 @@ describe('HoldAction (AGENTS §6: a 3 s hold, both ways)', () => {
         hold.foreground.leave();
         vi.advanceTimersByTime(rest);
       });
+      pressOut(hold.button());
       expect(hold.onHeld).not.toHaveBeenCalled();
     },
   );
@@ -240,12 +298,16 @@ describe('HoldAction (AGENTS §6: a 3 s hold, both ways)', () => {
     expect(screen.getByTestId('hold-fill').dataset.holding).toBe('false');
   });
 
-  it('clears the fill when the hold completes, before the finger lifts', () => {
+  it('keeps the fill full once the hold completes, until the finger lifts', () => {
     const hold = renderHold();
     pressIn(hold.button());
     act(() => vi.advanceTimersByTime(HOLD_MS));
-    expect(screen.getByTestId('hold-fill').dataset.holding).toBe('false');
+    expect(screen.getByTestId('hold-fill').dataset.holding).toBe('true');
+    act(() => vi.advanceTimersByTime(HOLD_MS));
+    expect(screen.getByTestId('hold-fill').dataset.holding).toBe('true');
     expect(screen.getByTestId('hold-fill').dataset.tone).toBe('go');
+    pressOut(hold.button());
+    expect(screen.getByTestId('hold-fill').dataset.holding).toBe('false');
   });
 
   it('says how to use it, in the operator’s language', () => {
@@ -304,10 +366,11 @@ describe('HoldAction under the turn card (ruling N4)', () => {
     act(() => vi.advanceTimersByTime(HOLD_MS * 2));
     gate.cover('none');
     act(() => vi.advanceTimersByTime(HOLD_MS * 2));
-    expect(gate.onHeld).not.toHaveBeenCalled();
     pressOut(gate.button());
+    expect(gate.onHeld).not.toHaveBeenCalled();
     pressIn(gate.button());
     act(() => vi.advanceTimersByTime(HOLD_MS));
+    pressOut(gate.button());
     expect(gate.onHeld).toHaveBeenCalledTimes(1);
   });
 
@@ -346,9 +409,81 @@ describe('useHold, under the control', () => {
     act(() => vi.advanceTimersByTime(1000));
     act(() => result.current.pressIn());
     act(() => vi.advanceTimersByTime(HOLD_MS - 1000));
+    act(() => result.current.pressOut());
     expect(onHeld).toHaveBeenCalledTimes(1);
     act(() => vi.advanceTimersByTime(5000));
     expect(onHeld).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops a full hold whose release was lost when a new press lands, with no act, and holds afresh', () => {
+    const onHeld = vi.fn();
+    const { result } = renderHook(() => useHold(onHeld, true), { wrapper: wrapper() });
+    act(() => result.current.pressIn());
+    act(() => vi.advanceTimersByTime(HOLD_MS));
+    act(() => result.current.pressIn());
+    expect(onHeld).not.toHaveBeenCalled();
+    expect(result.current.holding).toBe(true);
+    act(() => vi.advanceTimersByTime(HOLD_MS - 1));
+    act(() => result.current.pressOut());
+    expect(onHeld).not.toHaveBeenCalled();
+    act(() => result.current.pressIn());
+    act(() => vi.advanceTimersByTime(HOLD_MS));
+    act(() => result.current.pressOut());
+    expect(onHeld).toHaveBeenCalledTimes(1);
+  });
+
+  it('acts with the newer press’s action when a fresh press replaces a full one', () => {
+    const first = vi.fn();
+    const second = vi.fn();
+    const { result, rerender } = renderHook(({ onHeld }) => useHold(onHeld, true), {
+      initialProps: { onHeld: first },
+      wrapper: wrapper(),
+    });
+    act(() => result.current.pressIn());
+    act(() => vi.advanceTimersByTime(HOLD_MS));
+    rerender({ onHeld: second });
+    act(() => result.current.pressIn());
+    act(() => vi.advanceTimersByTime(HOLD_MS));
+    act(() => result.current.pressOut());
+    expect(second).toHaveBeenCalledTimes(1);
+    expect(first).not.toHaveBeenCalled();
+  });
+
+  it('never acts on a release after it unmounted while full', () => {
+    const onHeld = vi.fn();
+    const { result, unmount } = renderHook(() => useHold(onHeld, true), { wrapper: wrapper() });
+    act(() => result.current.pressIn());
+    act(() => vi.advanceTimersByTime(HOLD_MS));
+    unmount();
+    act(() => result.current.pressOut());
+    expect(onHeld).not.toHaveBeenCalled();
+  });
+
+  // A released hold leaves no clock behind: its old deadline must not make the
+  // next, shorter press full.
+  it('does not let a released hold’s deadline fill the next press early', () => {
+    const onHeld = vi.fn();
+    const { result } = renderHook(() => useHold(onHeld, true), { wrapper: wrapper() });
+    act(() => result.current.pressIn());
+    act(() => vi.advanceTimersByTime(2000));
+    act(() => result.current.pressOut());
+    act(() => result.current.pressIn());
+    act(() => vi.advanceTimersByTime(1000));
+    act(() => result.current.pressOut());
+    expect(onHeld).not.toHaveBeenCalled();
+  });
+
+  it('acts once when released twice after a full hold', () => {
+    const onHeld = vi.fn();
+    const { result } = renderHook(() => useHold(onHeld, true), { wrapper: wrapper() });
+    act(() => result.current.pressIn());
+    act(() => vi.advanceTimersByTime(HOLD_MS));
+    act(() => {
+      result.current.pressOut();
+      result.current.pressOut();
+    });
+    expect(onHeld).toHaveBeenCalledTimes(1);
+    expect(result.current.holding).toBe(false);
   });
 
   it('acts once, as first pressed, when a re-render and a second press land mid-hold', () => {
@@ -363,6 +498,7 @@ describe('useHold, under the control', () => {
     rerender({ onHeld: second });
     act(() => result.current.pressIn());
     act(() => vi.advanceTimersByTime(HOLD_MS * 2));
+    act(() => result.current.pressOut());
     expect(first).toHaveBeenCalledTimes(1);
     expect(second).not.toHaveBeenCalled();
   });
@@ -372,9 +508,16 @@ describe('useHold, under the control', () => {
     const { result } = renderHook(() => useHold(onHeld, true), { wrapper: wrapper() });
     act(() => result.current.pressIn());
     act(() => vi.advanceTimersByTime(HOLD_MS));
+    act(() => result.current.pressOut());
+    expect(onHeld).toHaveBeenCalledTimes(1);
     act(() => result.current.pressIn());
     expect(result.current.holding).toBe(true);
+    act(() => vi.advanceTimersByTime(HOLD_MS - 1));
+    act(() => result.current.pressOut());
+    expect(onHeld).toHaveBeenCalledTimes(1);
+    act(() => result.current.pressIn());
     act(() => vi.advanceTimersByTime(HOLD_MS));
+    act(() => result.current.pressOut());
     expect(onHeld).toHaveBeenCalledTimes(2);
   });
 
@@ -396,6 +539,7 @@ describe('useHold, under the control', () => {
     expect(result.current.holding).toBe(false);
     act(() => result.current.pressIn());
     act(() => vi.advanceTimersByTime(HOLD_MS));
+    act(() => result.current.pressOut());
     expect(onHeld).toHaveBeenCalledTimes(1);
   });
 });

@@ -225,6 +225,8 @@ describe('ApprovalScreen: the 3 s hold', () => {
     expect(calls(view, 'approve')).toEqual([]);
     pressIn(holdButton());
     await settle(HOLD_MS);
+    pressOut(holdButton());
+    await settle();
     expect(calls(view, 'approve')).toHaveLength(1);
     expect(calls(view, 'approve')[0]).toMatchObject({
       kind: 'swiss',
@@ -238,6 +240,8 @@ describe('ApprovalScreen: the 3 s hold', () => {
     const before = calls(view, 'day').length;
     pressIn(holdButton());
     await settle(HOLD_MS);
+    pressOut(holdButton());
+    await settle();
     expect(screen.queryByTestId('approval-screen')).toBeNull();
     expect(calls(view, 'day').length).toBe(before + 1);
   });
@@ -247,11 +251,15 @@ describe('ApprovalScreen: the 3 s hold', () => {
     view.matchDay.hold();
     pressIn(holdButton());
     await settle(HOLD_MS);
+    pressOut(holdButton());
+    await settle();
     expect(holdButton().getAttribute('aria-disabled')).toBe('true');
     expect(review().getByText(en['matchday.approve.approving'])).toBeTruthy();
     pressOut(holdButton());
     pressIn(holdButton());
     await settle(HOLD_MS);
+    pressOut(holdButton());
+    await settle();
     view.matchDay.release();
     await settle();
     expect(calls(view, 'approve')).toHaveLength(1);
@@ -273,6 +281,8 @@ describe('ApprovalScreen: the 3 s hold', () => {
     view.matchDay.hold();
     pressIn(holdButton());
     await settle(HOLD_MS);
+    pressOut(holdButton());
+    await settle();
     view.unmount();
     view.matchDay.release();
     await settle();
@@ -286,6 +296,7 @@ describe('ApprovalScreen: what the server says to an approve', () => {
     pressIn(button);
     await settle(HOLD_MS);
     pressOut(button);
+    await settle();
     return view;
   };
 
@@ -370,6 +381,7 @@ describe('ApprovalScreen: Back mid-approve, then Review again (fix round 1, M2)'
     pressIn(button);
     await settle(HOLD_MS);
     pressOut(button);
+    await settle();
     fireEvent.click(review().getByRole('button', { name: en['mode.matchday'] }));
     view.matchDay.release();
     await settle(300);
@@ -379,6 +391,7 @@ describe('ApprovalScreen: Back mid-approve, then Review again (fix round 1, M2)'
     pressIn(again);
     await settle(HOLD_MS);
     pressOut(again);
+    await settle();
     expect(review().getByText('Approved')).toBeTruthy();
     expect(screen.queryByText('Already approved')).toBeNull();
     expect(calls(view, 'approve')).toHaveLength(2);
@@ -469,6 +482,7 @@ describe('ApprovalScreen: the four languages', () => {
     expect(review().getByText(word(lang, 'matchday.approve.staleSwiss'))).toBeTruthy();
     pressIn(holdButton(lang));
     await settle(HOLD_MS);
+    pressOut(holdButton(lang));
     await settle();
     expect(review().getByText(word(lang, 'matchday.approve.onWeb'))).toBeTruthy();
     expect(calls(view, 'approve')).toHaveLength(2);

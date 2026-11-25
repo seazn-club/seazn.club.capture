@@ -769,6 +769,8 @@ describe('End of period is a 3 s hold (ruling 160)', () => {
     await flush(1000);
     pressIn(button);
     await flush(HOLD_MS);
+    pressOut(button);
+    await flush();
     expect(await periodEvents(app, NO_STAMP)).toHaveLength(1);
   });
 
@@ -776,12 +778,16 @@ describe('End of period is a 3 s hold (ruling 160)', () => {
     const app = await open(NO_STAMP);
     pressIn(periodButton(en['scoring.football.end.HT']));
     await flush(HOLD_MS);
+    pressOut(periodButton(en['scoring.football.end.HT']));
+    await flush();
     expect(await periodEvents(app, NO_STAMP)).toHaveLength(1);
     const next = within(screen.getByTestId('tool-row')).getByRole('button', {
       name: /Hold for/,
     });
     pressIn(next);
     await flush(HOLD_MS + 500);
+    pressOut(next);
+    await flush();
     expect(await periodEvents(app, NO_STAMP)).toHaveLength(1);
   });
 

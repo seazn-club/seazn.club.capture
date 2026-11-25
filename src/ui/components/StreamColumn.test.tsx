@@ -6,7 +6,7 @@ import type { Viewfinder } from '@/hooks/useViewfinder';
 import en from '@/i18n/en.json';
 import { StreamColumn } from '@/ui/components/StreamColumn';
 import { colour } from '@/ui/theme/tokens';
-import { pressIn } from '../../../test/press';
+import { pressIn, pressOut } from '../../../test/press';
 import { fillOf, heldOnGround } from '../../../test/pressState';
 import { renderWithPorts } from '../../../test/renderWithPorts';
 
@@ -68,6 +68,8 @@ describe('StreamColumn’s Go live', () => {
     renderWithPorts(<StreamColumn view={view} {...ICONS} viewer={VIEWER} />);
     pressIn(goLive());
     act(() => vi.advanceTimersByTime(HOLD_MS));
+    expect(view.start).not.toHaveBeenCalled();
+    pressOut(goLive());
     expect(view.start).toHaveBeenCalledTimes(1);
   });
 
@@ -81,6 +83,7 @@ describe('StreamColumn’s Go live', () => {
       renderWithPorts(<StreamColumn view={view} {...ICONS} viewer={VIEWER} />);
       pressIn(goLive());
       act(() => vi.advanceTimersByTime(HOLD_MS));
+      pressOut(goLive());
       expect(view.start).not.toHaveBeenCalled();
     },
   );
@@ -134,6 +137,7 @@ describe('StreamColumn’s Go live', () => {
     expect(screen.queryByRole('button', { name: /^Go live/ })).toBeNull();
     pressIn(control);
     act(() => vi.advanceTimersByTime(HOLD_MS));
+    pressOut(control);
     expect(view.start).not.toHaveBeenCalled();
     // Answered: the same control is Go live again.
     rerender(<StreamColumn view={viewOf({})} {...ICONS} viewer={VIEWER} />);

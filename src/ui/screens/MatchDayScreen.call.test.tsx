@@ -164,9 +164,12 @@ async function pickKim(lang: Lang = 'en') {
   return lang;
 }
 
-async function hold(ms = HOLD_MS, lang: Lang = 'en') {
+/** A full hold, then the finger lifts: the call goes on release (owner, 2026-11-25, option A). */
+async function hold(lang: Lang = 'en') {
   pressIn(holdButton(lang));
-  await settle(ms);
+  await settle(HOLD_MS);
+  pressOut(holdButton(lang));
+  await settle();
 }
 
 beforeEach(() => vi.useFakeTimers({ now: TEST_NOW }));
@@ -538,11 +541,15 @@ describe('the hold, then the call', () => {
     view.matchDay.hold();
     pressIn(holdButton());
     await settle(HOLD_MS);
+    pressOut(holdButton());
+    await settle();
     expect(calls(view, 'call')).toHaveLength(1);
     expect(sheet().getByText(en['matchday.call.calling'])).toBeTruthy();
     pressOut(holdButton());
     pressIn(holdButton());
     await settle(HOLD_MS);
+    pressOut(holdButton());
+    await settle();
     expect(calls(view, 'call')).toHaveLength(1);
     expect(holdButton().getAttribute('aria-disabled')).toBe('true');
     view.matchDay.release();

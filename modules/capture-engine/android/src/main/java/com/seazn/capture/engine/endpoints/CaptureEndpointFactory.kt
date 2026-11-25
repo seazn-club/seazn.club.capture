@@ -29,6 +29,7 @@ class CaptureEndpointFactory(
   private val rtmpIo: CoroutineDispatcher,
   private val clock: CaptureClockLine,
   private val service: TSServiceInfo,
+  private val encoder: EncoderTap,
 ) : IEndpoint.Factory { // StreamPack 3.2.1 (javap): `IEndpointInternal.Factory` became `IEndpoint.Factory`, same `create`
   /** The RTMP endpoint of the streamer built last: its counters are RTMPS's link reading (session 7, item 2). */
   @Volatile private var rtmp: RtmpEndpoint? = null
@@ -37,7 +38,7 @@ class CaptureEndpointFactory(
     val srt = CompositeEndpoint(TsMuxer().apply { addService(service) }, sink)
     val rtmpEndpoint = RtmpEndpointFactory().create(context, RtmpDispatcherProvider(dispatcherProvider, rtmpIo))
     rtmp = rtmpEndpoint as? RtmpEndpoint
-    return CountingEndpoint(RoutingEndpoint(srt, rtmpEndpoint), tally, clock)
+    return CountingEndpoint(RoutingEndpoint(srt, rtmpEndpoint), tally, clock, encoder)
   }
 
   /** 3.2.1 (javap): `RtmpEndpoint.getMetrics()` reads komuxer's counters synchronously, zero with no client. */

@@ -13,6 +13,8 @@ import android.view.SurfaceHolder
 import com.seazn.capture.engine.adapter.AttemptSignals
 import com.seazn.capture.engine.adapter.CameraAvailability
 import com.seazn.capture.engine.adapter.CameraFailures
+import com.seazn.capture.engine.adapter.EncoderDumpRules
+import com.seazn.capture.engine.adapter.EncoderFormatLine
 import com.seazn.capture.engine.adapter.EncoderKeys
 import com.seazn.capture.engine.adapter.FrameTally
 import com.seazn.capture.engine.adapter.MicSilenceWatch
@@ -42,6 +44,8 @@ import com.seazn.capture.engine.core.ZoomRange
 import com.seazn.capture.engine.endpoints.CaptureClockLine
 import com.seazn.capture.engine.net.HostLookup
 import com.seazn.capture.engine.endpoints.CaptureEndpointFactory
+import com.seazn.capture.engine.endpoints.EncoderDump
+import com.seazn.capture.engine.endpoints.EncoderTap
 import com.seazn.capture.engine.endpoints.RtmpDispatcher
 import com.seazn.capture.engine.preview.PreviewSizes
 import com.seazn.capture.engine.srt.SeaznSrtSink
@@ -107,7 +111,14 @@ class StreamerAdapter(
   private val sink = SeaznSrtSink(Dispatchers.IO.limitedParallelism(2), signals, calls.report, calls.line)
   private val lookup = HostLookup()
   private val clock = CaptureClockLine(calls.line)
-  private val endpoints = CaptureEndpointFactory(tally, sink, RtmpDispatcher.create(), clock, SERVICE)
+
+  /** Spec 2026-11-25-encoder-diagnostics §2: the encoder's format, a line when it changes, in every build. */
+  private val format = EncoderFormatLine(calls.line)
+
+  /** Spec §3: the dev twin's dump; null in the production app, whose package is not the dev twin's. */
+  private val dump = if (EncoderDumpRules.allowed(context.packageName)) EncoderDump(context.filesDir, calls.line) else null
+  private val encoder = EncoderTap(format, dump, { lastMode }, { current.value?.videoEncoder?.info?.name }, calls.line)
+  private val endpoints = CaptureEndpointFactory(tally, sink, RtmpDispatcher.create(), clock, SERVICE, encoder)
 
   /** Session 7, item 2: RTMPS's link reading, for the RTMPS attempt begun at its start. */
   private val rtmps = RtmpsLink()
@@ -313,6 +324,7 @@ class StreamerAdapter(
       cameras.held(null) // C6: another app's take of our old camera is heard again
       cameras.sessionEnded()
       tally.begin(-1)
+      dump?.broadcastOver() // spec 2026-11-25-encoder-diagnostics §3: a new capture's next attempt dumps again
       calls.readiness(false, null) // no buffer: the capture is gone (spec §4, pre-flight F5)
     }
 
@@ -320,6 +332,8 @@ class StreamerAdapter(
       sound.stop()
       tally.begin(attemptId)
       clock.newAttempt()
+      format.newAttempt()
+      dump?.attempt(lastMode)
       current.value?.videoEncoder?.bitrate = startBitrateBps
     }
 
@@ -343,6 +357,7 @@ class StreamerAdapter(
 
     override suspend fun stop() {
       rtmps.end()
+      dump?.stopped()
       val held = current.value ?: return
       quietly("stop") { held.stopStream() }
       quietly("close") { held.close() }
@@ -354,6 +369,7 @@ class StreamerAdapter(
     }
 
     override suspend fun afterBroadcast() {
+      dump?.broadcastOver()
       slate(false)
       tally.begin(-1)
       sound.start()

@@ -33,6 +33,13 @@ one said, so a reconnect on the same encoder writes none and a change of mode wr
 {"kind":"encoder-format","mode":"cbr","state":"high-4.1-cabac","source":"c2.qti.avc.encoder"}
 ```
 
+"The last one said" lives as long as the app's process (`EncoderFormatLine` in `StreamerAdapter`, built once by
+`EngineHost`), not one broadcast. A second broadcast in the same process with the same mode and format writes no
+`encoder-format` line, and its record shows none (R-ZFQ7, 2026-11-25: the third run of the day, Constant bitrate Off,
+had no line; a note here, not a code change, owner: "just doc update?"). To read a broadcast's mode from its record, use
+`bitrate-mode`: `CaptureRun` writes it at each encoder build when the mode is not VBR (`cbr` or `unsupported`), so a
+record with no `bitrate-mode` line was VBR. The format itself is in the record that came first in the process.
+
 - `mode`: the bitrate mode the encoder was asked for (vbr, cbr or unsupported).
 - `state`: the stream's format from its SPS and PPS, `<profile>-<level>-<entropy>`. The profile is Annex A's name
   (constrained-baseline, baseline, main, extended, high, progressive-high and constrained-high by High's

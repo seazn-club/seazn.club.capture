@@ -12,4 +12,9 @@ class CoreCalls(
   val cameraBusy: (PairRequest) -> Unit,
   val readiness: (cameraFrames: Boolean, audioPeak: Double?) -> Unit,
   val line: (RecordEntry) -> Unit,
+  /**
+   * Spec 2026-11-25-zoom-and-metering §3: the machine holds a broadcast, from Arming on (`Phase.holdsBroadcast`, as
+   * BridgeCore last published it). The pinch zoom is locked while it does.
+   */
+  val broadcastHeld: () -> Boolean,
 )

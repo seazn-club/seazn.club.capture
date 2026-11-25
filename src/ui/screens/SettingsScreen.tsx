@@ -25,6 +25,10 @@ import { colour, layout as metrics, space } from '@/ui/theme/tokens';
  * to AGENTS §6's rule: it only affects the automatic stop (amendment §2).
  * `useEngineSync` (in the shell) tells native when it changes.
  *
+ * Spec 2026-11-24-capture-tuning §2 (owner, 2026-11-24): Match sound stays usable on air (native changes the
+ * microphone's processing with no stop or start); Constant bitrate would change the encoder under the broadcast, so
+ * from Arming on it is disabled and its line says "After the broadcast" ([CaptureTuning]).
+ *
  * Spec §6: the Diagnostics card is here, after the settings. Portrait is one
  * scrolling column; landscape is two halves, the settings and the card, each
  * scrolling on its own (a 360 dp tall phone cannot hold the whole card under
@@ -61,6 +65,7 @@ export function SettingsScreen({ recordSend = FEATURES.recordSend }: SettingsScr
         onPress={toggleAutomatic}
       />
       <Text variant="metricUnit">{t('settings.automatic.hint')}</Text>
+      <CaptureTuning />
       <SideChoice side={settings.side} change={change} />
       <Text variant="metricUnit">{`${t('settings.power.label')} — ${t('settings.power.advice')}`}</Text>
       <PowerRow />
@@ -92,6 +97,39 @@ export function SettingsScreen({ recordSend = FEATURES.recordSend }: SettingsScr
         <DiagnosticsCard />
       </ScrollView>
     </View>
+  );
+}
+
+/** Spec 2026-11-24-capture-tuning §2: match sound, then constant bitrate, each with its one line. */
+function CaptureTuning() {
+  const { t } = useT();
+  const { settings, change, held } = useStreamSettings();
+  const toggleMatchSound = useCallback(
+    () => change({ matchSound: !settings.matchSound }),
+    [change, settings.matchSound],
+  );
+  const toggleConstant = useCallback(
+    () => change({ constantBitrate: !settings.constantBitrate }),
+    [change, settings.constantBitrate],
+  );
+  return (
+    <>
+      <ChoiceRow
+        label={t('settings.matchSound.label')}
+        checked={settings.matchSound}
+        onPress={toggleMatchSound}
+      />
+      <Text variant="metricUnit">{t('settings.matchSound.hint')}</Text>
+      <ChoiceRow
+        label={t('settings.constantBitrate.label')}
+        checked={settings.constantBitrate}
+        onPress={toggleConstant}
+        disabled={held}
+      />
+      <Text variant="metricUnit">
+        {t(held ? 'settings.constantBitrate.onAir' : 'settings.constantBitrate.hint')}
+      </Text>
+    </>
   );
 }
 

@@ -29,6 +29,12 @@ sealed interface Input {
 
   data class SetLanguage(val language: String) : Input
 
+  /** Spec 2026-11-24-capture-tuning §2: the operator's match sound, in any paired phase, on air included. */
+  data class SetMatchSound(val on: Boolean) : Input
+
+  /** Spec §2: the operator's constant bitrate, only while no broadcast is held. */
+  data class SetConstantBitrate(val on: Boolean) : Input
+
   /** The platform's readiness facts (A11), pushed on every change, in any phase. */
   data class ReadinessChanged(val readiness: Readiness) : Input
 

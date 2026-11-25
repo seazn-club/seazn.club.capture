@@ -126,6 +126,9 @@ class BridgeCore(
   /** The last published snapshot's language (P3), for the glue's notification. */
   @Volatile private var language: String? = null
 
+  /** Spec 2026-11-25-zoom-and-metering §3: the last published phase held a broadcast ([broadcastHeld]). */
+  @Volatile private var held = false
+
   /** Review Focus 2: an answer before the first tick, so a restarted JS never reads nothing; R6: a Forget's marker included. */
   @Volatile private var current: Map<String, Any?> = wire(Projection.snapshot(engine.phase, clock.now()), PlatformFacts())
 
@@ -284,6 +287,12 @@ class BridgeCore(
 
   /** P3: the notification's language, the pairing's until `setLanguage` replaces it; null with no pairing. Any thread. */
   fun language(): String? = language
+
+  /**
+   * Spec 2026-11-25-zoom-and-metering §3: the machine holds a broadcast (`Phase.holdsBroadcast`, Arming on), as the last
+   * snapshot published it, which every phase change makes. Any thread: the capture reads it for the pinch zoom's lock.
+   */
+  fun broadcastHeld(): Boolean = held
 
   /**
    * From any thread (A11): the platform's facts; null leaves a fact as it was. Sent only when a check
@@ -513,6 +522,7 @@ class BridgeCore(
     val peak = maxOf(heldPeak, facts.audioLevel.takeIf { it.isFinite() } ?: 0.0)
     val wire = wire(snapshot, facts.copy(audioLevel = peak, deliveryCheckedAtMs = checkedAtMs))
     language = snapshot.language
+    held = engine.phase.holdsBroadcast
     current = wire
     // Review C4a m-1: a tick can move the phase with no input behind it, such as an outage hold that ran
     // out; the capture follows the phase. Posted, never run inside the snapshot sink (CD31).

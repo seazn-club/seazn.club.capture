@@ -384,6 +384,7 @@ class ConnectingSignatureTest {
           cameraBusy = {},
           readiness = { _, _ -> },
           line = {},
+          broadcastHeld = { false },
         )
       val run = CaptureRun(parts, AttemptSignals(), CameraAvailability(), calls, { Side.LEFT }, scope)
       var slowest = 0L

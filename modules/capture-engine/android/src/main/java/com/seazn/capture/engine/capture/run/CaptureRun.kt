@@ -5,6 +5,9 @@ import com.seazn.capture.engine.adapter.CameraAvailability
 import com.seazn.capture.engine.adapter.EncoderKeys
 import com.seazn.capture.engine.adapter.PermanentPlatformFailure
 import com.seazn.capture.engine.adapter.StartEnd
+import com.seazn.capture.engine.core.Antibanding
+import com.seazn.capture.engine.core.BitrateMode
+import com.seazn.capture.engine.core.CameraTouch
 import com.seazn.capture.engine.core.Command
 import com.seazn.capture.engine.core.ConnectFailure
 import com.seazn.capture.engine.core.Input
@@ -12,8 +15,11 @@ import com.seazn.capture.engine.core.PairRequest
 import com.seazn.capture.engine.core.RecordEntry
 import com.seazn.capture.engine.core.SessionMachine
 import com.seazn.capture.engine.core.Side
+import com.seazn.capture.engine.core.SpeechProcessing
+import com.seazn.capture.engine.core.SpeechState
 import com.seazn.capture.engine.core.Stabilisation
 import com.seazn.capture.engine.core.Stabiliser
+import com.seazn.capture.engine.core.Tuning
 import java.io.IOException
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicInteger
@@ -120,6 +126,30 @@ class CaptureRun(
   /** Spec 2026-11-24-camera-stabilisation §4: the camera and OIS state the last `stabilisation` line said, in this opening. */
   private var stabilisedLine: Pair<String, Stabiliser>? = null
 
+  /**
+   * Spec 2026-11-24-capture-tuning §3: the pairing's latest capture choices, from its last [Command.Tune], kept while
+   * closed too, so every build reads them: the camera-stabilisation spec's trap (§6) was a choice that reached no open.
+   */
+  private var tuning = Tuning.DEFAULT
+
+  /**
+   * Spec §3.1: the speech processing the last `speech-processing` line said, in this opening; null when unknown. An
+   * opening starts OFF, the microphone as built (no effects), so match sound on, the default, writes no line.
+   */
+  private var speechLine: SpeechState? = SpeechState.OFF
+
+  /** Spec §3.1: whether a speech call has answered in this opening; until one has, the connect asks again. */
+  private var speechSet = false
+
+  /** Spec §3.3: the camera and antibanding the last `antibanding` line said, in this opening. */
+  private var bandedLine: Pair<String, Antibanding>? = null
+
+  /** Spec 2026-11-25-zoom-and-metering: the pinch zoom and the place tapped, carried out only on an accepted open. */
+  private val framing = CameraFraming(parts, calls.line, calls.broadcastHeld)
+
+  /** Spec §3: pinches waiting for the queue, taken as one. */
+  private val pinches = PinchBuffer()
+
   fun open(asked: PairRequest) = serial.submit { opened(asked) }
 
   /** Re-review 2 (R2-M2 ruling): the unpair never waits behind a probe ([abandonProbe]). */
@@ -157,22 +187,45 @@ class CaptureRun(
     nudges.trySend(Unit)
   }
 
+  /**
+   * Spec 2026-11-25-zoom-and-metering: a gesture on the preview, from the main thread; returns at once. Pinches that
+   * come faster than the queue takes them are one, by their product ([PinchBuffer]).
+   */
+  fun touch(touch: CameraTouch) {
+    if (touch !is CameraTouch.Pinch) return serial.submit { framing.touch(touch, frameDegrees()) }
+    if (pinches.offer(touch.scale)) serial.submit { framing.touch(CameraTouch.Pinch(pinches.take()), frameDegrees()) }
+  }
+
+  /** The picture's turn, as the held streamer encodes it (CD42), or as the side held would build it. */
+  private fun frameDegrees(): Int = (rotation ?: EncoderKeys.surfaceRotation(side())) * 90
+
   /** N2: never two streamers. One already held serves the new pairing, which its failures now name. */
   private suspend fun opened(asked: PairRequest) {
     request = asked
     rearm() // re-review 4 cap: a re-pair re-arms
+    framing.paired(asked, frameDegrees()) // spec 2026-11-25: a new pairing starts at 1x
     if (parts.held) return
     build(asked, EncoderKeys.surfaceRotation(side()))
   }
 
-  private suspend fun build(asked: PairRequest, wanted: Int) {
-    when (val built = parts.build(wanted)) {
+  /**
+   * Spec 2026-11-24-capture-tuning §3.2: an encoder that lists CBR and then refuses to configure with it would fail
+   * every pair while the choice stays saved, so a build asked for CBR whose encoder failed is built once more with VBR,
+   * and says `unsupported`. Only an encoder failure on a CBR build is retried; anything else fails as before.
+   */
+  private suspend fun build(asked: PairRequest, wanted: Int, with: Tuning = tuning) {
+    when (val built = parts.build(wanted, with)) {
       is Built.Ready -> {
         rotation = wanted
         micNoted = false
+        val mode = if (with.constantBitrate == tuning.constantBitrate) built.mode else BitrateMode.UNSUPPORTED
+        // Spec §3.2: a line only when the operator asked for constant bitrate (cbr or unsupported).
+        if (mode != BitrateMode.VBR) calls.line(mode.entry())
+        speak()
         watchOpens(built.cameraId)
       }
-      is Built.Failed -> failed(asked, built)
+      is Built.Failed ->
+        if (built.encoder && with.constantBitrate) build(asked, wanted, with.copy(constantBitrate = false)) else failed(asked, built)
     }
   }
 
@@ -199,7 +252,11 @@ class CaptureRun(
               openSeen()
               // Every camera source opened, a switch's, a reopen's and the slate's fall included; never a busy open's
               // false report, as a setting against a device not open opens it outside the take and the probe.
-              if (accepted) stabilise(id)
+              if (accepted) {
+                stabilise(id)
+                antiband(id)
+                framing.opened(id, frameDegrees())
+              }
             }
           }
         }
@@ -215,7 +272,10 @@ class CaptureRun(
           parts.busyOpens().collect { id ->
             cameras.busyHeard(id) // spec 2026-11-24 §4: the stabilise gate's, on air or off
             if (attempt != null) cameras.busyOpen(id)
-            serial.submit { busyByDevice(id) }
+            serial.submit {
+              framing.unopened(id) // spec 2026-11-25: an open that met another app's hold is no open
+              busyByDevice(id)
+            }
           }
         }
         parts.cameraLosses().collect { id -> serial.submit { lostByDevice(id) } }
@@ -235,6 +295,7 @@ class CaptureRun(
    * service that restarts reads the same, and its cameras' return is the release.
    */
   private suspend fun lostByDevice(camera: String) {
+    framing.unopened(camera) // spec 2026-11-25: a lost camera's device is closed; a setter would open it
     if (!cameras.lost(camera)) return
     calls.line(RecordEntry("camera-lost", listOf("from" to "device", "attempt" to attempt)))
     if (attempt == null) return rebuildLost()
@@ -492,6 +553,10 @@ class CaptureRun(
     attempt = null
     rotation = null
     stabilisedLine = null
+    speechLine = SpeechState.OFF
+    speechSet = false
+    bandedLine = null
+    framing.closed()
     parts.release()
   }
 
@@ -517,7 +582,64 @@ class CaptureRun(
     }
   }
 
+  /**
+   * Spec 2026-11-24-capture-tuning §3.3: camera [camera], just reported open, gets antibanding AUTO where it lists it,
+   * at the same gate as OIS (never a busy open's false report). One line when the camera or the state read differs from
+   * the last said in this opening; a throw is one `capture-call-failed` line, never the session's failure.
+   */
+  private suspend fun antiband(camera: String) {
+    try {
+      val state = parts.antibanding(camera) ?: return
+      if (bandedLine == camera to state) return
+      bandedLine = camera to state
+      calls.line(state.entry())
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      bandedLine = null
+      calls.line(RecordEntry("capture-call-failed", listOf("action" to "antibanding", "error" to e.javaClass.simpleName)))
+    }
+  }
+
+  /**
+   * Spec §3: the pairing's choices, held or not. Match sound reaches a held microphone at once, on air included (owner,
+   * 2026-11-24), with no stop or start. Constant bitrate is the encoder's, set only at a build: over a held capture
+   * with nothing on air it rebuilds it, and under an attempt it waits for the next build (the machine ignores it while
+   * a broadcast is held, so only a re-pair's could come then). The held rebuild is near-unreachable in practice: the
+   * capture is held only while the viewfinder shows (`BridgeCore.noticeCapture`), and both Settings screens cover it,
+   * so a change made there usually reaches the next build instead. It stays for a re-pair's Tune over a held capture.
+   */
+  private suspend fun tune(next: Tuning) {
+    val before = tuning
+    tuning = next
+    if (!parts.held) return
+    if (before.matchSound != next.matchSound) speak()
+    if (before.constantBitrate != next.constantBitrate && attempt == null) rebuild("tuning")
+  }
+
+  /**
+   * Spec §3.1: speech processing as [tuning] wants it on the held microphone. One line when the state differs from the
+   * last said in this opening, which starts OFF. Null from the parts (the recording's session not known yet) says nothing, and the
+   * connect asks again ([connect]). A throw is one `capture-call-failed` line and leaves the state unknown.
+   */
+  private suspend fun speak() {
+    try {
+      val state = parts.speech(SpeechProcessing.wanted(tuning)) ?: return
+      speechSet = true
+      if (state == speechLine) return
+      speechLine = state
+      calls.line(SpeechProcessing.entry(state))
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      speechLine = null
+      speechSet = false
+      calls.line(RecordEntry("capture-call-failed", listOf("action" to "speech-processing", "error" to e.javaClass.simpleName)))
+    }
+  }
+
   private suspend fun run(command: Command) {
+    if (command is Command.Tune) return tune(command.tuning)
     if (!parts.held) return unheld(command)
     when (command) {
       is Command.Orient -> orient(command.side)
@@ -527,7 +649,10 @@ class CaptureRun(
       is Command.StartNewSession -> reconnect(command.previousAttemptId, command.next)
       is Command.SetBitrate -> parts.bitrate(command.bps)
       is Command.SetMaxBw -> parts.maxBw(command.attemptId, command.bytesPerSecond)
-      Command.SwitchCamera -> parts.switchCamera()
+      Command.SwitchCamera -> {
+        framing.unopened() // spec 2026-11-25: the other camera, opened afresh
+        parts.switchCamera()
+      }
       Command.ReopenCamera -> reopen()
       is Command.Slate -> slate(command.on)
       Command.StopBroadcast, is Command.End -> stopBroadcast()
@@ -574,6 +699,7 @@ class CaptureRun(
    * next take's first refusal is written with its own count.
    */
   private suspend fun slate(on: Boolean) {
+    framing.unopened() // spec 2026-11-25: the slate is no camera, and its fall asks a new open
     parts.slate(on)
     stopProbing()
     if (on) probeWhileSlated()
@@ -632,7 +758,9 @@ class CaptureRun(
     if (started == null) return timedOut(id, start)
     if (!started) return calls.report(Input.ConnectFailed(id, ConnectFailure.OTHER, "srt url does not parse"))
     signals.connected(id)?.let(calls.report)
+    framing.airing() // spec 2026-11-25: the zoom in use, once a broadcast
     noteMicSession()
+    if (!speechSet) speak() // spec §3.1: a recording whose session the build could not read is set now
     watchClose(id)
   }
 
@@ -763,6 +891,7 @@ class CaptureRun(
   /** The broadcast ends; the pairing, the camera and the viewfinder stay (amendment, _States_). */
   private suspend fun stopBroadcast() {
     attempt?.let { stopHeld(it) }
+    framing.grounded()
     cameras.offAir()
     parts.afterBroadcast()
   }

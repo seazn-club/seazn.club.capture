@@ -183,6 +183,20 @@ class PairMappingTest {
   }
 
   @Test
+  fun `the capture choices ride the pair - absent or mistyped, match sound on and constant bitrate off`() {
+    val chosen = PairMapping.request(wire().apply { put("matchSound", false); put("constantBitrate", true) })
+    assertEquals(false, chosen.matchSound)
+    assertEquals(true, chosen.constantBitrate)
+    val bare = PairMapping.request(wire().apply { remove("matchSound"); remove("constantBitrate") })
+    assertEquals(true, bare.matchSound)
+    assertEquals(false, bare.constantBitrate)
+    val mistyped = PairMapping.request(wire().apply { put("matchSound", "false"); put("constantBitrate", "true") })
+    assertEquals(true, mistyped.matchSound, "a string is no flag")
+    assertEquals(false, mistyped.constantBitrate, "a string is no flag")
+    assertEquals(emptyList<String>(), chosen.problems(), "never a reason to refuse a pair")
+  }
+
+  @Test
   fun `absent settings take their defaults - automatic on, claim resume, staging`() {
     val bare = wire().apply { remove("automatic"); remove("claim"); remove("environment"); remove("language") }
     val request = PairMapping.request(bare)

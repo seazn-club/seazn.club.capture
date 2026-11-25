@@ -43,6 +43,7 @@ descriptor schema's prose and fifteen fixtures' RTMPS host to `live.cloudflare.c
 | `capture-matchday-open.v1.json`     | Opening a match through a Match Day code: its scoring link, or finished    |
 | `capture-matchday-approval.v1.json` | An approval's review, its approve and their answers                        |
 | `capture-matchday-call.v1.json`     | A free court's candidates, the call's preview, the call and its Undo       |
+| `capture-matchday-realtime.v1.json` | The Match Day realtime door's subscriber token and its refusals            |
 | `fixtures/<contract>/…`             | The web's own fixtures for each, in the web's tree                         |
 | `VENDORED.json`                     | The web commit and the sha256 of every file above, written by the script   |
 

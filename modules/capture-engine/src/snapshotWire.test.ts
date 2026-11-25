@@ -17,6 +17,8 @@ const PAIRING = {
   slot: 1,
   tokenTag: 'c980ff38',
   automatic: true,
+  matchSound: true,
+  constantBitrate: false,
   label: 'Example Town v Sample CC',
   venueTimezone: 'Europe/London',
   scheduledStart: new Date('2026-09-21T15:13:20Z'),
@@ -309,6 +311,17 @@ const EXPECTED: Readonly<Record<string, Expected>> = {
     reportedAtMs: 1_790_000_010_000,
     survivesBackground: true,
   },
+  // Spec 2026-11-24-capture-tuning §2: the operator's capture choices, each off its default.
+  'paired-tuned': {
+    ...REST,
+    state: { kind: 'paired' },
+    pairing: { ...PAIRING, matchSound: false, constantBitrate: true },
+    broadcast: null,
+    ready: READY,
+    camera: 'own',
+    reportedAtMs: 1_790_000_012_000,
+    survivesBackground: true,
+  },
   // T46 (design 2026-11-24 §3): the server's delivery facts ride telemetry; the rest of the snapshot is live as ever.
   'live-server-facts': {
     ...REST,
@@ -345,8 +358,8 @@ const EXPECTED: Readonly<Record<string, Expected>> = {
 
 describe('carries 2-6: the snapshot wire, as native writes it (Task 12)', () => {
   // The file's count, so an emptied or truncated file cannot pass by sweeping nothing (PV12).
-  it('has an expectation for each of the 24 cases, and a case for every expectation', () => {
-    expect(vectors.cases).toHaveLength(24);
+  it('has an expectation for each of the 25 cases, and a case for every expectation', () => {
+    expect(vectors.cases).toHaveLength(25);
     expect(vectors.cases.map((c) => c.name).sort()).toEqual(Object.keys(EXPECTED).sort());
   });
 
@@ -468,6 +481,21 @@ describe('carries 2-6: the snapshot wire, as native writes it (Task 12)', () => 
     expect(toEngineSnapshot(off)?.pairing?.starting).toBe(false);
     const { starting: _gone, ...without } = wire.pairing as Record<string, unknown>;
     expect(toEngineSnapshot({ ...wire, pairing: without })).toBeNull();
+  });
+
+  // Spec 2026-11-24-capture-tuning §2: a capture choice is never guessed: anything but a flag is a malformed pairing.
+  it.each([
+    ['matchSound', 'false'],
+    ['matchSound', null],
+    ['constantBitrate', 1],
+    ['constantBitrate', undefined],
+  ])('reads a pairing whose %s is %s as no snapshot', (key, value) => {
+    const wire = vectorWire('paired-tuned');
+    expect(toEngineSnapshot(wire)?.pairing).toMatchObject({
+      matchSound: false,
+      constantBitrate: true,
+    });
+    expect(toEngineSnapshot({ ...wire, pairing: { ...wire.pairing, [key]: value } })).toBeNull();
   });
 
   // E2 (2026-11-17): the court's refused automatic start is display only, as next is: anything but one of the six words

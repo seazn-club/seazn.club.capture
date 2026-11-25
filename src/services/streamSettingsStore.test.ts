@@ -44,7 +44,12 @@ describe('stream settings (D23)', () => {
   it('starts with controls on the right and the automatic start on', async () => {
     const { store, events } = build();
     await store.load();
-    expect(store.getSnapshot()).toEqual({ side: 'right', automatic: true });
+    expect(store.getSnapshot()).toEqual({
+      side: 'right',
+      automatic: true,
+      matchSound: true,
+      constantBitrate: false,
+    });
     // Nothing saved is the first launch, not an unreadable record.
     expect(events()).toEqual([]);
   });
@@ -55,16 +60,33 @@ describe('stream settings (D23)', () => {
     });
     const { store } = build(kv);
     await store.load();
-    expect(store.getSnapshot()).toEqual({ side: 'left', automatic: false });
+    expect(store.getSnapshot()).toEqual({
+      side: 'left',
+      automatic: false,
+      matchSound: true,
+      constantBitrate: false,
+    });
   });
 
   // A4's and D2's upgrades: an operator's side and automatic survive, the automatic start reads on from v1, and the
   // score preview's overlay is dropped from both (D2 §4.1).
   it.each([
-    ['{"v":1,"overlay":false,"side":"right"}', { side: 'right', automatic: true }],
-    ['{"v":1,"overlay":true,"side":"left"}', { side: 'left', automatic: true }],
-    ['{"v":2,"overlay":true,"side":"left","automatic":false}', { side: 'left', automatic: false }],
-    ['{"v":2,"overlay":false,"side":"right","automatic":true}', { side: 'right', automatic: true }],
+    [
+      '{"v":1,"overlay":false,"side":"right"}',
+      { side: 'right', automatic: true, matchSound: true, constantBitrate: false },
+    ],
+    [
+      '{"v":1,"overlay":true,"side":"left"}',
+      { side: 'left', automatic: true, matchSound: true, constantBitrate: false },
+    ],
+    [
+      '{"v":2,"overlay":true,"side":"left","automatic":false}',
+      { side: 'left', automatic: false, matchSound: true, constantBitrate: false },
+    ],
+    [
+      '{"v":2,"overlay":false,"side":"right","automatic":true}',
+      { side: 'right', automatic: true, matchSound: true, constantBitrate: false },
+    ],
   ])('reads %s as saved, not as the defaults', async (text, expected) => {
     const { store, events } = build(createMemoryKeyValueStore({ [SETTINGS_KEY]: text }));
     await store.load();
@@ -127,7 +149,9 @@ describe('stream settings (D23)', () => {
     expect(store.getSnapshot().side).toBe('left');
     expect(listener).toHaveBeenCalledTimes(1);
     expect(await saved).toBe('saved');
-    expect(kv.entries.get(SETTINGS_KEY)).toBe('{"v":3,"side":"left","automatic":true}');
+    expect(kv.entries.get(SETTINGS_KEY)).toBe(
+      '{"v":4,"side":"left","automatic":true,"matchSound":true,"constantBitrate":false}',
+    );
   });
 
   it('keeps the same snapshot until something changes (useSyncExternalStore)', async () => {
@@ -162,10 +186,17 @@ describe('stream settings (D23)', () => {
     await first.load();
     await first.set({ automatic: false, side: 'left' });
     // A literal, not SETTINGS_KEY: renaming the key would reset every operator's settings (m2).
-    expect(kv.entries.get('settings.stream')).toBe('{"v":3,"side":"left","automatic":false}');
+    expect(kv.entries.get('settings.stream')).toBe(
+      '{"v":4,"side":"left","automatic":false,"matchSound":true,"constantBitrate":false}',
+    );
     const { store: second, events } = build(kv);
     await second.load();
-    expect(second.getSnapshot()).toEqual({ side: 'left', automatic: false });
+    expect(second.getSnapshot()).toEqual({
+      side: 'left',
+      automatic: false,
+      matchSound: true,
+      constantBitrate: false,
+    });
     expect(events()).toEqual([]);
   });
 
@@ -219,9 +250,16 @@ describe('a change before the saved settings are read', () => {
     expect(set).not.toHaveBeenCalled();
     answer('{"v":2,"overlay":true,"side":"left","automatic":false}');
     await loading;
-    expect(store.getSnapshot()).toEqual({ side: 'right', automatic: false });
+    expect(store.getSnapshot()).toEqual({
+      side: 'right',
+      automatic: false,
+      matchSound: true,
+      constantBitrate: false,
+    });
     expect(await saving).toBe('saved');
-    expect(kv.entries.get(SETTINGS_KEY)).toBe('{"v":3,"side":"right","automatic":false}');
+    expect(kv.entries.get(SETTINGS_KEY)).toBe(
+      '{"v":4,"side":"right","automatic":false,"matchSound":true,"constantBitrate":false}',
+    );
     expect(events()).toEqual([]);
   });
 
@@ -233,9 +271,16 @@ describe('a change before the saved settings are read', () => {
     const second = store.set({ side: 'left' });
     answer('{"v":1,"overlay":true,"side":"right"}');
     await loading;
-    expect(store.getSnapshot()).toEqual({ side: 'left', automatic: false });
+    expect(store.getSnapshot()).toEqual({
+      side: 'left',
+      automatic: false,
+      matchSound: true,
+      constantBitrate: false,
+    });
     expect([await first, await second]).toEqual(['saved', 'saved']);
-    expect(kv.entries.get(SETTINGS_KEY)).toBe('{"v":3,"side":"left","automatic":false}');
+    expect(kv.entries.get(SETTINGS_KEY)).toBe(
+      '{"v":4,"side":"left","automatic":false,"matchSound":true,"constantBitrate":false}',
+    );
   });
 
   it('reads the saved settings first when a change comes before any load', async () => {
@@ -245,10 +290,17 @@ describe('a change before the saved settings are read', () => {
     const get = vi.spyOn(kv, 'get');
     const { store } = build(kv);
     expect(await store.set({ side: 'right' })).toBe('saved');
-    expect(kv.entries.get(SETTINGS_KEY)).toBe('{"v":3,"side":"right","automatic":false}');
+    expect(kv.entries.get(SETTINGS_KEY)).toBe(
+      '{"v":4,"side":"right","automatic":false,"matchSound":true,"constantBitrate":false}',
+    );
     await store.load();
     expect(get).toHaveBeenCalledTimes(1);
-    expect(store.getSnapshot()).toEqual({ side: 'right', automatic: false });
+    expect(store.getSnapshot()).toEqual({
+      side: 'right',
+      automatic: false,
+      matchSound: true,
+      constantBitrate: false,
+    });
   });
 
   it('saves the change over the defaults after a refused read, and says the read failed', async () => {
@@ -260,8 +312,15 @@ describe('a change before the saved settings are read', () => {
     };
     const { store, events } = build(refusingRead);
     expect(await store.set({ side: 'left' })).toBe('saved');
-    expect(store.getSnapshot()).toEqual({ side: 'left', automatic: true });
-    expect(kv.entries.get(SETTINGS_KEY)).toBe('{"v":3,"side":"left","automatic":true}');
+    expect(store.getSnapshot()).toEqual({
+      side: 'left',
+      automatic: true,
+      matchSound: true,
+      constantBitrate: false,
+    });
+    expect(kv.entries.get(SETTINGS_KEY)).toBe(
+      '{"v":4,"side":"left","automatic":true,"matchSound":true,"constantBitrate":false}',
+    );
     expect(events()).toEqual(['settings.read-refused']);
   });
 });
@@ -283,7 +342,9 @@ describe('two changes in quick succession (a second call)', () => {
     }
     expect(await first).toBe('saved');
     expect(await second).toBe('saved');
-    expect(kv.entries.get(SETTINGS_KEY)).toBe('{"v":3,"side":"left","automatic":false}');
+    expect(kv.entries.get(SETTINGS_KEY)).toBe(
+      '{"v":4,"side":"left","automatic":false,"matchSound":true,"constantBitrate":false}',
+    );
   });
 
   it('still saves the next change after a refused write', async () => {
@@ -299,7 +360,9 @@ describe('two changes in quick succession (a second call)', () => {
     await flush();
     expect(await first).toBe('refused');
     expect(await second).toBe('saved');
-    expect(kv.entries.get(SETTINGS_KEY)).toBe('{"v":3,"side":"left","automatic":false}');
+    expect(kv.entries.get(SETTINGS_KEY)).toBe(
+      '{"v":4,"side":"left","automatic":false,"matchSound":true,"constantBitrate":false}',
+    );
     expect(events()).toEqual(['settings.write-refused']);
   });
 });
@@ -317,26 +380,38 @@ describe('wire v3: the score preview is gone from the record (D2 §4.1)', () => 
       [SETTINGS_KEY]: '{"v":2,"overlay":false,"side":"left","automatic":false}',
     });
     await store.load();
-    expect(store.getSnapshot()).toEqual({ side: 'left', automatic: false });
+    expect(store.getSnapshot()).toEqual({
+      side: 'left',
+      automatic: false,
+      matchSound: true,
+      constantBitrate: false,
+    });
     expect(record.lines()).toEqual([]);
   });
 
   it('reads a v1 record: its side kept, automatic on by default, its overlay dropped', async () => {
     const { store } = storeOver({ [SETTINGS_KEY]: '{"v":1,"overlay":true,"side":"left"}' });
     await store.load();
-    expect(store.getSnapshot()).toEqual({ side: 'left', automatic: true });
+    expect(store.getSnapshot()).toEqual({
+      side: 'left',
+      automatic: true,
+      matchSound: true,
+      constantBitrate: false,
+    });
   });
 
-  it('writes v3 on the next save, with no overlay in it', async () => {
+  it('writes v4 on the next save, with no overlay in it', async () => {
     const { store, kv } = storeOver({
       [SETTINGS_KEY]: '{"v":2,"overlay":true,"side":"right","automatic":true}',
     });
     await store.load();
     await store.set({ side: 'left' });
     expect(JSON.parse((await kv.get(SETTINGS_KEY)) ?? 'null')).toEqual({
-      v: 3,
+      v: 4,
       side: 'left',
       automatic: true,
+      matchSound: true,
+      constantBitrate: false,
     });
   });
 
@@ -347,19 +422,68 @@ describe('wire v3: the score preview is gone from the record (D2 §4.1)', () => 
     ]) {
       const { store } = storeOver({ [SETTINGS_KEY]: text });
       await store.load();
-      expect(store.getSnapshot()).toEqual({ side: 'left', automatic: false });
+      expect(store.getSnapshot()).toEqual({
+        side: 'left',
+        automatic: false,
+        matchSound: true,
+        constantBitrate: false,
+      });
     }
   });
 
   it.each([
     ['a v2 with no side', '{"v":2,"overlay":true,"automatic":true}'],
     ['a v3 with no automatic', '{"v":3,"side":"left"}'],
-    ['a v4', '{"v":4,"side":"left","automatic":true}'],
+    ['a v4 with no capture choices', '{"v":4,"side":"left","automatic":true}'],
+    [
+      'a v4 whose match sound is text',
+      '{"v":4,"side":"left","automatic":true,"matchSound":"off","constantBitrate":false}',
+    ],
+    ['a v4 with no constant bitrate', '{"v":4,"side":"left","automatic":true,"matchSound":false}'],
+    ['a v5', '{"v":5,"side":"left","automatic":true,"matchSound":true,"constantBitrate":false}'],
     ['not JSON', 'side=left'],
   ])('falls back to the defaults for %s, and says so', async (_name, text) => {
     const { store, record } = storeOver({ [SETTINGS_KEY]: text });
     await store.load();
-    expect(store.getSnapshot()).toEqual({ side: 'right', automatic: true });
+    expect(store.getSnapshot()).toEqual({
+      side: 'right',
+      automatic: true,
+      matchSound: true,
+      constantBitrate: false,
+    });
     expect(record.lines().join('\n')).toContain('settings.unreadable');
+  });
+});
+
+describe('wire v4: the capture choices (spec 2026-11-24-capture-tuning §2)', () => {
+  it('reads a v3 record with match sound on and constant bitrate off, its side and automatic kept', async () => {
+    const kv = createMemoryKeyValueStore({
+      [SETTINGS_KEY]: '{"v":3,"side":"left","automatic":false}',
+    });
+    const { store, events } = build(kv);
+    await store.load();
+    expect(store.getSnapshot()).toEqual({
+      side: 'left',
+      automatic: false,
+      matchSound: true,
+      constantBitrate: false,
+    });
+    expect(events()).toEqual([]);
+  });
+
+  it('saves each choice and reads it back after a cold start', async () => {
+    const kv = createMemoryKeyValueStore();
+    const first = build(kv).store;
+    await first.load();
+    expect(await first.set({ matchSound: false })).toBe('saved');
+    expect(await first.set({ constantBitrate: true })).toBe('saved');
+    const second = build(kv).store;
+    await second.load();
+    expect(second.getSnapshot()).toEqual({
+      side: 'right',
+      automatic: true,
+      matchSound: false,
+      constantBitrate: true,
+    });
   });
 });

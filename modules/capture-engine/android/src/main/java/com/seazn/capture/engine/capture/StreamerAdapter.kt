@@ -6,6 +6,7 @@ import android.hardware.camera2.CameraAccessException
 import android.hardware.camera2.CameraCharacteristics
 import android.media.AudioFormat
 import android.media.MediaFormat
+import android.media.MediaRecorder
 import android.os.SystemClock
 import android.util.Size
 import android.view.SurfaceHolder
@@ -24,13 +25,20 @@ import com.seazn.capture.engine.capture.run.CaptureParts
 import com.seazn.capture.engine.capture.run.CaptureRun
 import com.seazn.capture.engine.capture.run.CoreCalls
 import com.seazn.capture.engine.capture.run.Probe
+import com.seazn.capture.engine.core.Antibanding
+import com.seazn.capture.engine.core.BitrateMode
+import com.seazn.capture.engine.core.CameraTouch
 import com.seazn.capture.engine.core.Command
 import com.seazn.capture.engine.core.Encode
+import com.seazn.capture.engine.core.MeterPoint
 import com.seazn.capture.engine.core.PairRequest
 import com.seazn.capture.engine.core.RecordEntry
 import com.seazn.capture.engine.core.RtmpsTarget
 import com.seazn.capture.engine.core.Side
+import com.seazn.capture.engine.core.SpeechState
 import com.seazn.capture.engine.core.SrtTarget
+import com.seazn.capture.engine.core.Tuning
+import com.seazn.capture.engine.core.ZoomRange
 import com.seazn.capture.engine.endpoints.CaptureClockLine
 import com.seazn.capture.engine.net.HostLookup
 import com.seazn.capture.engine.endpoints.CaptureEndpointFactory
@@ -39,6 +47,7 @@ import com.seazn.capture.engine.preview.PreviewSizes
 import com.seazn.capture.engine.srt.SeaznSrtSink
 import io.github.thibaultbee.streampack.core.elements.encoders.AudioCodecConfig
 import io.github.thibaultbee.streampack.core.elements.encoders.VideoCodecConfig
+import io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.MicrophoneSourceFactory
 import io.github.thibaultbee.streampack.core.elements.endpoints.composites.muxers.ts.data.TSServiceInfo
 import io.github.thibaultbee.streampack.core.elements.sources.video.IVideoSourceInternal
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.CameraException
@@ -109,6 +118,15 @@ class StreamerAdapter(
 
   /** The last camera whose preview sizes were written, so a reopen of the same camera writes none (a change of camera writes again). */
   @Volatile private var sizedCamera: String? = null
+
+  /** Spec 2026-11-24-capture-tuning §3.1: our own speech effects on the held recording, none while match sound is on. */
+  private val speechEffects = SpeechEffects.create()
+
+  /**
+   * Spec §3.2: the mode the last customize asked the encoder for. Written inside StreamPack's encoder creation, read
+   * by the build once `setVideoConfig` returns.
+   */
+  @Volatile private var lastMode: BitrateMode = BitrateMode.VBR
   private var readinessJob: Job? = null
 
   /** D2 (1): a scope of its own, so a throw on a photo cannot reach `scope`'s handler above, which fails the session. */
@@ -129,6 +147,8 @@ class StreamerAdapter(
   override fun execute(command: Command) = run.execute(command)
 
   override fun foreground() = run.foreground()
+
+  override fun touch(touch: CameraTouch) = run.touch(touch)
 
   /** N45 I1: CameraWatch's word that our camera may be free now (an available, Camera2's priorities): a probe at once. */
   fun cameraMayBeFree() = run.mayBeFree()
@@ -230,23 +250,32 @@ class StreamerAdapter(
       get() = current.value != null
 
     /** P11, P12, I4: a failure is returned, with Camera2's reason when one is in its cause chain; never thrown. */
-    override suspend fun build(rotation: Int): Built {
+    override suspend fun build(rotation: Int, tuning: Tuning): Built {
       val id = context.cameraManager.backCameras.firstOrNull() ?: context.defaultCameraId
       cameras.selfChange(SystemClock.elapsedRealtime()) // our own open's availability events are ours
       val made =
         try {
-          cameraSingleStreamer(context, cameraId = id, endpointFactory = endpoints, defaultRotation = rotation)
+          // Spec 2026-11-24-capture-tuning §3.1: CAMCORDER, StreamPack's own source, with none of its default effects
+          // (AEC and NS): match sound on is the ground's sound. Speech processing, when wanted, is ours ([speech]).
+          cameraSingleStreamer(
+            context,
+            cameraId = id,
+            audioSourceFactory = MicrophoneSourceFactory(MediaRecorder.AudioSource.CAMCORDER, emptySet()),
+            endpointFactory = endpoints,
+            defaultRotation = rotation,
+          )
         } catch (e: CancellationException) {
           throw e
         } catch (e: Exception) {
           return Built.Failed(id, accessReason(e), encoder = false, error = e)
         }
-      configured(made)?.let { return Built.Failed(id, accessReason(it), encoder = true, error = it) }
+      lastMode = BitrateMode.of(tuning.constantBitrate, supported = null)
+      configured(made, tuning)?.let { return Built.Failed(id, accessReason(it), encoder = true, error = it) }
       cameraId = id
       current.value = made
       sound.start()
       readinessJob = scope.launch { reportReadiness() }
-      return Built.Ready(id) // I-2: asked for, not opened: StreamPack opens it at the first preview or the start
+      return Built.Ready(id, lastMode) // I-2: asked for, not opened: StreamPack opens it at the first preview or the start
     }
 
     /** I4: the Camera2 reason anywhere in the cause chain, so a wrapper of StreamPack's does not hide it. */
@@ -254,10 +283,10 @@ class StreamerAdapter(
       generateSequence(e) { it.cause }.take(8).filterIsInstance<CameraAccessException>().firstOrNull()?.reason
 
     /** The codecs and the level effect; the streamer is released when they fail, and the failure returned. */
-    private suspend fun configured(made: SingleStreamer): Exception? =
+    private suspend fun configured(made: SingleStreamer, tuning: Tuning): Exception? =
       try {
         made.setAudioConfig(AUDIO)
-        made.setVideoConfig(video())
+        made.setVideoConfig(video(tuning.constantBitrate))
         made.audioInput.processor.add(AudioLevelEffect(::level))
         null
       } catch (e: CancellationException) {
@@ -275,6 +304,7 @@ class StreamerAdapter(
       val held = current.value
       current.value = null // the preview unbinds first (Task 39)
       sizedCamera = null
+      speechEffects.release() // spec 2026-11-24-capture-tuning §3.1: before the recording goes
       if (held != null) {
         quietly("stop") { held.stopStream() }
         quietly("close") { held.close() }
@@ -419,6 +449,48 @@ class StreamerAdapter(
       camera.settings.applyRepeatingSession()
     }
 
+    /** Spec 2026-11-24-capture-tuning §3.1: null when nothing is held or its recording's session is not readable yet. */
+    override suspend fun speech(on: Boolean): SpeechState? {
+      val session = streamerSession() ?: return null
+      return speechEffects.set(session, on)
+    }
+
+    /** Spec §3.3: the source held now, of that id, only, as [stabilise]. */
+    override suspend fun antibanding(cameraId: String): Antibanding? = heldCamera(cameraId)?.let { Antibands.set(it) }
+
+    /**
+     * Spec 2026-11-25-zoom-and-metering: StreamPack 3.2.1's zoom range, read from `CONTROL_ZOOM_RATIO_RANGE` (`RZoom`,
+     * the one it builds from API 30; javap), of the held camera source [cameraId] while it is open now.
+     */
+    override fun zoomRange(cameraId: String): ZoomRange? =
+      openCamera(cameraId)?.settings?.zoom?.availableRatioRange?.let { ZoomRange(it.lower, it.upper) }
+
+    /**
+     * Spec §3: `RZoom.setZoomRatio` (javap: sets `CONTROL_ZOOM_RATIO` within the range and applies the repeating request)
+     * on the held camera source [cameraId], only while it is open now.
+     */
+    override suspend fun zoom(cameraId: String, ratio: Float): Boolean {
+      val camera = openCamera(cameraId) ?: return false
+      camera.settings.zoom.setZoomRatio(ratio)
+      return true
+    }
+
+    /** Spec §4: the focus and exposure regions ([Meters]) on the held camera source [cameraId], only while it is open now. */
+    override suspend fun meter(cameraId: String, point: MeterPoint?, frameDegrees: Int): Boolean {
+      val camera = openCamera(cameraId) ?: return false
+      Meters.set(camera, point, frameDegrees)
+      return true
+    }
+
+    /**
+     * Spec 2026-11-25-zoom-and-metering: the held source of that id while StreamPack reports it open now, previewing or
+     * streaming (the flows [cameraOpens] reads; javap, 3.2.1: both turn false when its device closes, a loss's included).
+     * Against a device not open, `CameraSettings.set` and `applyRepeatingSession` open it. The run's accepted-open gate
+     * comes first; this is the device's own word at the moment of the call.
+     */
+    private fun openCamera(cameraId: String): ICameraSource? =
+      heldCamera(cameraId)?.takeIf { it.isPreviewingFlow.value || (it as? IVideoSourceInternal)?.isStreamingFlow?.value == true }
+
     /** The held streamer's camera source, when it is camera [cameraId]: never a slate, a switch's other camera or none. */
     private fun heldCamera(cameraId: String): ICameraSource? =
       (current.value?.videoInput?.sourceFlow?.value as? ICameraSource)?.takeIf { it.cameraId == cameraId }
@@ -447,7 +519,11 @@ class StreamerAdapter(
     }
   }
 
-  private fun video() =
+  /**
+   * Spec 2026-11-24-capture-tuning §3.2: [constant] asks for CBR only when the encoder StreamPack picks lists it
+   * ([EncoderModes]); [lastMode] says what was asked. customize runs inside StreamPack's encoder creation.
+   */
+  private fun video(constant: Boolean) =
     VideoCodecConfig(
       mimeType = MediaFormat.MIMETYPE_VIDEO_AVC,
       startBitrate = Encode.START_BPS,
@@ -456,7 +532,11 @@ class StreamerAdapter(
       // N47: 3 s, not 2 s. Cloudflare requires 2–10 s and a 60-frame GOP's timing jitter (1986–2012 ms) crossed the floor.
       // S5: one constant, which the delivery watch's segment is too.
       gopDurationInS = Encode.GOP_MS / 1_000f,
-      customize = { _ -> EncoderKeys.VIDEO.forEach { (key, value) -> setInteger(key, value) } },
+      customize = { _ ->
+        val mode = BitrateMode.of(constant, if (constant) EncoderModes.cbrSupported(this) else null)
+        lastMode = mode
+        EncoderKeys.video(mode).forEach { (key, value) -> setInteger(key, value) }
+      },
     )
 
   private companion object {

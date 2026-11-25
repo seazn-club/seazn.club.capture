@@ -39,6 +39,8 @@ describe('pairIntentFor', () => {
     const facts = {
       language: 'fr',
       automatic: false,
+      matchSound: true,
+      constantBitrate: false,
       environment: 'production',
       claim: 'resume',
     } as const;
@@ -53,6 +55,8 @@ describe('pairIntentFor', () => {
       venueTimezone: 'Europe/London',
       language: 'fr',
       automatic: false,
+      matchSound: true,
+      constantBitrate: false,
       environment: 'production',
       claim: 'resume',
     } satisfies EngineIntent);
@@ -63,6 +67,8 @@ describe('pairIntentFor', () => {
     const facts = {
       language: 'en',
       automatic: true,
+      matchSound: true,
+      constantBitrate: false,
       environment: 'staging',
       claim: 'new',
     } as const;
@@ -90,6 +96,8 @@ describe('pairIntentFor', () => {
     const facts = {
       language: 'nl',
       automatic: true,
+      matchSound: true,
+      constantBitrate: false,
       environment: 'staging',
       claim: 'resume',
     } as const;
@@ -106,6 +114,8 @@ describe('pairIntentFor', () => {
     const facts = {
       language: 'en',
       automatic: true,
+      matchSound: true,
+      constantBitrate: false,
       environment: 'staging',
       claim: 'resume',
     } as const;
@@ -119,6 +129,8 @@ describe('pairIntentFor', () => {
     const facts = {
       language: 'en',
       automatic: true,
+      matchSound: true,
+      constantBitrate: false,
       environment: 'staging',
       claim: 'new',
     } as const;
@@ -142,6 +154,8 @@ describe('usePairing', () => {
         slot: 1,
         language: 'en',
         automatic: true,
+        matchSound: true,
+        constantBitrate: false,
         environment: 'staging',
         claim: 'new',
       }),
@@ -156,6 +170,15 @@ describe('usePairing', () => {
     const { result } = pairer(fakes);
     act(() => result.current(savedStreamCode(), 'new'));
     expect(fakes.engine.intents.at(-1)).toMatchObject({ language: 'fr', automatic: false });
+  });
+
+  // Spec 2026-11-24-capture-tuning §2: the saved capture choices ride the pair, so the new pairing starts with them.
+  it('carries the saved match sound and constant bitrate', async () => {
+    const fakes = createFakePorts();
+    await act(() => fakes.ports.streamSettings.set({ matchSound: false, constantBitrate: true }));
+    const { result } = pairer(fakes);
+    act(() => result.current(savedStreamCode(), 'new'));
+    expect(fakes.engine.intents.at(-1)).toMatchObject({ matchSound: false, constantBitrate: true });
   });
 
   it('sends nothing when the same code is already paired (a second call adopts)', () => {

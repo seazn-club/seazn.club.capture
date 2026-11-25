@@ -9,6 +9,8 @@ const namedBy = (intent: PairIntent): PairingInfo => ({
   slot: intent.slot,
   tokenTag: tokenTag(intent.token),
   automatic: intent.automatic,
+  matchSound: intent.matchSound,
+  constantBitrate: intent.constantBitrate,
   label: '',
   venueTimezone: '',
   scheduledStart: null,

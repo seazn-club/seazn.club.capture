@@ -8,6 +8,8 @@ type ChoiceRowProps = {
   readonly label: string;
   readonly checked: boolean;
   readonly onPress: () => void;
+  /** Off, and drawn so: a setting that would disturb a held broadcast (AGENTS §6). The screen says why, in a line. */
+  readonly disabled?: boolean;
 };
 
 /**
@@ -16,7 +18,12 @@ type ChoiceRowProps = {
  * only shown; the pill is a picture of that state, so it is hidden from the accessibility tree and is never a
  * second control (`SwitchTrack`).
  */
-export const ChoiceRow = memo(function ChoiceRow({ label, checked, onPress }: ChoiceRowProps) {
+export const ChoiceRow = memo(function ChoiceRow({
+  label,
+  checked,
+  onPress,
+  disabled = false,
+}: ChoiceRowProps) {
   return (
     <Pressable
       accessibilityRole="switch"
@@ -25,10 +32,11 @@ export const ChoiceRow = memo(function ChoiceRow({ label, checked, onPress }: Ch
       // Pressable reads aria-checked into the same checked state (0.86,
       // Libraries/Components/Pressable/Pressable.js).
       aria-checked={checked}
+      disabled={disabled}
       onPress={onPress}
       style={styles.row}
     >
-      <Text variant="controlInk" style={styles.label}>
+      <Text variant="controlInk" style={disabled ? styles.labelOff : styles.label}>
         {label}
       </Text>
       <SwitchTrack checked={checked} />
@@ -49,4 +57,5 @@ const styles = StyleSheet.create({
   },
   // The label takes the line, so the switch is pushed to the right and a long label wraps beside it.
   label: { flex: 1 },
+  labelOff: { flex: 1, color: colour.ink3 },
 });

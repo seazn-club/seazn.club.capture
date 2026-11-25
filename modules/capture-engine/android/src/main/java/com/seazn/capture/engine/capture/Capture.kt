@@ -1,6 +1,7 @@
 package com.seazn.capture.engine.capture
 
 import com.seazn.capture.engine.adapter.FrameCount
+import com.seazn.capture.engine.core.CameraTouch
 import com.seazn.capture.engine.core.Command
 import com.seazn.capture.engine.core.LinkCounters
 import com.seazn.capture.engine.core.PairRequest
@@ -45,4 +46,10 @@ interface Capture {
    * throws. One of the two calls that answer (the other is `scoringLink`), recorded in AGENTS §2.
    */
   fun takePhoto(done: (String) -> Unit)
+
+  /**
+   * Spec 2026-11-25-zoom-and-metering: the operator's pinch or tap on the preview, from the main thread. Returns at once;
+   * the capture decides whether it is carried out (an accepted open, and the zoom before air only), never the view.
+   */
+  fun touch(touch: CameraTouch)
 }

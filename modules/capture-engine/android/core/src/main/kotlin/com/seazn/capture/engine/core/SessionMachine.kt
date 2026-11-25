@@ -62,6 +62,8 @@ object SessionMachine {
       Input.Forget -> Pairings.forget(phase)
       is Input.SetAutomatic -> Pairings.automatic(phase, input.on)
       is Input.SetLanguage -> Pairings.language(phase, input.language)
+      is Input.SetMatchSound -> Pairings.matchSound(phase, input.on)
+      is Input.SetConstantBitrate -> Pairings.constantBitrate(phase, input.on)
       is Input.ReadinessChanged -> Pairings.readiness(phase, input.readiness)
       Input.Start -> Verdicts.postStart(phase, now)
       Input.Stop -> stop(phase, now)
@@ -645,7 +647,7 @@ internal object Timers {
       is Phase.Connecting -> connecting(phase, now)
       is Phase.OnAir -> onAir(phase, now)
       is Phase.Arming -> Starts.tick(phase, now)
-      is Phase.Paired -> Verdicts.unconfirmed(phase, now)
+      is Phase.Paired -> Verdicts.tick(phase, now)
       is Phase.Idle, is Phase.Pairing, is Phase.Armed, is Phase.Ended -> Step(phase)
     }
 

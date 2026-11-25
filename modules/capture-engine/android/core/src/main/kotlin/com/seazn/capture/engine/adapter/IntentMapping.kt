@@ -22,6 +22,9 @@ object IntentMapping {
       "setAutomatic" -> WireValues.flag(wire["on"])?.let { Input.SetAutomatic(it) }
       // (P3) No string is no input, as setAutomatic's missing flag is: the pairing keeps its language.
       "setLanguage" -> (wire["language"] as? String)?.let { Input.SetLanguage(it) }
+      // Spec 2026-11-24-capture-tuning §2: a missing flag is no input, as setAutomatic's is.
+      "setMatchSound" -> WireValues.flag(wire["on"])?.let { Input.SetMatchSound(it) }
+      "setConstantBitrate" -> WireValues.flag(wire["on"])?.let { Input.SetConstantBitrate(it) }
       // Carry 10: reserved. S1 has no control for it; the platform swaps to the other facing camera.
       "switchCamera" -> Input.SwitchCamera
       else -> null

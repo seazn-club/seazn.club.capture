@@ -61,7 +61,7 @@ names the gear "Settings", and it always shows, cards or not. Settings has two
 sections of short rows, a label and a value, with no explanatory sentences
 (owner, same day: "make sure that it is clean display instead of printing
 text"): General (the language, the battery row and the record row) and Live
-Stream (its two phone settings). This supersedes the gear on the Live Stream
+Stream (its four phone settings; match sound and constant bitrate joined on 2026-11-24). This supersedes the gear on the Live Stream
 tile that opened Stream Settings (R2 of the D3 findings design, owner,
 2026-10-11, made a gear on 2026-10-12) and the rule that hid it while a card
 stood above the tiles (the D3 fixes plan's ruling P6). The language picker
@@ -507,7 +507,10 @@ Three rules travel with these tokens:
   hold it, and the server's Go live is the decision (A2, A10). The Stop hold
   ends the broadcast and unpairs (A3). On a court code it ends this match only
   and the court waits again (O5), and its label says so: "Hold to stop this
-  match".
+  match". The same mis-tap reasoning locks the pinch zoom from Arming on: a
+  pinch zooms before air only. A tap on the preview sets focus and exposure
+  there, on air too, since it never moves the frame (owner, 2026-11-24;
+  `docs/specs/2026-11-25-zoom-and-metering.md`).
 - **What viewers see is built, and hidden** (the owner's ruling, 2026-10-09:
   "keep all code and just hide button then when later stage like when org
   reqeust we can implemnt"). One compile-time switch, `FEATURES.viewerCheck`
@@ -567,9 +570,11 @@ Three rules travel with these tokens:
   LIVE plate beside the way back so the broadcast is never out of sight. The
   protection belongs on the individual control, not the screen: a setting that
   would disturb a live broadcast is disabled while live with a one-line reason —
-  the encode profile is the first one that will be. The named exception is
-  Settings' automatic switch: it stays usable on air, because it only affects
-  the automatic stop (A4). It lives inside the Live Stream route
+  Constant bitrate is, from Arming on ("After the broadcast"; capture tuning,
+  2026-11-24), and the encode profile will be. The named exceptions are
+  Settings' automatic switch, usable on air because it only affects the
+  automatic stop (A4), and Match sound, which changes the microphone's
+  processing with no stop or start. It lives inside the Live Stream route
   (`app/stream/`), so on air it is only _leaving the mode_ that is blocked:
   Home is hidden and Back says how to stop. A broadcast started remotely moves
   the app to Live Stream from wherever it is (A2).

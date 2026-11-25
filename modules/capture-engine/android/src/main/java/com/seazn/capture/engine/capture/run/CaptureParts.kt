@@ -1,6 +1,12 @@
 package com.seazn.capture.engine.capture.run
 
+import com.seazn.capture.engine.core.Antibanding
+import com.seazn.capture.engine.core.BitrateMode
 import com.seazn.capture.engine.core.Command
+import com.seazn.capture.engine.core.MeterPoint
+import com.seazn.capture.engine.core.SpeechState
+import com.seazn.capture.engine.core.Tuning
+import com.seazn.capture.engine.core.ZoomRange
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -11,8 +17,12 @@ interface CaptureParts {
   /** A streamer is built and not yet released. */
   val held: Boolean
 
-  /** Builds the camera, microphone and encoders, encoding at [rotation] (CD42), or says why it built nothing. */
-  suspend fun build(rotation: Int): Built
+  /**
+   * Builds the camera, microphone and encoders, encoding at [rotation] (CD42), or says why it built nothing. Spec
+   * 2026-11-24-capture-tuning §3: [tuning] is the run's latest; the encoder's bitrate mode is set from it here, and
+   * only here, so it never changes under a held streamer.
+   */
+  suspend fun build(rotation: Int, tuning: Tuning): Built
 
   /** Releases the held streamer, if any, and closes the camera's session: the preview unbinds first (CD37). */
   suspend fun release()
@@ -102,6 +112,35 @@ interface CaptureParts {
    * that has OIS. A throw is the run's to record; it never reaches the session's failure path.
    */
   suspend fun stabilise(cameraId: String)
+
+  /**
+   * Spec 2026-11-24-capture-tuning §3.1: speech processing (AEC and NS) on, or off, on the held streamer's microphone,
+   * at once, with no stop or start. Null when nothing is held or its recording's session is not known yet. A throw is
+   * the run's to record; it never reaches the session's failure path.
+   */
+  suspend fun speech(on: Boolean): SpeechState?
+
+  /**
+   * Spec §3.3: antibanding AUTO on the held camera source [cameraId] where it lists it, and what the capture result
+   * then said. Null when the source held now is not that camera. Asked only after an accepted open, as [stabilise] is.
+   */
+  suspend fun antibanding(cameraId: String): Antibanding?
+
+  /**
+   * Spec 2026-11-25-zoom-and-metering §3: camera [cameraId]'s zoom ratios (`CONTROL_ZOOM_RATIO_RANGE`). Null unless the
+   * source held now is that camera and StreamPack reports it open now: a setter against a closed device opens it.
+   */
+  fun zoomRange(cameraId: String): ZoomRange?
+
+  /** Spec §3: [ratio] on the held, open camera source [cameraId]; false, with nothing set, when it is not held or open. */
+  suspend fun zoom(cameraId: String, ratio: Float): Boolean
+
+  /**
+   * Spec §4: focus and exposure metered at [point] of the picture encoded at [frameDegrees], or the camera's own
+   * metering with null; continuous focus stays the mode. False, with nothing set, when the held source is not camera
+   * [cameraId] or is not open now.
+   */
+  suspend fun meter(cameraId: String, point: MeterPoint?, frameDegrees: Int): Boolean
 }
 
 /** N45 I1: what a probe of our camera found ([CaptureParts.probeCamera]). */
@@ -137,7 +176,7 @@ sealed interface Probe {
 /** What a build made: a streamer, or why none. */
 sealed interface Built {
   /** A streamer, on [cameraId]: asked for, not yet opened (StreamPack opens it lazily, review C7 I-2). */
-  data class Ready(val cameraId: String) : Built
+  data class Ready(val cameraId: String, val mode: BitrateMode = BitrateMode.VBR) : Built
 
   /**
    * Nothing built. [reason] is Camera2's `CameraAccessException` reason, when one is in the cause chain;

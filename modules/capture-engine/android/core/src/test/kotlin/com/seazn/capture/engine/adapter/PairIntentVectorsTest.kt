@@ -40,6 +40,8 @@ class PairIntentVectorsTest {
       assertEquals(listOf(sent["stageLabel"], sent["stageMatch"]), listOf(request.stageLabel, request.stageMatch), name)
       // The court crosses as sent, or as none (court stream §6.1): the court row sends one, the others none.
       assertEquals(sent["court"], request.court, name)
+      // Spec 2026-11-24-capture-tuning §2: the capture choices cross as sent; the rows send each both ways.
+      assertEquals(listOf(sent["matchSound"], sent["constantBitrate"]), listOf(request.matchSound, request.constantBitrate), name)
       if (sent.containsKey("stageLabel")) staged += 1
       if (sent.containsKey("court")) courted += 1
       checked += 1

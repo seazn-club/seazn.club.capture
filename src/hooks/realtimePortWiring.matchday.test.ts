@@ -85,7 +85,7 @@ const handlers = () => ({ onPing: vi.fn(), onDown: vi.fn(), onUp: vi.fn() });
 
 /**
  * The frame the web sends (2026-11-24, confirmed): event `broadcast`, payload `{type, event, payload: {v, reason, at}}`,
- * `v` epoch ms and `at` ISO-8601. PROVISIONAL until capture-matchday-realtime.v1 is vendored.
+ * `v` epoch ms and `at` ISO-8601. Vendored: capture-matchday-realtime.v1 (web 55d5bcc87d) names reason score, schedule or call.
  */
 const broadcast = (topic: string, event: string, reason = 'score') => ({
   topic,

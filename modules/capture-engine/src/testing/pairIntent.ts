@@ -16,6 +16,8 @@ export const PAIR: PairIntent = {
   venueTimezone: 'Europe/London',
   language: 'fr',
   automatic: false,
+  matchSound: false,
+  constantBitrate: true,
   claim: 'resume',
   environment: 'staging',
 };

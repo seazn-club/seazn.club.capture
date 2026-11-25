@@ -2,10 +2,16 @@ package com.seazn.capture.engine.capture.run
 
 import com.seazn.capture.engine.adapter.CameraAvailability
 import com.seazn.capture.engine.adapter.CameraFailures
+import com.seazn.capture.engine.core.Antibanding
+import com.seazn.capture.engine.core.BitrateMode
 import com.seazn.capture.engine.core.Command
 import com.seazn.capture.engine.core.Input
+import com.seazn.capture.engine.core.MeterPoint
 import com.seazn.capture.engine.core.PairRequest
 import com.seazn.capture.engine.core.RecordEntry
+import com.seazn.capture.engine.core.SpeechState
+import com.seazn.capture.engine.core.Tuning
+import com.seazn.capture.engine.core.ZoomRange
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -80,11 +86,18 @@ class FakeParts : CaptureParts {
   /** The held build's camera, as the adapter keeps its `cameraId`. */
   private var camera: String? = null
 
-  override suspend fun build(rotation: Int): Built {
+  /** Spec 2026-11-24-capture-tuning §3: the choices each build was given, in order. */
+  val builtWith = mutableListOf<Tuning>()
+
+  /** Spec §3.2: whether the encoder StreamPack picks lists CBR; null when none is found. */
+  var cbrSupported: Boolean? = true
+
+  override suspend fun build(rotation: Int, tuning: Tuning): Built {
     log += "build $rotation"
+    builtWith += tuning
     delay(STEP_MS)
     log += "build done"
-    val built = builds.removeFirstOrNull() ?: Built.Ready("0")
+    val built = builds.removeFirstOrNull() ?: Built.Ready("0", BitrateMode.of(tuning.constantBitrate, cbrSupported))
     held = built is Built.Ready
     camera = (built as? Built.Ready)?.cameraId
     return built
@@ -288,6 +301,98 @@ class FakeParts : CaptureParts {
     stabilised += cameraId
   }
 
+  /** Spec §3.1: each speech processing asked of a held microphone, on or off, in order. */
+  val speeches = mutableListOf<Boolean>()
+
+  /** Spec §3.1: whether StreamPack's microphone session can be read; false is the adapter's null. */
+  var speechKnown = true
+
+  /** Spec §3.1: whether the phone has the speech effects. */
+  var speechAvailable = true
+
+  /** Spec §3.1: a speech change that throws this. */
+  var speechFailure: Exception? = null
+
+  override suspend fun speech(on: Boolean): SpeechState? {
+    if (!held || !speechKnown) return null
+    speechFailure?.let { throw it }
+    speeches += on
+    return when {
+      !on -> SpeechState.OFF
+      speechAvailable -> SpeechState.ON
+      else -> SpeechState.UNAVAILABLE
+    }
+  }
+
+  /** Spec §3.3: what each camera's result reads after AUTO, by id; absent is a camera whose source is not held now. */
+  val antibands = mutableMapOf("0" to Antibanding.AUTO, "1" to Antibanding.UNAVAILABLE)
+
+  /** Spec §3.3: an antibanding setter that throws this. */
+  var antibandFailure: Exception? = null
+
+  /** Spec §3.3: each camera antibanding was asked of, in order. */
+  val antibanded = mutableListOf<String>()
+
+  override suspend fun antibanding(cameraId: String): Antibanding? {
+    val state = antibands[cameraId] ?: return null
+    antibandFailure?.let { throw it }
+    antibanded += cameraId
+    return state
+  }
+
+  /**
+   * Spec 2026-11-25-zoom-and-metering: each camera's zoom ratios, by id; absent is a camera whose source is not held, or
+   * not open, now (the adapter's null). Camera 1 is a front camera with less reach.
+   */
+  val zoomRanges = mutableMapOf("0" to ZoomRange(0.6f, 8f), "1" to ZoomRange(1f, 4f))
+
+  /** Spec §3: each ratio set, with its camera, in order. */
+  val zooms = mutableListOf<Pair<String, Float>>()
+
+  /** Spec §3: a zoom that throws this. */
+  var zoomFailure: Exception? = null
+
+  /** Spec §4: each metering set, its camera, place (null: the camera's own) and frame's turn, in order. */
+  val meters = mutableListOf<Triple<String, MeterPoint?, Int>>()
+
+  /** Spec §4: a metering that throws this. */
+  var meterFailure: Exception? = null
+
+  /** Spec §4: false is the adapter finding the held source not that camera, or not open now. */
+  var meterable = true
+
+  /** Spec §3: false is a range read that finds nothing while the camera still takes a ratio; each run alone. */
+  var rangeKnown = true
+
+  /** Spec §3: false is a camera that closes between the range's read and the ratio's set. */
+  var zoomable = true
+
+  /** Spec §3: how many times the run read a range: one a turn of the queue a pinch took. */
+  var rangeReads = 0
+    private set
+
+  /** The adapter's: only the held camera source, open now; never a slate. */
+  private fun openNow(cameraId: String): Boolean = held && !onSlate && cameraId in zoomRanges
+
+  override fun zoomRange(cameraId: String): ZoomRange? {
+    rangeReads += 1
+    return zoomRanges[cameraId]?.takeIf { rangeKnown && openNow(cameraId) }
+  }
+
+  override suspend fun zoom(cameraId: String, ratio: Float): Boolean {
+    if (!zoomable || !openNow(cameraId)) return false
+    zoomFailure?.let { throw it }
+    zooms += cameraId to ratio
+    return true
+  }
+
+  override suspend fun meter(cameraId: String, point: MeterPoint?, frameDegrees: Int): Boolean {
+    if (!meterable || !openNow(cameraId)) return false
+    meterFailure?.let { throw it }
+    meters += Triple(cameraId, point, frameDegrees)
+    return true
+  }
+
   companion object {
     const val STEP_MS = 10L
 
@@ -329,6 +434,9 @@ class Told {
   val busy = mutableListOf<PairRequest>()
   val lines = mutableListOf<RecordEntry>()
 
+  /** Spec 2026-11-25-zoom-and-metering: BridgeCore's word that the machine holds a broadcast, from Arming on. */
+  var held = false
+
   fun calls(report: (Input) -> Unit = { reports += it }, cameraBusy: (PairRequest) -> Unit = { busy += it }) =
     CoreCalls(
       report = report,
@@ -337,5 +445,6 @@ class Told {
       cameraBusy = cameraBusy,
       readiness = { _, _ -> },
       line = { lines += it },
+      broadcastHeld = { held },
     )
 }

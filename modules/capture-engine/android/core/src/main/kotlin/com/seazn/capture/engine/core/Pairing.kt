@@ -47,11 +47,20 @@ enum class Refusal(override val wire: String) : Wire {
   /** Court stream (capture-start.v1's 409): a court code with no streamed match in play (a court's start only). */
   NO_MATCH("no_match"),
   UNKNOWN("unknown"),
-  START_FAILED("start-failed");
+  START_FAILED("start-failed"),
+
+  /**
+   * Not a refusal for good: the server's 503 `unavailable` while this phone's own session still ends ([StartAnswer.Draining]),
+   * shown while the one retry waits ("Getting ready — going live shortly"). The phone's word, never a server `code`.
+   */
+  DRAINING("start-draining");
 
   companion object {
+    /** The phone's own words, which no server `code` maps to. */
+    private val OWN = setOf(UNKNOWN, START_FAILED, DRAINING)
+
     /** A refusal body's `code`; any code not listed is [UNKNOWN]. */
-    fun of(code: String?): Refusal = entries.firstOrNull { it != UNKNOWN && it != START_FAILED && it.wire == code } ?: UNKNOWN
+    fun of(code: String?): Refusal = entries.firstOrNull { it !in OWN && it.wire == code } ?: UNKNOWN
   }
 }
 
@@ -231,6 +240,10 @@ class PairRequest(
    * any GET. Not a secret. Held to 1 to 80 characters by [problems]: a malformed court refuses the pair, never no court.
    */
   val court: String? = null,
+  /** Spec 2026-11-24-capture-tuning §2: the operator's match sound, on unless they turned it off. */
+  val matchSound: Boolean = true,
+  /** Spec §2: the operator's constant bitrate, off unless they turned it on. */
+  val constantBitrate: Boolean = false,
 ) {
   val name: PairingName
     get() = PairingName(code, slot, TokenTag.of(token))
@@ -281,7 +294,16 @@ class PairRequest(
  * [askedAtMs] is when the last ask was sent (`start-asked`, monotonic). [pending]: that ask got no answer and waits for a
  * beat to confirm it ([START_CONFIRM_MS], N48).
  */
-data class StartAsks(val nextId: Int = 1, val inFlightId: Int? = null, val askedAtMs: Long? = null, val pending: Boolean = false) {
+data class StartAsks(
+  val nextId: Int = 1,
+  val inFlightId: Int? = null,
+  val askedAtMs: Long? = null,
+  val pending: Boolean = false,
+  /** When the one drain retry asks again (owner, 2026-11-25, "Retry once by itself"), on the monotonic clock; null for none. */
+  val retryAtMs: Long? = null,
+  /** This start is the drain retry, so another Draining is the start failure: once, never a loop. */
+  val retried: Boolean = false,
+) {
   /** The hold's start is not yet decided: in flight, or pending a beat (N48). Go live says starting and holds once. */
   val awaited: Boolean
     get() = inFlightId != null || pending
@@ -297,5 +319,8 @@ data class StartAsks(val nextId: Int = 1, val inFlightId: Int? = null, val asked
      * beat has armed the phone this long after `start-asked`.
      */
     const val START_CONFIRM_MS = 20_000L
+
+    /** Past the Retry-After before the drain retry asks, so the server's drain has surely ended (spec 2026-11-25). */
+    const val RETRY_MARGIN_MS = 500L
   }
 }

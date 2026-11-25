@@ -238,10 +238,11 @@ class CaptureRunOpeningTest : CaptureRunTestKit() {
       val s = opened()
       s.parts.micKnown = false
       does(s, connect(1), Command.Disconnect(1), connect(2))
-      assertEquals(listOf("watch-failed"), s.told.lines.map { it.kind })
-      assertEquals(listOf("action" to "mic-session"), s.told.lines.single().fields)
+      val said = { s.told.lines.filter { it.kind != "zoom" } } // spec 2026-11-25: air's zoom line is CaptureRunFramingTest's
+      assertEquals(listOf("watch-failed"), said().map { it.kind })
+      assertEquals(listOf("action" to "mic-session"), said().single().fields)
       does(s, Command.Orient(Side.RIGHT), connect(3)) // a new opening
-      assertEquals(listOf("watch-failed", "capture-rebuilt", "watch-failed"), s.told.lines.map { it.kind })
+      assertEquals(listOf("watch-failed", "capture-rebuilt", "watch-failed"), said().map { it.kind })
     }
 
   /** The sequence: a reopen whose build finds the camera taken again is the busy build's (I4), and the next release opens it. */

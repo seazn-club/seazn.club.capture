@@ -66,6 +66,8 @@ class PairingValuesTest {
     assertEquals(Refusal.NO_MATCH, Refusal.of("no_match"))
     assertEquals(Refusal.UNKNOWN, Refusal.of("org_suspended"))
     assertEquals(Refusal.UNKNOWN, Refusal.of("start-failed"))
+    // The drain wait's word is the phone's own: a server `code` never shows "Getting ready" (spec 2026-11-25).
+    assertEquals(Refusal.UNKNOWN, Refusal.of("start-draining"))
     assertEquals(Refusal.UNKNOWN, Refusal.of(null))
   }
 

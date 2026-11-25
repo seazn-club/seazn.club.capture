@@ -1203,3 +1203,19 @@ abandoned open holds, so the unpair, and everything queued behind it, still wait
 tests do not show it: the fake's release takes no lock. The next RTMPS attempt is not held by the queue, but its own
 open waits on that `Mutex`, and fails `TIMEOUT` at its own 14 s bound if the resolver has not returned. Device-only and
 not reproduced: it needs a resolver that answers the warm lookup and stalls on komuxer's own.
+
+### N51 — A resumed broadcast already starts on a keyframe, so no keyframe is asked for
+
+**Seen:** not on a device. The owner asked for a keyframe on resume (2026-11-24, spec 2026-11-24-capture-tuning §1,
+ruling 4), unless StreamPack already starts each resumed stream on one.
+
+**Read (javap of StreamPack 3.2.1, `streampack-core`):** every outage in `SessionMachine` (a drop, a stuck link's new
+session, a stalled video's rebuild, a not-delivered restart) ends in a new `Command.Connect`, and `CaptureRun` stops
+the attempt it held first (`parts.stop()`, `held.stopStream()`). `SingleStreamer.stopStream` runs
+`EncodingPipelineOutput.stopStreamElements`, which stops the video encoder (`MediaCodecEncoder.stopStream`: a flush,
+then `MediaCodec.stop`) and resets it (`resetVideoEncoder`: `MediaCodec.reset`, then `configure`). The next
+`startStream` starts the codec from `CONFIGURED` only (`startStreamUnsafe` returns at once from `STARTED`,
+`PENDING_START` or `ERROR`), so each resumed stream is a fresh codec session, whose first output frame is an IDR.
+
+**So:** no `requestKeyFrame` on resume; it would ask for what the encoder already does. Open: seeing the IDR as the
+first frame after a reconnect, on the wire, is the device check's (spec 2026-11-24-capture-tuning §7, item 6).

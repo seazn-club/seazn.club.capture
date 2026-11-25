@@ -1,9 +1,15 @@
 package com.seazn.capture.engine
 
+import android.annotation.SuppressLint
 import android.content.Context
+import android.view.GestureDetector
+import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.View
 import android.view.ViewGroup
+import com.seazn.capture.engine.core.CameraTouch
 import com.seazn.capture.engine.core.Encode
+import com.seazn.capture.engine.core.Metering
 import com.seazn.capture.engine.core.RecordEntry
 import com.seazn.capture.engine.preview.LaidOut
 import com.seazn.capture.engine.preview.PreviewFit
@@ -27,9 +33,14 @@ import kotlinx.coroutines.launch
  * ([Encode]) and scaled to fit the box by [PreviewFit]. An area alone ties a 960 x 960 square with 1280 x 720 (N30), so
  * the view sees the camera through the 16:9 rule ([SixteenNineBinding]): its stream is the listed 16:9 size nearest the
  * encode's, StreamPack's own pick when none is listed (the device's `dumpsys media.camera` and the `preview-size` line
- * say which). FIT stays, so a box that is not quite 16:9 leaves bars and crops nothing. No
- * pinch-zoom or tap-to-focus: a tap on a tripod is a mis-tap. It follows the pairing's streamer
- * while attached, and only then. It tells the engine
+ * say which). FIT stays, so a box that is not quite 16:9 leaves bars and crops nothing.
+ *
+ * Spec 2026-11-25-zoom-and-metering (owner, 2026-11-24): a pinch zooms and a tap meters focus and exposure there; a
+ * double tap gives the camera its own metering back. The view only reads the gestures and hands each to the capture
+ * ([CameraTouch]): the capture decides, so the mis-tap this view once refused outright ("a tap on a tripod is a
+ * mis-tap") still never moves the picture on air (the zoom is locked from Arming on) and a tap moves no frame.
+ * StreamPack's own pinch and tap stay off: they set whatever source it holds, open or not, and its tap locks focus. It
+ * follows the pairing's streamer while attached, and only then. It tells the engine
  * whether the viewfinder is shown (CD37): attached to a window that is visible. A screen pushed over the
  * viewfinder may detach it and attach it again; a lock or Background keeps it attached and turns only its
  * window invisible (review C7 I-1), as StreamPack 3.2.1's own PreviewView reads it (javap: it stops its
@@ -71,9 +82,44 @@ class CapturePreviewView(context: Context, appContext: AppContext) : ExpoView(co
         }
       }
     }
+  /** Spec 2026-11-25-zoom-and-metering §3: two fingers' scale, each move of them. */
+  private val pinch =
+    ScaleGestureDetector(
+      context,
+      object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+        override fun onScale(detector: ScaleGestureDetector): Boolean {
+          touched(CameraTouch.Pinch(detector.scaleFactor))
+          return true
+        }
+      },
+    ).apply { isQuickScaleEnabled = false } // a double tap and drag is one finger: never a zoom, nor a reset
+
+  /**
+   * Spec §4: a tap, confirmed once it is no double tap's first, and a double tap. A second finger cancels a tap
+   * (`GestureDetector` on ACTION_POINTER_DOWN), so a pinch is never a tap too. No long press.
+   */
+  private val taps =
+    GestureDetector(
+      context,
+      object : GestureDetector.SimpleOnGestureListener() {
+        override fun onDown(e: MotionEvent): Boolean = true
+
+        override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+          Metering.point(e.x / preview.width, e.y / preview.height)?.let { touched(CameraTouch.Tap(it)) }
+          return true
+        }
+
+        override fun onDoubleTap(e: MotionEvent): Boolean {
+          touched(CameraTouch.Reset)
+          return true
+        }
+      },
+    ).apply { setIsLongpressEnabled(false) }
+
   private val preview =
     PreviewView(context).apply {
       scaleMode = PreviewView.ScaleMode.FIT
+      // Spec 2026-11-25: StreamPack's own gestures stay off; ours are read in [gestured] and decided by the capture.
       enableZoomOnPinch = false
       enableTapToFocus = false
       // Review C7 I-2: StreamPack opens the camera lazily, here at the preview's start, and 3.2.1's PreviewView
@@ -95,7 +141,32 @@ class CapturePreviewView(context: Context, appContext: AppContext) : ExpoView(co
     preview.pivotX = 0f
     preview.pivotY = 0f
     addView(preview, LayoutParams(Encode.WIDTH, Encode.HEIGHT))
+    listen()
   }
+
+  /**
+   * Spec 2026-11-25-zoom-and-metering: every touch on the picture is read here. The listener sees it in the preview's own
+   * coordinates, the encode's 1280 x 720 (Android maps a touch through the scale [place] sets), so a place is a share of
+   * its width and height. Consumed, so StreamPack's `onTouchEvent` never runs. The picture is a native view, and no JS
+   * draws over it (AGENTS §6). Not clickable: the gestures are a convenience with no screen-reader action of their own.
+   */
+  @SuppressLint("ClickableViewAccessibility")
+  private fun listen() {
+    preview.setOnTouchListener { _, event -> gestured(event) }
+  }
+
+  private fun gestured(event: MotionEvent): Boolean {
+    try {
+      pinch.onTouchEvent(event)
+      taps.onTouchEvent(event)
+    } catch (e: Exception) {
+      failed("touch", e)
+    }
+    return true
+  }
+
+  /** To the capture's queue; I5: a throw is one `preview-failed` line. */
+  private fun touched(touch: CameraTouch) = guarded("touch") { EngineHost.capture(context).touch(touch) }
 
   override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
     super.onSizeChanged(w, h, oldw, oldh)

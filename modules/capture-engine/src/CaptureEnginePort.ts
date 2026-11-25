@@ -49,6 +49,9 @@ export type PairIntent = {
   readonly court?: string;
   readonly language: string;
   readonly automatic: boolean;
+  /** Spec 2026-11-24-capture-tuning §2: the operator's saved capture choices, which the pairing starts with. */
+  readonly matchSound: boolean;
+  readonly constantBitrate: boolean;
   readonly claim: Claim;
   readonly environment: Environment;
 };
@@ -71,6 +74,10 @@ export type EngineIntent =
   | { readonly kind: 'reset' }
   | { readonly kind: 'setAutomatic'; readonly on: boolean }
   | { readonly kind: 'setLanguage'; readonly language: string }
+  /** Spec 2026-11-24-capture-tuning §2: any paired phase, on air included. */
+  | { readonly kind: 'setMatchSound'; readonly on: boolean }
+  /** Spec §2: native ignores it while a broadcast is held (Arming on). */
+  | { readonly kind: 'setConstantBitrate'; readonly on: boolean }
   | { readonly kind: 'switchCamera' };
 
 /**
@@ -169,7 +176,7 @@ export type HeartbeatStatus = {
  * encoded rates are null), and for the delivered lag whenever `delivery` is
  * `unknown`. A reader shows a dash, not a 0.
  */
-/** T46's words (capture-beat.v1 at web edfff98171, PROVISIONAL until vendored). */
+/** T46's words (capture-beat.v1, vendored at web 55d5bcc87d). */
 export type RelayOutput = 'connecting' | 'connected' | 'backoff';
 export type ProgrammePhase = 'waiting' | 'live' | 'frozen' | 'reconnecting' | 'final';
 export type IngestState = 'connected' | 'disconnected' | 'errored';

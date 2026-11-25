@@ -15,7 +15,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Design 2026-11-24 §2.1 and §3: a beat answer's `realtime` and T46's `delivery`, read from the PROVISIONAL rows of
+ * Design 2026-11-24 §2.1 and §3: a beat answer's `realtime` and T46's `delivery`, read from the rows of
  * `wire/realtime-delivery-vectors.json`. Neither ever refuses the answer or makes a waiting field unreadable.
  */
 class RealtimeBodiesTest {

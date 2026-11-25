@@ -28,6 +28,8 @@ const ROUTINE: readonly LineKey[] = [
   'stream.status.courtAutomaticOff', // automatic is off: nothing will go live by itself
   // E2 (2026-11-17): the server's automatic start failed for a passing reason and it retries every 60 s by itself.
   'stream.status.courtStartRetrying', // can't start yet, retrying
+  // Owner, 2026-11-25: the phone's own last session still ends on the server; native asks once more by itself.
+  'stream.status.startDraining', // getting ready, going live shortly
 ];
 
 const URGENT: readonly LineKey[] = [
@@ -99,9 +101,9 @@ describe('the strip’s two tiers of line (owner ruling, 2026-10-08)', () => {
     ] as const) {
       expect(dictionaryKeys(dictionary), lang).toEqual(chosen);
     }
-    // Anti-vacuity: the lists are the whole copy, 52 status keys and Back's line.
-    expect(chosen).toHaveLength(53);
-    expect(ROUTINE).toHaveLength(13);
+    // Anti-vacuity: the lists are the whole copy, 53 status keys and Back's line.
+    expect(chosen).toHaveLength(54);
+    expect(ROUTINE).toHaveLength(14);
     expect(URGENT).toHaveLength(40);
     // And the table has an entry for exactly those keys.
     expect(Object.keys(LINE_TIER).sort()).toEqual(chosen);

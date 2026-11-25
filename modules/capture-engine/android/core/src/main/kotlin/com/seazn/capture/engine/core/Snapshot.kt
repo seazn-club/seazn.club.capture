@@ -154,7 +154,14 @@ private val NO_BEAT = HeartbeatStatus(lastSentAtEpochMs = null, lastResult = nul
  * operator's hold has posted start and its answer has not come (court stream Task 13, P2), so Go live says so and
  * cannot be held again. Only Paired posts one, and whatever arms a broadcast retires it ([Starts.arm]).
  */
-data class PairingView(val name: PairingName, val automatic: Boolean, val waiting: WaitingFields, val starting: Boolean = false)
+data class PairingView(
+  val name: PairingName,
+  val automatic: Boolean,
+  val waiting: WaitingFields,
+  val starting: Boolean = false,
+  /** Spec 2026-11-24-capture-tuning §2: the pairing's capture choices, which JS reconciles its stored ones against. */
+  val tuning: Tuning = Tuning.DEFAULT,
+)
 
 /** The broadcast's non-secret fields: no ingest URL, stream id, key or passphrase. */
 data class BroadcastView(

@@ -290,6 +290,44 @@ describe('Live Stream, the two phone settings', () => {
   });
 });
 
+/** Spec 2026-11-24-capture-tuning §2: the operator's two capture choices, rows of the Live Stream section. */
+describe('Live Stream, the capture choices', () => {
+  const matchSound = () => screen.getByRole('switch', { name: /^Match sound/ });
+  const constant = () => screen.getByRole('switch', { name: /^Constant bitrate/ });
+
+  it('match sound reads on, constant bitrate off, each named by its label alone, and each change is kept', async () => {
+    const view = await renderSettings();
+    expect(matchSound().getAttribute('aria-checked')).toBe('true');
+    expect(matchSound().getAttribute('aria-label')).toBe('Match sound');
+    expect(constant().getAttribute('aria-checked')).toBe('false');
+    expect(constant().getAttribute('aria-label')).toBe('Constant bitrate');
+    fireEvent.click(matchSound());
+    fireEvent.click(constant());
+    await settle();
+    expect(matchSound().getAttribute('aria-checked')).toBe('false');
+    expect(constant().getAttribute('aria-checked')).toBe('true');
+    expect(view.kv.entries.get(SETTINGS_KEY)).toContain(
+      '"matchSound":false,"constantBitrate":true',
+    );
+  });
+
+  it('on air, match sound still changes, and constant bitrate is off with one line that says when', async () => {
+    const view = await renderSettings();
+    act(() => view.engine.scene('live'));
+    expect(constant().getAttribute('aria-label')).toBe('Constant bitrate · After the broadcast');
+    fireEvent.click(constant());
+    fireEvent.click(matchSound());
+    await settle();
+    expect(constant().getAttribute('aria-checked')).toBe('false');
+    expect(matchSound().getAttribute('aria-checked')).toBe('false');
+    act(() => view.engine.scene('stopped'));
+    expect(constant().getAttribute('aria-label')).toBe('Constant bitrate');
+    fireEvent.click(constant());
+    await settle();
+    expect(constant().getAttribute('aria-checked')).toBe('true');
+  });
+});
+
 describe('Open-source licences', () => {
   it('is one row that opens the list and the libsrt source line, and closes it again', async () => {
     await renderSettings();

@@ -58,6 +58,7 @@ export const WIRE_VOCABULARY = {
     'no_match',
     'unknown',
     'start-failed',
+    'start-draining',
   ]),
   lastEnd: new Set([
     'stopped-by-organiser',
@@ -94,7 +95,7 @@ export const WIRE_VOCABULARY = {
     'competition_frozen',
     'match_stopped',
   ]),
-  // T46 (capture-beat.v1 at web edfff98171, PROVISIONAL until vendored).
+  // T46 (capture-beat.v1, vendored at web 55d5bcc87d).
   relayOutput: new Set(['connecting', 'connected', 'backoff']),
   programmePhase: new Set(['waiting', 'live', 'frozen', 'reconnecting', 'final']),
   ingest: new Set(['connected', 'disconnected', 'errored']),
@@ -364,11 +365,16 @@ function toPairing(value: Wire): PairingInfo | undefined {
   const court = toCourt(value.court);
   // Court stream Task 13 (P2): the Go live in flight. Never guessed: anything but a flag is a malformed pairing.
   if (court === undefined || !isFlag(value.starting)) return undefined;
+  // Spec 2026-11-24-capture-tuning §2: the capture choices, never guessed.
+  const { matchSound, constantBitrate } = value;
+  if (!isFlag(matchSound) || !isFlag(constantBitrate)) return undefined;
   return {
     code,
     slot,
     tokenTag,
     automatic,
+    matchSound,
+    constantBitrate,
     label,
     venueTimezone,
     scheduledStart: scheduledStart === null ? null : new Date(scheduledStart * 1000),

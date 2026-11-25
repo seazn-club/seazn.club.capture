@@ -73,6 +73,51 @@ class BridgeCoreCaptureTest : BridgeCoreTestKit() {
     assertEquals(listOf(true, false), platform.captures, "the tick that ended it closed it: ${state()} after $ticks ticks")
   }
 
+  /**
+   * Spec 2026-11-25-zoom-and-metering §3: the pinch zoom is locked from Arming on, on the machine's own word
+   * (`Phase.holdsBroadcast`), read by the capture from any thread. A tick that ends the broadcast with no input after it
+   * (review C4a m-1) frees it too.
+   */
+  @Test
+  fun `the capture reads a broadcast held from Arming on, and free again once it ends`() {
+    core.start()
+    core.report(Input.Network(true))
+    ready()
+    pair()
+    assertFalse(core.broadcastHeld(), "paired and waiting")
+    platform.unanswered = { true } // the POST start waits for its answer
+    core.send(mapOf("kind" to "start"))
+    scheduler.advanceBy(0)
+    assertEquals("paired", state())
+    assertFalse(core.broadcastHeld(), "a start asked and not answered holds no broadcast yet")
+    platform.owed.single().let { (asked, answer) -> answer(platform.answer(asked)) }
+    scheduler.advanceBy(0)
+    assertEquals("arming", state(), "the answer arms it")
+    assertTrue(core.broadcastHeld(), "from Arming on, before anything is on air")
+    scheduler.advanceBy(1_500)
+    assertTrue(core.broadcastHeld(), "on air: ${state()}")
+    core.send(mapOf("kind" to "stop"))
+    scheduler.advanceBy(0)
+    assertFalse(core.broadcastHeld(), "stopped: ${state()}")
+  }
+
+  @Test
+  fun `a tick that ends the broadcast frees the capture's zoom with no input after it`() {
+    live()
+    assertTrue(core.broadcastHeld())
+    platform.throwOnConnect = IllegalStateException("no route")
+    platform.unanswered = { true }
+    platform.dropCurrent()
+    scheduler.advanceBy(0)
+    var ticks = 0
+    while (core.current()["broadcast"] != null) {
+      scheduler.advanceBy(Engine.TICK_MS)
+      ticks += 1
+      assertTrue(ticks < 2_000, "the hold never ran out: ${state()}")
+    }
+    assertFalse(core.broadcastHeld(), "the tick that ended it: ${state()}")
+  }
+
   @Test
   fun `CD37 PV20 the capture is held only for a re-pair - a first pair waits for the grant, and a refused re-pair closes it`() {
     core.start()

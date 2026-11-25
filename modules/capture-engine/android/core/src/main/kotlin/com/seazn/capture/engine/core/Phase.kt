@@ -65,6 +65,8 @@ data class PairingState(
   val claim: Claim?,
   val automatic: Boolean,
   val language: String,
+  /** Spec 2026-11-24-capture-tuning §2: the operator's capture choices, seeded by the pair and changed by intents. */
+  val tuning: Tuning = Tuning.DEFAULT,
   val heartbeat: HeartbeatState,
   val waiting: WaitingFields = WaitingFields.UNKNOWN,
   /** The platform's last readiness facts (A11); the network is the phase's own fact. */

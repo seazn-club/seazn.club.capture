@@ -29,9 +29,10 @@ describe('useStreamSettings (D23)', () => {
       kvSeed: { [SETTINGS_KEY]: '{"v":3,"side":"left","automatic":false}' },
     });
     const { result } = renderHook(() => useStreamSettings(), { wrapper: wrapperFor(fakes) });
-    expect(result.current.settings).toEqual({ side: 'right', automatic: true });
+    const tuning = { matchSound: true, constantBitrate: false };
+    expect(result.current.settings).toEqual({ side: 'right', automatic: true, ...tuning });
     await waitFor(() =>
-      expect(result.current.settings).toEqual({ side: 'left', automatic: false }),
+      expect(result.current.settings).toEqual({ side: 'left', automatic: false, ...tuning }),
     );
     expect(result.current.saveFailed).toBe(false);
   });
@@ -42,9 +43,24 @@ describe('useStreamSettings (D23)', () => {
     act(() => result.current.change({ side: 'left' }));
     expect(result.current.settings.side).toBe('left');
     await waitFor(() =>
-      expect(fakes.kv.entries.get(SETTINGS_KEY)).toBe('{"v":3,"side":"left","automatic":true}'),
+      expect(fakes.kv.entries.get(SETTINGS_KEY)).toBe(
+        '{"v":4,"side":"left","automatic":true,"matchSound":true,"constantBitrate":false}',
+      ),
     );
     expect(result.current.saveFailed).toBe(false);
+  });
+
+  // Spec 2026-11-24-capture-tuning §2: constant bitrate is off from Arming on, so the screens read whether one is held.
+  it('says whether a broadcast is held, from Arming on, and none again once it is over', () => {
+    const fakes = createFakePorts();
+    const { result } = renderHook(() => useStreamSettings(), { wrapper: wrapperFor(fakes) });
+    expect(result.current.held).toBe(false);
+    act(() => fakes.engine.scene('arming-retrying'));
+    expect(result.current.held).toBe(true);
+    act(() => fakes.engine.scene('live'));
+    expect(result.current.held).toBe(true);
+    act(() => fakes.engine.scene('stopped'));
+    expect(result.current.held).toBe(false);
   });
 
   it('says a refused change held for this session only, until a later one saves', async () => {

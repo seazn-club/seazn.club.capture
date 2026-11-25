@@ -820,7 +820,12 @@ describe('the side control and the switch rows fit the narrowest line, in every 
     const { t } = createTranslator(lang);
     // The row's padding each side, the 40 dp pill and the 8 dp gap between the label and it.
     const cell = NARROW_LINE - 2 * layout.switchRowPadX - layout.switchTrackW - space.sm;
-    for (const key of ['settings.automatic.label'] as const) {
+    // Spec 2026-11-24-capture-tuning §2: the capture choices' switches wear the same row.
+    for (const key of [
+      'settings.automatic.label',
+      'settings.matchSound.label',
+      'settings.constantBitrate.label',
+    ] as const) {
       expect(longestWord(t(key)), `${lang} ${key}`).toBeLessThanOrEqual(cell);
       switchLabelsChecked += 1;
     }
@@ -861,7 +866,12 @@ describe('the side control and the switch rows fit the narrowest line, in every 
         2 * layout.ghostCompactPadX +
         2 * layout.iconBorder;
       expect(button, `${lang} button`).toBeLessThanOrEqual(NARROW_LINE);
-      for (const key of ['settings.power.path', 'settings.power.onAir'] as const) {
+      // Spec 2026-11-24-capture-tuning §2: constant bitrate's on-air reason is one line at the caption size, as these.
+      for (const key of [
+        'settings.power.path',
+        'settings.power.onAir',
+        'settings.constantBitrate.onAir',
+      ] as const) {
         const line = t(key);
         // Every character is Geist's own: a fallback face on the phone would set the arrow wider than measured.
         expect(
@@ -879,7 +889,7 @@ describe('the side control and the switch rows fit the narrowest line, in every 
 
   it('checked every language for the pair, the switch label and the battery row (anti-vacuity)', () => {
     expect(sideChecked).toBe(4);
-    expect(switchLabelsChecked).toBe(4 * 1);
+    expect(switchLabelsChecked).toBe(4 * 3);
     expect(powerChecked).toBe(4);
   });
 });

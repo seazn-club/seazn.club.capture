@@ -33,6 +33,12 @@ sealed interface Command {
   /** Switch to the other camera, as the operator asked ([Input.SwitchCamera]). No answer is expected: frames are the proof. */
   data object SwitchCamera : Command
 
+  /**
+   * Spec 2026-11-24-capture-tuning §3: the pairing's capture choices, at the pair and at every change. The capture
+   * keeps the latest, held or not, and applies it at every build; match sound also at once to a held microphone.
+   */
+  data class Tune(val tuning: Tuning) : Command
+
   /** Reopen our camera with an ID round trip (F-P5-10: ~1.2 s, one black frame). */
   data object ReopenCamera : Command
 

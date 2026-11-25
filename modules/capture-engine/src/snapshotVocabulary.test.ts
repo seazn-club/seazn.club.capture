@@ -112,6 +112,7 @@ const REFUSAL: Readonly<Record<Refusal, true>> = {
   no_match: true,
   unknown: true,
   'start-failed': true,
+  'start-draining': true,
 };
 const LAST_END: Readonly<Record<LastEnd, true>> = {
   'stopped-by-organiser': true,
@@ -151,7 +152,7 @@ describe("the port names exactly what native's snapshot sends", () => {
   it.each([
     ['cause', CAUSE, vectors.vocabulary.cause, 4],
     ['notReady', NOT_READY, vectors.vocabulary.notReady, 4],
-    ['refusal', REFUSAL, vectors.vocabulary.refusal, 6],
+    ['refusal', REFUSAL, vectors.vocabulary.refusal, 7],
     ['lastEnd', LAST_END, vectors.vocabulary.lastEnd, 9],
     ['unpairReason', UNPAIR, vectors.vocabulary.unpairReason, 6],
     ['endReason', END, vectors.vocabulary.endReason, 2],

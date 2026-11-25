@@ -7,6 +7,7 @@ import com.seazn.capture.engine.adapter.PermanentPlatformFailure
 import com.seazn.capture.engine.adapter.StartEnd
 import com.seazn.capture.engine.core.Antibanding
 import com.seazn.capture.engine.core.BitrateMode
+import com.seazn.capture.engine.core.CameraTouch
 import com.seazn.capture.engine.core.Command
 import com.seazn.capture.engine.core.ConnectFailure
 import com.seazn.capture.engine.core.Input
@@ -143,6 +144,12 @@ class CaptureRun(
   /** Spec §3.3: the camera and antibanding the last `antibanding` line said, in this opening. */
   private var bandedLine: Pair<String, Antibanding>? = null
 
+  /** Spec 2026-11-25-zoom-and-metering: the pinch zoom and the place tapped, carried out only on an accepted open. */
+  private val framing = CameraFraming(parts, calls.line, calls.broadcastHeld)
+
+  /** Spec §3: pinches waiting for the queue, taken as one. */
+  private val pinches = PinchBuffer()
+
   fun open(asked: PairRequest) = serial.submit { opened(asked) }
 
   /** Re-review 2 (R2-M2 ruling): the unpair never waits behind a probe ([abandonProbe]). */
@@ -180,10 +187,23 @@ class CaptureRun(
     nudges.trySend(Unit)
   }
 
+  /**
+   * Spec 2026-11-25-zoom-and-metering: a gesture on the preview, from the main thread; returns at once. Pinches that
+   * come faster than the queue takes them are one, by their product ([PinchBuffer]).
+   */
+  fun touch(touch: CameraTouch) {
+    if (touch !is CameraTouch.Pinch) return serial.submit { framing.touch(touch, frameDegrees()) }
+    if (pinches.offer(touch.scale)) serial.submit { framing.touch(CameraTouch.Pinch(pinches.take()), frameDegrees()) }
+  }
+
+  /** The picture's turn, as the held streamer encodes it (CD42), or as the side held would build it. */
+  private fun frameDegrees(): Int = (rotation ?: EncoderKeys.surfaceRotation(side())) * 90
+
   /** N2: never two streamers. One already held serves the new pairing, which its failures now name. */
   private suspend fun opened(asked: PairRequest) {
     request = asked
     rearm() // re-review 4 cap: a re-pair re-arms
+    framing.paired(asked, frameDegrees()) // spec 2026-11-25: a new pairing starts at 1x
     if (parts.held) return
     build(asked, EncoderKeys.surfaceRotation(side()))
   }
@@ -235,6 +255,7 @@ class CaptureRun(
               if (accepted) {
                 stabilise(id)
                 antiband(id)
+                framing.opened(id, frameDegrees())
               }
             }
           }
@@ -251,7 +272,10 @@ class CaptureRun(
           parts.busyOpens().collect { id ->
             cameras.busyHeard(id) // spec 2026-11-24 §4: the stabilise gate's, on air or off
             if (attempt != null) cameras.busyOpen(id)
-            serial.submit { busyByDevice(id) }
+            serial.submit {
+              framing.unopened(id) // spec 2026-11-25: an open that met another app's hold is no open
+              busyByDevice(id)
+            }
           }
         }
         parts.cameraLosses().collect { id -> serial.submit { lostByDevice(id) } }
@@ -271,6 +295,7 @@ class CaptureRun(
    * service that restarts reads the same, and its cameras' return is the release.
    */
   private suspend fun lostByDevice(camera: String) {
+    framing.unopened(camera) // spec 2026-11-25: a lost camera's device is closed; a setter would open it
     if (!cameras.lost(camera)) return
     calls.line(RecordEntry("camera-lost", listOf("from" to "device", "attempt" to attempt)))
     if (attempt == null) return rebuildLost()
@@ -531,6 +556,7 @@ class CaptureRun(
     speechLine = SpeechState.OFF
     speechSet = false
     bandedLine = null
+    framing.closed()
     parts.release()
   }
 
@@ -623,7 +649,10 @@ class CaptureRun(
       is Command.StartNewSession -> reconnect(command.previousAttemptId, command.next)
       is Command.SetBitrate -> parts.bitrate(command.bps)
       is Command.SetMaxBw -> parts.maxBw(command.attemptId, command.bytesPerSecond)
-      Command.SwitchCamera -> parts.switchCamera()
+      Command.SwitchCamera -> {
+        framing.unopened() // spec 2026-11-25: the other camera, opened afresh
+        parts.switchCamera()
+      }
       Command.ReopenCamera -> reopen()
       is Command.Slate -> slate(command.on)
       Command.StopBroadcast, is Command.End -> stopBroadcast()
@@ -670,6 +699,7 @@ class CaptureRun(
    * next take's first refusal is written with its own count.
    */
   private suspend fun slate(on: Boolean) {
+    framing.unopened() // spec 2026-11-25: the slate is no camera, and its fall asks a new open
     parts.slate(on)
     stopProbing()
     if (on) probeWhileSlated()
@@ -728,6 +758,7 @@ class CaptureRun(
     if (started == null) return timedOut(id, start)
     if (!started) return calls.report(Input.ConnectFailed(id, ConnectFailure.OTHER, "srt url does not parse"))
     signals.connected(id)?.let(calls.report)
+    framing.airing() // spec 2026-11-25: the zoom in use, once a broadcast
     noteMicSession()
     if (!speechSet) speak() // spec §3.1: a recording whose session the build could not read is set now
     watchClose(id)
@@ -860,6 +891,7 @@ class CaptureRun(
   /** The broadcast ends; the pairing, the camera and the viewfinder stay (amendment, _States_). */
   private suspend fun stopBroadcast() {
     attempt?.let { stopHeld(it) }
+    framing.grounded()
     cameras.offAir()
     parts.afterBroadcast()
   }

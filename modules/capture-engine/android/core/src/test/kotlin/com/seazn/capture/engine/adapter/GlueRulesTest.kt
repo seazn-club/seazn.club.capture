@@ -724,8 +724,10 @@ class GlueRulesTest {
     assertEquals(0, uses(view, "FILL"), "never FILL")
     // One write site per property the view is set by, so a second write cannot undo the first behind a green pin.
     for (property in listOf("scaleX", "scaleY", "translationX", "translationY", "pivotX", "pivotY", "layoutDirection")) assertEquals(1, uses(view, property), "$property is written at one site")
+    // Spec 2026-11-25-zoom-and-metering: a tap's `e.x` and `e.y` read a MotionEvent, and move no view.
+    val unread = view.replace(Regex("""\be\.[xy]\b"""), "")
     for (property in listOf("rotation", "rotationX", "rotationY", "translationZ", "alpha", "x", "y", "setScaleX", "setScaleY", "setTranslationX", "setTranslationY", "animate", "setPivotX", "setPivotY", "setLayoutDirection"))
-      assertEquals(0, uses(view, property), "$property: nothing else moves the view")
+      assertEquals(0, uses(unread, property), "$property: nothing else moves the view")
     assertEquals(1, uses(view, "left"), "`at.left`, once")
     assertEquals(1, uses(view, "top"), "`at.top`, once")
     assertTrue(Regex("""preview\.pivotX = 0f\s+preview\.pivotY = 0f""").containsMatchIn(built), "scaled about its corner, which the placement's left and top assume, set in init: $built")
@@ -862,6 +864,45 @@ class GlueRulesTest {
     val bands = glue("Antibands.kt")
     assertTrue("withTimeoutOrNull(RESULT_MS) { settings.applyRepeatingSessionSync() }" in bands, "bounded: a stalled session never holds the queue")
     assertTrue("if (!Antibanding.autoListed(available)) return Antibanding.UNAVAILABLE" in bands, "nothing set on a camera without AUTO")
+  }
+
+  /**
+   * Spec 2026-11-25-zoom-and-metering: the preview reads the pinch and the tap itself and hands each to the capture as an
+   * intent; StreamPack 3.2.1's own handlers never run (javap: its pinch sets the zoom of whatever source it holds, its
+   * tap runs `FocusMetering.tapToFocus`, which turns focus to AUTO, a lock, and neither asks whether the camera is open).
+   * The adapter sets a ratio or a region only on the held source of that id while StreamPack reports it open, and the
+   * metering never touches the focus mode, so continuous focus stays.
+   */
+  @Test
+  fun `zoom and metering - the preview's own gestures reach the capture, StreamPack's never run, and only an open camera is set`() {
+    val view = glue("CapturePreviewView.kt")
+    assertTrue("enableZoomOnPinch = false" in code(view), "StreamPack's pinch stays off")
+    assertTrue("enableTapToFocus = false" in code(view), "StreamPack's tap stays off")
+    assertEquals(1, Regex("""setOnTouchListener \{ _, event -> gestured\(event\) \}""").findAll(view).count(), "every touch on the picture is ours")
+    val gestured = body(view, "private fun gestured(")
+    assertTrue(Regex("""pinch\.onTouchEvent\(event\)\s+taps\.onTouchEvent\(event\)""").containsMatchIn(gestured), "both detectors see each event: $gestured")
+    assertTrue(gestured.trimEnd().removeSuffix("}").trimEnd().endsWith("return true"), "consumed, so StreamPack's onTouchEvent never runs: $gestured")
+    assertTrue("touched(CameraTouch.Pinch(detector.scaleFactor))" in body(view, "override fun onScale("), "the pinch's scale")
+    assertTrue("Metering.point(e.x / preview.width, e.y / preview.height)?.let { touched(CameraTouch.Tap(it)) }" in body(view, "override fun onSingleTapConfirmed("), "a tap's place on the picture, never a double tap's first")
+    assertTrue("touched(CameraTouch.Reset)" in body(view, "override fun onDoubleTap("), "a double tap resets")
+    assertTrue(Regex("""private fun touched\(touch: CameraTouch\) = guarded\("touch"\) \{ EngineHost\.capture\(context\)\.touch\(touch\) \}""").containsMatchIn(view), "guarded: nothing here may crash the app (I5)")
+    val adapter = glue("StreamerAdapter.kt")
+    assertTrue("override fun touch(touch: CameraTouch) = run.touch(touch)" in adapter, "to the run's queue")
+    assertTrue("broadcastHeld = { core().broadcastHeld() }" in glue("EngineHost.kt"), "the zoom's lock reads the machine's own word, wired")
+    val open = adapter.substringAfter("private fun openCamera(cameraId: String)").take(200)
+    assertTrue("heldCamera(cameraId)?.takeIf { it.isPreviewingFlow.value || (it as? IVideoSourceInternal)?.isStreamingFlow?.value == true }" in open, "held, of that id, and open now: $open")
+    for (part in listOf("override fun zoomRange(cameraId: String)", "override suspend fun zoom(cameraId: String, ratio: Float)", "override suspend fun meter(cameraId: String, point: MeterPoint?, frameDegrees: Int)")) {
+      assertTrue(Regex("""=\s*openCamera\(cameraId\)|val camera = openCamera\(cameraId\) \?: return false""").containsMatchIn(adapter.substring(adapter.indexOf(part)).take(300)), "$part reads the open camera first")
+    }
+    assertTrue("camera.settings.zoom.setZoomRatio(ratio)" in adapter, "the ratio the run worked out, set as it is")
+    for (file in sources()) {
+      val text = code(file.readText())
+      for (call in listOf("tapToFocus", "onTap(", "onPinch(", "CONTROL_AF_MODE", "setAutoMode(", "CONTROL_AF_TRIGGER")) assertFalse(call in text, "${file.name}: $call")
+    }
+    val meters = glue("Meters.kt")
+    assertTrue("settings.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(rectangle(focus)))" in meters, "focus where tapped")
+    assertTrue("settings.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(rectangle(exposure)))" in meters, "exposure where tapped")
+    assertTrue("settings.applyRepeatingSession()" in meters, "StreamPack's set only sets the key: the request is applied")
   }
 
   @Test

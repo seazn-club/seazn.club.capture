@@ -149,6 +149,7 @@ object EngineHost {
       cameraBusy = { request -> core().cameraBusy(request) },
       readiness = { frames, peak -> core().readiness(cameraFrames = frames, audioPeak = peak) },
       line = ::line,
+      broadcastHeld = { core().broadcastHeld() },
     )
 
   /**

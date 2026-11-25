@@ -6,10 +6,12 @@ import com.seazn.capture.engine.core.Antibanding
 import com.seazn.capture.engine.core.BitrateMode
 import com.seazn.capture.engine.core.Command
 import com.seazn.capture.engine.core.Input
+import com.seazn.capture.engine.core.MeterPoint
 import com.seazn.capture.engine.core.PairRequest
 import com.seazn.capture.engine.core.RecordEntry
 import com.seazn.capture.engine.core.SpeechState
 import com.seazn.capture.engine.core.Tuning
+import com.seazn.capture.engine.core.ZoomRange
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -338,6 +340,59 @@ class FakeParts : CaptureParts {
     return state
   }
 
+  /**
+   * Spec 2026-11-25-zoom-and-metering: each camera's zoom ratios, by id; absent is a camera whose source is not held, or
+   * not open, now (the adapter's null). Camera 1 is a front camera with less reach.
+   */
+  val zoomRanges = mutableMapOf("0" to ZoomRange(0.6f, 8f), "1" to ZoomRange(1f, 4f))
+
+  /** Spec §3: each ratio set, with its camera, in order. */
+  val zooms = mutableListOf<Pair<String, Float>>()
+
+  /** Spec §3: a zoom that throws this. */
+  var zoomFailure: Exception? = null
+
+  /** Spec §4: each metering set, its camera, place (null: the camera's own) and frame's turn, in order. */
+  val meters = mutableListOf<Triple<String, MeterPoint?, Int>>()
+
+  /** Spec §4: a metering that throws this. */
+  var meterFailure: Exception? = null
+
+  /** Spec §4: false is the adapter finding the held source not that camera, or not open now. */
+  var meterable = true
+
+  /** Spec §3: false is a range read that finds nothing while the camera still takes a ratio; each run alone. */
+  var rangeKnown = true
+
+  /** Spec §3: false is a camera that closes between the range's read and the ratio's set. */
+  var zoomable = true
+
+  /** Spec §3: how many times the run read a range: one a turn of the queue a pinch took. */
+  var rangeReads = 0
+    private set
+
+  /** The adapter's: only the held camera source, open now; never a slate. */
+  private fun openNow(cameraId: String): Boolean = held && !onSlate && cameraId in zoomRanges
+
+  override fun zoomRange(cameraId: String): ZoomRange? {
+    rangeReads += 1
+    return zoomRanges[cameraId]?.takeIf { rangeKnown && openNow(cameraId) }
+  }
+
+  override suspend fun zoom(cameraId: String, ratio: Float): Boolean {
+    if (!zoomable || !openNow(cameraId)) return false
+    zoomFailure?.let { throw it }
+    zooms += cameraId to ratio
+    return true
+  }
+
+  override suspend fun meter(cameraId: String, point: MeterPoint?, frameDegrees: Int): Boolean {
+    if (!meterable || !openNow(cameraId)) return false
+    meterFailure?.let { throw it }
+    meters += Triple(cameraId, point, frameDegrees)
+    return true
+  }
+
   companion object {
     const val STEP_MS = 10L
 
@@ -379,6 +434,9 @@ class Told {
   val busy = mutableListOf<PairRequest>()
   val lines = mutableListOf<RecordEntry>()
 
+  /** Spec 2026-11-25-zoom-and-metering: BridgeCore's word that the machine holds a broadcast, from Arming on. */
+  var held = false
+
   fun calls(report: (Input) -> Unit = { reports += it }, cameraBusy: (PairRequest) -> Unit = { busy += it }) =
     CoreCalls(
       report = report,
@@ -387,5 +445,6 @@ class Told {
       cameraBusy = cameraBusy,
       readiness = { _, _ -> },
       line = { lines += it },
+      broadcastHeld = { held },
     )
 }

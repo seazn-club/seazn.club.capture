@@ -27,8 +27,10 @@ import com.seazn.capture.engine.capture.run.CoreCalls
 import com.seazn.capture.engine.capture.run.Probe
 import com.seazn.capture.engine.core.Antibanding
 import com.seazn.capture.engine.core.BitrateMode
+import com.seazn.capture.engine.core.CameraTouch
 import com.seazn.capture.engine.core.Command
 import com.seazn.capture.engine.core.Encode
+import com.seazn.capture.engine.core.MeterPoint
 import com.seazn.capture.engine.core.PairRequest
 import com.seazn.capture.engine.core.RecordEntry
 import com.seazn.capture.engine.core.RtmpsTarget
@@ -36,6 +38,7 @@ import com.seazn.capture.engine.core.Side
 import com.seazn.capture.engine.core.SpeechState
 import com.seazn.capture.engine.core.SrtTarget
 import com.seazn.capture.engine.core.Tuning
+import com.seazn.capture.engine.core.ZoomRange
 import com.seazn.capture.engine.endpoints.CaptureClockLine
 import com.seazn.capture.engine.net.HostLookup
 import com.seazn.capture.engine.endpoints.CaptureEndpointFactory
@@ -144,6 +147,8 @@ class StreamerAdapter(
   override fun execute(command: Command) = run.execute(command)
 
   override fun foreground() = run.foreground()
+
+  override fun touch(touch: CameraTouch) = run.touch(touch)
 
   /** N45 I1: CameraWatch's word that our camera may be free now (an available, Camera2's priorities): a probe at once. */
   fun cameraMayBeFree() = run.mayBeFree()
@@ -452,6 +457,39 @@ class StreamerAdapter(
 
     /** Spec §3.3: the source held now, of that id, only, as [stabilise]. */
     override suspend fun antibanding(cameraId: String): Antibanding? = heldCamera(cameraId)?.let { Antibands.set(it) }
+
+    /**
+     * Spec 2026-11-25-zoom-and-metering: StreamPack 3.2.1's zoom range, read from `CONTROL_ZOOM_RATIO_RANGE` (`RZoom`,
+     * the one it builds from API 30; javap), of the held camera source [cameraId] while it is open now.
+     */
+    override fun zoomRange(cameraId: String): ZoomRange? =
+      openCamera(cameraId)?.settings?.zoom?.availableRatioRange?.let { ZoomRange(it.lower, it.upper) }
+
+    /**
+     * Spec §3: `RZoom.setZoomRatio` (javap: sets `CONTROL_ZOOM_RATIO` within the range and applies the repeating request)
+     * on the held camera source [cameraId], only while it is open now.
+     */
+    override suspend fun zoom(cameraId: String, ratio: Float): Boolean {
+      val camera = openCamera(cameraId) ?: return false
+      camera.settings.zoom.setZoomRatio(ratio)
+      return true
+    }
+
+    /** Spec §4: the focus and exposure regions ([Meters]) on the held camera source [cameraId], only while it is open now. */
+    override suspend fun meter(cameraId: String, point: MeterPoint?, frameDegrees: Int): Boolean {
+      val camera = openCamera(cameraId) ?: return false
+      Meters.set(camera, point, frameDegrees)
+      return true
+    }
+
+    /**
+     * Spec 2026-11-25-zoom-and-metering: the held source of that id while StreamPack reports it open now, previewing or
+     * streaming (the flows [cameraOpens] reads; javap, 3.2.1: both turn false when its device closes, a loss's included).
+     * Against a device not open, `CameraSettings.set` and `applyRepeatingSession` open it. The run's accepted-open gate
+     * comes first; this is the device's own word at the moment of the call.
+     */
+    private fun openCamera(cameraId: String): ICameraSource? =
+      heldCamera(cameraId)?.takeIf { it.isPreviewingFlow.value || (it as? IVideoSourceInternal)?.isStreamingFlow?.value == true }
 
     /** The held streamer's camera source, when it is camera [cameraId]: never a slate, a switch's other camera or none. */
     private fun heldCamera(cameraId: String): ICameraSource? =

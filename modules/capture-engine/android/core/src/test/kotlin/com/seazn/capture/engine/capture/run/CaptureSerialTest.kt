@@ -65,7 +65,7 @@ class CaptureSerialTest {
       advanceUntilIdle()
       assertTrue(left != right, "the two sides encode at different rotations, so the rebuild is witnessed")
       assertEquals(listOf("release", "release done", "build $right", "build done", "before 1", "start 1", "start done"), parts.log)
-      assertEquals(listOf("capture-rebuilt"), told.lines.map { it.kind })
+      assertEquals(listOf("capture-rebuilt"), told.lines.map { it.kind }.filter { it != "zoom" }) // air's zoom line: CaptureRunFramingTest
     }
 
   @Test

@@ -24,11 +24,20 @@ export type ScanFlight = {
   /** The app is back. True when the return is the scan's; that lowers what it held. */
   appReturned(): boolean;
   active(): boolean;
+  /**
+   * Tells `listener` each time the flight comes down (a scan or a pasted code dealt with, and the app back from the
+   * scanner), so an opened link that waited for it can go on (Open in app, spec 2026-11-25 §9). Returns the off switch.
+   */
+  onIdle(listener: () => void): () => void;
 };
 
 export function createScanFlight(): ScanFlight {
   let scanning = false;
   let away = false;
+  const listeners = new Set<() => void>();
+  const settled = (wasActive: boolean): void => {
+    if (wasActive && !scanning && !away) for (const listener of [...listeners]) listener();
+  };
   return {
     begin: () => {
       if (scanning || away) return false;
@@ -36,7 +45,9 @@ export function createScanFlight(): ScanFlight {
       return true;
     },
     end: () => {
+      const was = scanning || away;
       scanning = false;
+      settled(was);
     },
     appLeft: () => {
       if (scanning) away = true;
@@ -44,8 +55,15 @@ export function createScanFlight(): ScanFlight {
     appReturned: () => {
       const ours = scanning || away;
       away = false;
+      settled(ours);
       return ours;
     },
     active: () => scanning || away,
+    onIdle: (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
   };
 }

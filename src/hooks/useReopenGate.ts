@@ -9,6 +9,7 @@ import {
   type ReopenTarget,
   type SavedState,
 } from '@/domain/mode/reopen';
+import { pendingLink } from '@/hooks/pendingLink';
 import { selectEngineStatus, selectUnpairedName } from '@/hooks/engineSelectors';
 import { usePairing } from '@/hooks/usePairing';
 import { usePorts } from '@/hooks/usePorts';
@@ -22,13 +23,17 @@ import type { ModeStore } from '@/services/modeStore';
  * first, then the last mode while its code is valid, else Home with the
  * expiry named. Runs again on every return to the foreground, against the
  * clock at that moment — a code can expire in a pocket.
+ *
+ * True once the first decision has landed: what waits for the app to know where it is (an opened Open in app link,
+ * spec 2026-11-25 §6) starts then.
  */
-export function useReopenGate(navigatorReady: boolean): void {
+export function useReopenGate(navigatorReady: boolean): boolean {
   const { modeStore, foreground, splash, scanFlight } = usePorts();
   // Only the status: Shell must not re-render on every store publish.
   const status = useSyncExternalStore(modeStore.subscribe, () => modeStore.getSnapshot().status);
   const settingsLoaded = useSettingsLoaded();
   const decided = useRef(false);
+  const [settled, setSettled] = useState(false);
   const settle = useSettle();
 
   useEffect(() => {
@@ -42,6 +47,7 @@ export function useReopenGate(navigatorReady: boolean): void {
     decided.current = true;
     settle(true);
     splash.hide();
+    setSettled(true);
   }, [navigatorReady, status, settingsLoaded, settle, splash]);
 
   // Not before the first decision: Expo Router refuses a move before its
@@ -51,11 +57,15 @@ export function useReopenGate(navigatorReady: boolean): void {
   useEffect(
     () =>
       foreground.subscribe(() => {
-        if (!scanFlight.appReturned() && decided.current) settle(false);
+        // Both are asked on every return, so each claim is spent: a scan's, and an opened link's (it went Home itself).
+        const scans = scanFlight.appReturned();
+        const links = pendingLink.claimsReturn();
+        if (!scans && !links && decided.current) settle(false);
       }),
     [foreground, settle, scanFlight],
   );
   useEffect(() => foreground.subscribeBackground(scanFlight.appLeft), [foreground, scanFlight]);
+  return settled;
 }
 
 /**
@@ -132,7 +142,11 @@ function useSettle(): (coldStart: boolean) => void {
         (target.go === 'stream' && isStreamSubRoute(here)) ||
         (target.go === 'stream' && here === 'settings' && facts.engine === 'paired') ||
         (target.go === 'home' && isHomeSubRoute(here));
-      if (!staying) navigation.go(target.go);
+      // A link parked for Home is stale once the app is sent elsewhere: it never acts on a later arrival at Home.
+      if (!staying) {
+        if (target.go !== 'home') pendingLink.clear();
+        navigation.go(target.go);
+      }
     },
     [modeStore, clock, engine, navigation, logger, unpair, pair, probeFlight, matchDayStore],
   );

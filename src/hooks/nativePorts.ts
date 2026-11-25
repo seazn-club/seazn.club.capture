@@ -14,6 +14,7 @@ import { scoringLinkPortFor } from '@/hooks/scoringLinkPortWiring';
 import { scoringPortFor } from '@/hooks/scoringPortWiring';
 import type { Ports } from '@/hooks/usePorts';
 import { createNativeCodeScanner } from '@/scanner/nativeCodeScanner';
+import { createIncomingLink } from '@/services/incomingLink';
 import { createEndedNotice } from '@/services/endedNotice';
 import { createMailbox } from '@/services/mailbox';
 import { withTimeout } from '@/services/kvTimeout';
@@ -133,6 +134,7 @@ export function createNativePorts(
     foreground,
     screen: createNativeScreen({ logger, os: Platform.OS }),
     navigation: createExpoRouterNavigation(router),
+    incomingLink: createIncomingLink(),
     splash: createNativeSplash(),
     surfaces: createNativeSurfaces({ logger }),
     logger,

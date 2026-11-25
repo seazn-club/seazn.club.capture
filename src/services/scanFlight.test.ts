@@ -48,4 +48,26 @@ describe('scanFlight', () => {
     expect(flight.active()).toBe(false);
     expect(flight.appReturned()).toBe(false);
   });
+
+  it('tells a listener each time the flight comes down, and only then (Open in app waits on it)', () => {
+    const flight = createScanFlight();
+    let idle = 0;
+    const off = flight.onIdle(() => (idle += 1));
+    flight.end();
+    flight.appReturned();
+    expect(idle).toBe(0);
+    flight.begin();
+    flight.end();
+    expect(idle).toBe(1);
+    flight.begin();
+    flight.appLeft();
+    flight.end();
+    expect(idle).toBe(1);
+    flight.appReturned();
+    expect(idle).toBe(2);
+    off();
+    flight.begin();
+    flight.end();
+    expect(idle).toBe(2);
+  });
 });

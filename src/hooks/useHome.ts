@@ -49,6 +49,7 @@ import { codeStays, useUnpair } from '@/hooks/useUnpair';
 import { useFormatDay, useFormatTime } from '@/hooks/useFormatTime';
 import { useT } from '@/hooks/useLanguage';
 import { usePairing } from '@/hooks/usePairing';
+import { usePendingLink } from '@/hooks/usePendingLink';
 import {
   keepScoringLink,
   letGoOfScoring,
@@ -215,7 +216,9 @@ export function useHome(): { view: HomeView; actions: HomeActions } {
     saveFailed,
   );
   const { openOrCheck, retryCheck } = useCodeCheck(openCode, panel, setPanel, useDayCheck(day));
-  const handle = useHandleScan(openOrCheck, setPanel, setStatusKey);
+  const handleRecognised = useHandleRecognised(openOrCheck, setPanel);
+  const handle = useHandleScan(handleRecognised, setStatusKey);
+  usePendingLink(handleRecognised, setPanel, setStatusKey);
   const { tapTile, scanFrom } = useTapTile(handle, setPanel, setStatusKey, useOpenSavedDay(day));
   const { rows, finish, refresh } = useScoringRows(savedMatchId(snapshot));
   const view = useHomeView(snapshot, panel, statusKey, rows, finish);
@@ -394,25 +397,41 @@ const closeSheet = (open: HomePanel | null): HomePanel | null =>
   open?.kind === 'unpairConfirm' ? null : open;
 
 /**
+ * What a code's text turned out to be, for the tile that was tapped: an open, or a panel. Settles only once any check
+ * and save have, so the scan guard covers both. The one path a scan's result and an opened link both take (Open in app,
+ * spec 2026-11-25 §9): a link is a scan that arrives by another route.
+ */
+function useHandleRecognised(
+  openOrCheck: OpenOrCheck,
+  setPanel: SetPanel,
+): (tapped: Mode, raw: string) => Promise<void> {
+  const { clock, hosts } = usePorts();
+  return useCallback(
+    async (tapped: Mode, raw: string) => {
+      const outcome = scanOutcome(tapped, recognise(raw, clock(), hosts));
+      if (outcome.kind === 'open') return openOrCheck(outcome.code);
+      setPanel(outcome);
+    },
+    [clock, hosts, openOrCheck, setPanel],
+  );
+}
+
+/**
  * One scan's result: nothing, a reason on the status line, an open, or a
  * panel. Settles only once any check and save have, so the scan guard covers
  * both.
  */
 function useHandleScan(
-  openOrCheck: OpenOrCheck,
-  setPanel: SetPanel,
+  handleRecognised: (tapped: Mode, raw: string) => Promise<void>,
   setStatusKey: SetStatusKey,
 ): HandleScan {
-  const { clock, hosts } = usePorts();
   return useCallback(
     async (tapped: Mode, result: ScanResult) => {
       if (result.outcome === 'cancelled') return;
       if (result.outcome === 'unavailable') return setStatusKey(SCANNER_MESSAGE[result.reason]);
-      const outcome = scanOutcome(tapped, recognise(result.raw, clock(), hosts));
-      if (outcome.kind === 'open') return openOrCheck(outcome.code);
-      setPanel(outcome);
+      return handleRecognised(tapped, result.raw);
     },
-    [clock, hosts, openOrCheck, setPanel, setStatusKey],
+    [handleRecognised, setStatusKey],
   );
 }
 

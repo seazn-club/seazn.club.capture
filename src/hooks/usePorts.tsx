@@ -13,6 +13,7 @@ import type {
   NavigationPort,
   OrientationLockPort,
   PowerPort,
+  IncomingLinkPort,
   ScreenPort,
   SharePort,
   SplashPort,
@@ -77,6 +78,8 @@ export type Ports = {
   /** The window's brightness: dimmed while paired and idle (D2 §4.5). */
   readonly screen: ScreenPort;
   readonly navigation: NavigationPort;
+  /** Open in app: the links the phone opens the app with (spec 2026-11-25 §6). */
+  readonly incomingLink: IncomingLinkPort;
   readonly splash: SplashPort;
   /** The native views the viewfinder draws (D16). */
   readonly surfaces: Surfaces;

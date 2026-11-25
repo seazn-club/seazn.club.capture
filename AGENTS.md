@@ -158,6 +158,16 @@ minted with the organiser's "Call matches to courts" tick (`can_call`; S4 design
 §7a; owner, 2026-11-13): the phone shows no call control without it, the call is
 held for 3 s, and Undo takes back only a call this phone made.
 
+**Open in app** (spec `docs/specs/2026-11-25-open-in-app-design.md`): a tapped
+`https://<host>/app/{stream|score|day}#…` link is a scan by another route. The
+unwrapper (`domain/mode/openLink.ts`) turns it into the text a scan would have
+read, `useIncomingLink` (over the `IncomingLinkPort`, never `expo-linking`
+directly) records `link-opened {mode, state}` and either ignores it while a
+broadcast is held or moves Home and parks it, and Home handles it exactly as a
+scanner result. It never pairs, goes live or scores by itself, its token is
+never in a record line, and `app/+native-intent.tsx` (R22) never lets a link
+pick a screen.
+
 Adding a fourth mode, or a screen outside a mode, is a product decision, not
 an implementation detail. Raise it; don't build it.
 

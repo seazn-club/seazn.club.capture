@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ConfigContext, ExpoConfig } from 'expo/config';
 import { withAppBuildGradle } from 'expo/config-plugins';
+import { seaznHosts } from './src/services/seaznHosts.ts';
 
 /**
  * The file a production release's number is pinned in (owner, 2026-10-28: production releases build on EAS). EAS
@@ -114,6 +115,29 @@ export function appVariant(
   };
 }
 
+/** One Android intent filter, the shape Expo's `android.intentFilters` takes. */
+export type IntentFilter = {
+  readonly action: string;
+  readonly autoVerify: boolean;
+  readonly category: readonly string[];
+  readonly data: readonly { scheme: string; host: string; pathPrefix: string }[];
+};
+
+/**
+ * The App Links the build declares (Open in app, spec 2026-11-25 §8): `https://<host>/app/*` on the build's own Seazn
+ * hosts and no other, verified by the host's assetlinks.json. `/score/` and `/day/` stay the web's.
+ */
+export function appLinkFilters(env: string | undefined): IntentFilter[] {
+  return [
+    {
+      action: 'VIEW',
+      autoVerify: true,
+      category: ['BROWSABLE', 'DEFAULT'],
+      data: seaznHosts(env).map((host) => ({ scheme: 'https', host, pathPrefix: '/app/' })),
+    },
+  ];
+}
+
 export default ({ config, projectRoot }: ConfigContext): ExpoConfig => {
   const number = buildNumber(projectRoot);
   const pinned = pinnedBuildNumber(projectRoot);
@@ -124,7 +148,15 @@ export default ({ config, projectRoot }: ConfigContext): ExpoConfig => {
       ...variant,
       name: variant.name ?? 'Seazn Club',
       slug: config.slug ?? 'capture',
-      android: { ...variant.android, versionCode: number },
+      android: {
+        ...variant.android,
+        versionCode: number,
+        intentFilters: appLinkFilters(process.env.EXPO_PUBLIC_SEAZN_ENV).map((f) => ({
+          ...f,
+          category: [...f.category],
+          data: [...f.data],
+        })),
+      },
       ios: { ...variant.ios, buildNumber: String(number) },
     },
     (gradle) => {

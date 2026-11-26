@@ -73,10 +73,10 @@ class BitrateRegulatorFloorTest {
   }
 
   @Test
-  fun `R-RTRF a cut onto the floor by its clamp still names the rate it failed, and caps raises for 5 min`() {
-    // 900_000 halves to 450_000, held to the floor: 900_000 failed at 1 s, a cap of 720_000 until 301 s. Floor cuts to
-    // 21 s keep it. Clean from 22 s: 600_000 at 51 s, 720_000 (600_000 + 120_000, at the cap) at 61 s, then capped. At
-    // 301 s the memory has lapsed: 720_000 + 144_000 = 864_000.
+  fun `R-RTRF a cut onto the floor by its clamp still names the rate it failed, and caps raises for its hold`() {
+    // 900_000 halves to 450_000, held to the floor: 900_000 failed at 1 s, a cap of 720_000. N53: a cap under two floors
+    // holds 60 s, to 61 s (it held to 301 s before). Floor cuts to 21 s keep it. Clean from 22 s: 600_000 at 51 s, and at
+    // 61 s the cap has lapsed: 600_000 + 120_000 = 720_000, then 864_000 at 71 s, 10 s on, not 301 s.
     val first = BitrateRegulator.regulate(Regulation(900_000), draining, 1_000, Transport.SRT, latency)
     assertEquals(BitrateMove.DROPS, first.move)
     assertNull(first.floor, "a cut that moved the target is a bitrate line, not a floor line")
@@ -85,9 +85,9 @@ class BitrateRegulatorFloorTest {
     assertEquals(FailedRate(900_000, 1_000), floored.failed)
     val clean = { _: Long -> reading() }
     assertEquals(600_000, run(floored, 22_000, 51_000, clean).first.targetBps)
-    assertEquals(720_000, run(floored, 22_000, 61_000, clean).first.targetBps)
-    assertEquals(720_000, run(floored, 22_000, 300_000, clean).first.targetBps)
-    assertEquals(864_000, run(floored, 22_000, 301_000, clean).first.targetBps)
+    assertEquals(720_000, BitrateRegulator.raiseCap(floored, 60_999))
+    assertEquals(720_000, run(floored, 22_000, 70_000, clean).first.targetBps)
+    assertEquals(864_000, run(floored, 22_000, 71_000, clean).first.targetBps)
   }
 
   @Test

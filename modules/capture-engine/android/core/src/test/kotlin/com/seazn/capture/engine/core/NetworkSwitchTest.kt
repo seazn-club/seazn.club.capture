@@ -351,43 +351,64 @@ class NetworkSwitchTest {
     assertEquals(emptyList(), line.fields.map { it.first }.filterNot { it in plain || it in scalars })
   }
 
-  // N49 fix 3: a replaced switch is a new link.
+  // N49 fix 3: a replaced switch is a new link. N53: the regulator restarts for it, the target and the cut included.
 
   private fun MachineRig.failedAt(bps: Int, cutAtMs: Long, target: Int) {
     phase = phase.withSession(session.copy(regulation = session.regulation.copy(targetBps = target, lastCutAtMs = cutAtMs, failed = FailedRate(bps, cutAtMs))))
   }
 
   @Test
-  fun `N49 fix 3 a replaced switch forgets the failed rate, so Weak signal clears, and keeps the target and the cut`() {
+  fun `N53 a replaced switch restarts the regulator - the start rate, no cut to wait out, and Weak signal clears`() {
     val rig = liveOnCellular()
     rig.failedAt(1_000_000, rig.mono, target = Encode.FLOOR_BPS)
     assertTrue(DegradeReason.POOR_UPLINK in Projection.reasons(rig.session, rig.now), "the rig's cut shows")
-    rig.on(wifi)
+    val commands = rig.on(wifi)
     val regulation = rig.session.regulation
     assertNull(regulation.failed)
-    assertEquals(Encode.FLOOR_BPS, regulation.targetBps, "the climb still starts where it was")
-    assertEquals(rig.mono, regulation.lastCutAtMs, "so the raise still waits from the cut")
+    assertEquals(Encode.START_BPS, regulation.targetBps, "the new link starts where a session does")
+    assertNull(regulation.lastCutAtMs, "nothing the old link cut is waited out")
     assertFalse(DegradeReason.POOR_UPLINK in Projection.reasons(rig.session, rig.now))
+    // The new attempt is asked at it, and the record says the move before the connect.
+    assertEquals(Encode.START_BPS, commands.replaces().single().next.startBitrateBps)
+    val kinds = commands.filterIsInstance<Command.Record>().map { it.entry.kind }
+    assertEquals(listOf("network-switched", "bitrate", "connecting"), kinds)
+    val line = rig.records("bitrate").single()
+    assertEquals(listOf("from" to Encode.FLOOR_BPS, "to" to Encode.START_BPS, "reason" to BitrateMove.NEW_NETWORK), line.fields)
   }
 
   @Test
-  fun `N49 fix 3 a replace held for its connect forgets the failed rate too`() {
+  fun `N49 fix 3 a replace held for its connect restarts the regulator too`() {
     val rig = liveOnCellular()
     rig.on(wifi)
     rig.on(cellular)
     rig.failedAt(1_000_000, rig.mono, target = Encode.FLOOR_BPS)
     rig.send(Input.Connected(2))
     assertNull(rig.session.regulation.failed)
-    assertEquals(rig.mono, rig.session.regulation.lastCutAtMs)
+    assertNull(rig.session.regulation.lastCutAtMs)
+    assertEquals(Encode.START_BPS, rig.session.regulation.targetBps)
   }
 
   @Test
-  fun `a switch that replaces nothing keeps the failed rate`() {
+  fun `N53 a switch between attempts restarts the regulator, since the next attempt is on the new network`() {
     val rig = liveOnCellular()
     rig.send(Input.Dropped(1, DropReason.ENDPOINT_CLOSED, null))
     rig.failedAt(1_000_000, rig.mono, target = Encode.FLOOR_BPS)
-    rig.on(wifi)
+    val commands = rig.on(wifi)
+    assertNull(rig.session.regulation.failed)
+    assertEquals(Encode.START_BPS, rig.session.regulation.targetBps)
+    assertEquals(listOf("network-switched", "bitrate"), commands.filterIsInstance<Command.Record>().map { it.entry.kind })
+    assertTrue(commands.none { it is Command.SetBitrate }, "nothing is on air to hear it: the next connect carries it")
+    rig.advance(SessionMachine.RETRY_MS)
+    assertEquals(Encode.START_BPS, rig.connects().last().startBitrateBps)
+  }
+
+  @Test
+  fun `N53 a switch the attempt is already on restarts nothing`() {
+    val rig = liveOnCellular()
+    rig.failedAt(1_000_000, rig.mono, target = Encode.FLOOR_BPS)
+    rig.on(cellular)
     assertEquals(FailedRate(1_000_000, rig.mono), rig.session.regulation.failed)
+    assertEquals(Encode.FLOOR_BPS, rig.session.regulation.targetBps)
   }
 
   // N49 fix 4: the delivery watch after a replaced switch.

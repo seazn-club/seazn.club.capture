@@ -1,7 +1,10 @@
 package com.seazn.capture.engine.core
 
-/** A target the link failed to carry, and when. */
-data class FailedRate(val bps: Int, val atMs: Long)
+/**
+ * A target the link failed to carry, and when. [repeats] counts the rates that failed again soon after a low cap's short
+ * hold ran out ([BitrateRegulator.lowCapHoldMs]): 0 for a first failure.
+ */
+data class FailedRate(val bps: Int, val atMs: Long, val repeats: Int = 0)
 
 /** What the regulator remembers between readings, and across the attempts of one session. */
 data class Regulation(
@@ -54,6 +57,9 @@ enum class BitrateMove(override val wire: String) : Wire {
 
   /** S3: a drop after a clean link put back the last healthy target ([BitrateRegulator.afterDrop]). */
   DROP_RESTORED("drop-restored"),
+
+  /** N53: a new network restarted the regulator at the start rate ([BitrateRegulator.newNetwork]). */
+  NEW_NETWORK("new-network"),
 }
 
 /**
@@ -114,6 +120,20 @@ object BitrateRegulator {
   const val TESTED_PERCENT = 70L
   const val FAILED_RATE_MEMORY_MS = 300_000L
   const val FAILED_RATE_PERCENT = 80
+
+  /**
+   * N53 (stg, 2026-11-26, session 66753ccd): a cap under this, two floors, keeps the target within one halving of the
+   * floor, and holds it there for [LOW_CAP_HOLD_MS], not [FAILED_RATE_MEMORY_MS]. A cascade of cuts names the last rate
+   * it left, which the backlog of the rate before was still draining through: 703_821 capped raises at 563_040 for
+   * 5 min, and 608_000 at 486_400, under the floor, for 5 min more. A cap at or over it holds 5 min, as F-P5-7 set.
+   */
+  const val LOW_CAP_BPS = 2 * Encode.FLOOR_BPS
+
+  /** N53: how long a low cap holds a first time. Each repeat doubles it, up to [FAILED_RATE_MEMORY_MS]. */
+  const val LOW_CAP_HOLD_MS = 60_000L
+
+  /** N53: 60 s × 2³ = 480 s, past [FAILED_RATE_MEMORY_MS], so a low cap's hold never grows past today's 5 min. */
+  const val LOW_CAP_MAX_REPEATS = 3
   const val CLEAN_EGRESS_TICKS = 10
 
   /** At most one `bitrate-held` line in this long: R-990P's 18 min hold reads as 18 lines, not 108. */
@@ -138,11 +158,28 @@ object BitrateRegulator {
   fun sessionStarted(): Regulation = Regulation(Encode.START_BPS)
 
   /**
-   * N49 fix round 1: a socket replaced for a switch of the default network is a new link, on another network. The rate
-   * the old one failed says nothing of it, so it is forgotten, and Weak signal (`poor-uplink`, which needs one) with it.
-   * The target and the cut stand, so the climb starts where it was and F-P5-7's tested raise still gates it.
+   * N53 (owner ruling, 2026-11-26), superseding N49 fix round 1's "the target and the cut stand": a connection on a new
+   * network (a replaced switch, an attempt asked on another network, or a connection remade while the network was not
+   * validated, which validation then confirms) is a new link. What the old one failed, cut and carried says nothing of
+   * it: the failed rate, the cut's 30 s wait, the failing mark and the egress a cut is sized from are forgotten, so Weak
+   * signal (`poor-uplink`) clears, and a target under the start rate restarts at it, as a session does. A target over it
+   * stands: a new network is no reason to cut. F-P5-7's tested raise still gates every raise from there, and the lines'
+   * own minutes and counts are kept.
    */
-  fun newLink(state: Regulation): Regulation = state.copy(failed = null)
+  fun newNetwork(state: Regulation): Regulation {
+    val target = maxOf(state.targetBps, Encode.START_BPS)
+    return state
+      .copy(
+        targetBps = target,
+        lastCutAtMs = null,
+        failed = null,
+        failingAtMs = null,
+        cleanEgressBps = emptyList(),
+        healthyTargetBps = target,
+        healthyAtMs = null,
+      )
+      .cleanWaitRestarted(null)
+  }
 
   /** A new attempt keeps the target, the cut and the failed rate. Only the clean interval restarts. */
   fun attemptStarted(state: Regulation): Regulation = state.cleanWaitRestarted(null)
@@ -210,11 +247,18 @@ object BitrateRegulator {
   /** [RAISE_STEP_PERCENT] of [targetBps], rounded down, and never under [RAISE_STEP_BPS]. */
   fun raiseStepBps(targetBps: Int): Int = maxOf((targetBps * RAISE_STEP_PERCENT / 100).toInt(), RAISE_STEP_BPS)
 
-  /** 80% of a rate that failed less than [FAILED_RATE_MEMORY_MS] ago; otherwise the ceiling. */
+  /** 80% of a rate that failed less than its hold ago ([holdMs]); otherwise the ceiling. */
   fun raiseCap(state: Regulation, nowMs: Long): Int =
-    state.failed
-      ?.takeIf { nowMs - it.atMs < FAILED_RATE_MEMORY_MS }
-      ?.let { it.bps / 100 * FAILED_RATE_PERCENT } ?: Encode.CEILING_BPS
+    state.failed?.takeIf { nowMs - it.atMs < holdMs(it) }?.let(::capOf) ?: Encode.CEILING_BPS
+
+  private fun capOf(failed: FailedRate): Int = failed.bps / 100 * FAILED_RATE_PERCENT
+
+  /** How long [failed] caps raises: a low cap's short hold ([lowCapHoldMs]), or [FAILED_RATE_MEMORY_MS]. */
+  fun holdMs(failed: FailedRate): Long = if (capOf(failed) < LOW_CAP_BPS) lowCapHoldMs(failed.repeats) else FAILED_RATE_MEMORY_MS
+
+  /** N53: [LOW_CAP_HOLD_MS], doubled for each repeat, never past [FAILED_RATE_MEMORY_MS]. */
+  fun lowCapHoldMs(repeats: Int): Long =
+    minOf(LOW_CAP_HOLD_MS shl repeats.coerceIn(0, LOW_CAP_MAX_REPEATS), FAILED_RATE_MEMORY_MS)
 
   /**
    * The send buffer, or null when it has no value to judge: negative (P5: −336, "a reading artefact to
@@ -262,7 +306,20 @@ object BitrateRegulator {
    * that lowers the target names the rate it left, a clamp onto the floor included.
    */
   private fun failedAt(state: Regulation, target: Int, nowMs: Long): FailedRate? =
-    if (target == state.targetBps) state.failed else FailedRate(state.targetBps, nowMs)
+    if (target == state.targetBps) state.failed else FailedRate(state.targetBps, nowMs, repeatsAfter(state.failed, nowMs))
+
+  /**
+   * N53: the guard against probing a bad link every minute. A rate that fails within [FAILED_RATE_MEMORY_MS] of the last
+   * low cap's hold running out is the link failing again where it failed before, so the next hold doubles, up to
+   * [LOW_CAP_MAX_REPEATS]. Any other failure is a first: a cascade inside a hold, a cap of [LOW_CAP_BPS] or more, or one
+   * long after.
+   */
+  private fun repeatsAfter(last: FailedRate?, nowMs: Long): Int {
+    if (last == null || capOf(last) >= LOW_CAP_BPS) return 0
+    val hold = holdMs(last)
+    val since = nowMs - last.atMs
+    return if (since >= hold && since < hold + FAILED_RATE_MEMORY_MS) (last.repeats + 1).coerceAtMost(LOW_CAP_MAX_REPEATS) else 0
+  }
 
   /**
    * R-RTRF: a cut that found the target at the floor. It is still a cut, so it moves [Regulation.lastCutAtMs]: a backlog

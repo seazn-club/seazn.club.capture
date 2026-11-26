@@ -41,8 +41,11 @@ object SessionMachine {
    * Plan D §3.4: whatever the input, a pairing that stops beating writes its open minute of beats ([BeatLogs.closed]).
    * N49 fix round 1: a session that ends writes its floor cuts no line has said yet ([FloorCuts.closed]).
    */
-  fun reduce(phase: Phase, input: Input, now: Now): Step =
-    Nudges.closed(phase, BeatLogs.closed(phase, NeverLiveRetries.closed(phase, FloorCuts.closed(phase, reduced(phase, input, now)))), now)
+  fun reduce(phase: Phase, input: Input, now: Now): Step {
+    // R-1PG4: the first step after which the held broadcast's viewers are confirmed says which fact did it.
+    val step = ViewersConfirmed.closed(reduced(phase, input, now), now)
+    return Nudges.closed(phase, BeatLogs.closed(phase, NeverLiveRetries.closed(phase, FloorCuts.closed(phase, step))), now)
+  }
 
   private fun reduced(phase: Phase, input: Input, now: Now): Step {
     if (input == Input.Tick || input == Input.Stop) return apply(phase, input, now)

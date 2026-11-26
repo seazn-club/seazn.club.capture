@@ -7,7 +7,7 @@ object Projection {
    * it in the step the watch reads ok), through its new ingest session and its reconnect; otherwise the watch's
    * word while on air, and unknown off air.
    */
-  private fun delivery(session: Session?, onAir: Phase.OnAir?): Delivery =
+  internal fun delivery(session: Session?, onAir: Phase.OnAir?): Delivery =
     if (session?.notDelivered == true) Delivery.STALLED else onAir?.session?.delivery?.delivery ?: Delivery.UNKNOWN
 
   fun snapshot(phase: Phase, now: Now): Snapshot {

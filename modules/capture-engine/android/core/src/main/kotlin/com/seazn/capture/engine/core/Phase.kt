@@ -157,6 +157,8 @@ data class Session(
   val retries: NeverLiveRetries = NeverLiveRetries(),
   /** N52: the flap bound on a provisional connection's immediate retries, across attempts. */
   val provisional: ProvisionalRetries = ProvisionalRetries(),
+  /** R-1PG4: this broadcast's `viewers-confirmed` line was written ([ViewersConfirmed]). */
+  val viewersConfirmed: Boolean = false,
   /** Review of batch 2, item 1: stuck replaces in a row, across attempts. */
   val stuckReplaces: StuckReplaces = StuckReplaces(),
   /** S1: below-floor rebuilds in a row, across attempts, and when the last went. */

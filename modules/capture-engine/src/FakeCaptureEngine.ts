@@ -42,6 +42,7 @@ export type FakeScene =
   | 'arming-retrying'
   | 'armed-not-ready'
   | 'connecting'
+  | 'going-live'
   | 'live'
   | 'fell-back'
   | 'holding'
@@ -69,6 +70,7 @@ export const FAKE_SCENES: readonly FakeScene[] = [
   'arming-retrying',
   'armed-not-ready',
   'connecting',
+  'going-live',
   'live',
   'fell-back',
   'holding',
@@ -373,6 +375,13 @@ function sceneOf(name: FakeScene, now: number): Scene {
       };
     case 'connecting':
       return { state: { kind: 'connecting', transport: 'srt' }, telemetry: ARMED };
+    case 'going-live':
+      // Owner, 2026-11-26: the upload connected this moment and nothing yet confirms the viewers' picture: the
+      // playlist check has not seen the head move, and no beat answer has said the programme is live.
+      return {
+        state: publishing('srt', now),
+        telemetry: { ...live, delivery: 'unknown', deliveredLagMs: null, server: null },
+      };
     case 'live':
       return { state: publishing('srt', since), telemetry: live };
     case 'fell-back':

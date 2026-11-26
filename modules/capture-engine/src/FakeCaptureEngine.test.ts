@@ -496,6 +496,8 @@ describe('scenes: every state spec §6 and the amendment list', () => {
     'arming-retrying': { kind: 'arming', cause: 'automatic', retrying: true },
     'armed-not-ready': { kind: 'armed', cause: 'organiser', notReady: 'held' },
     connecting: { kind: 'connecting', transport: 'srt' },
+    // Owner, 2026-11-26: connected this moment, the viewers' picture not yet confirmed.
+    'going-live': { kind: 'publishing', transport: 'srt', sinceEpochMs: NOW },
     live: { kind: 'publishing', transport: 'srt', sinceEpochMs: NOW - ON_AIR_MS },
     'fell-back': { kind: 'degraded', transport: 'rtmps', reason: 'fell-back-to-rtmps' },
     holding: {
@@ -532,7 +534,7 @@ describe('scenes: every state spec §6 and the amendment list', () => {
   };
 
   it('lists every scene once, for the dev controls', () => {
-    expect(FAKE_SCENES).toHaveLength(25);
+    expect(FAKE_SCENES).toHaveLength(26);
     expect([...FAKE_SCENES].sort()).toEqual(Object.keys(EXPECTED).sort());
   });
 
@@ -727,6 +729,7 @@ describe('whose camera is on air (carry 10)', () => {
     'arming-retrying': 'own',
     'armed-not-ready': 'own',
     connecting: 'own',
+    'going-live': 'own',
     live: 'own',
     'fell-back': 'own',
     holding: 'own',

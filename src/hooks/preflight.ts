@@ -1,5 +1,6 @@
 import { firstNotReady, type NotReady } from '@/domain/session/Pairing';
 import type { SessionState } from '@/domain/session/SessionState';
+import type { AirStage } from '@/domain/session/viewersConfirmed';
 import type { EngineSnapshot } from '@/engine/CaptureEnginePort';
 import type { MessageKey } from '@/i18n/messages';
 
@@ -49,9 +50,10 @@ export function blockerReason(blocker: Blocker | null): BlockerKey | null {
 }
 
 export type TallyPlate =
-  'starting' | 'notReady' | 'ready' | 'connecting' | 'live' | 'trouble' | 'ended';
+  'starting' | 'notReady' | 'ready' | 'connecting' | 'goingLive' | 'live' | 'trouble' | 'ended';
 
-export type TallyTone = 'live' | 'healthy' | 'degraded' | 'inert';
+/** `going` is Going live's own: a dark plate with a red outline, never the red fill (owner, 2026-11-26). */
+export type TallyTone = 'live' | 'going' | 'healthy' | 'degraded' | 'inert';
 
 /**
  * Spec §4's state plate (D14). The LIVE gate: LIVE only while publishing —
@@ -59,12 +61,22 @@ export type TallyTone = 'live' | 'healthy' | 'degraded' | 'inert';
  * and Armed read as connecting: the amendment names no plate of their own, and
  * their line says who started it or what it waits for (Task 28). `backupOnly` is a degraded session whose one reason
  * is the fall to RTMPS (`selectBackupOnly`): the broadcast is publishing, so it reads LIVE.
+ *
+ * Red LIVE means viewers can see the picture (owner, 2026-11-26): a plate that would read LIVE reads GOING LIVE while
+ * `stage` says the viewers' picture is not yet confirmed (`airStage`), on the main link and the backup alike. Trouble
+ * stays trouble whatever the stage.
  */
 export function tallyPlateFor(
   kind: SessionState['kind'],
   ready: boolean,
   backupOnly = false,
+  stage: AirStage = 'live',
 ): TallyPlate {
+  const plate = plateOf(kind, ready, backupOnly);
+  return plate === 'live' && stage === 'goingLive' ? 'goingLive' : plate;
+}
+
+function plateOf(kind: SessionState['kind'], ready: boolean, backupOnly: boolean): TallyPlate {
   switch (kind) {
     case 'idle':
     case 'pairing':
@@ -87,11 +99,13 @@ export function tallyPlateFor(
   }
 }
 
-/** The only place a plate becomes a colour. Red is LIVE and nothing else (AGENTS §5). */
+/** The only place a plate becomes a colour. Red is LIVE and nothing else (AGENTS §5); Going live is outlined in it. */
 export function tallyTone(plate: TallyPlate): TallyTone {
   switch (plate) {
     case 'live':
       return 'live';
+    case 'goingLive':
+      return 'going';
     case 'ready':
       return 'healthy';
     case 'trouble':

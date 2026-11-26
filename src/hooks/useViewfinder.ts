@@ -1,5 +1,6 @@
 import { useCallback, useMemo } from 'react';
 import type { SessionState } from '@/domain/session/SessionState';
+import { airStage, type AirStage } from '@/domain/session/viewersConfirmed';
 import { selectShedding } from '@/hooks/advisory';
 import {
   selectAutomaticOn,
@@ -10,6 +11,8 @@ import {
   selectPlaybackUrl,
   selectScheduledStartMs,
   selectBackupOnly,
+  selectConfirmLate,
+  selectConfirmSource,
   selectStarting,
   selectStateKind,
   selectVenueZone,
@@ -28,6 +31,7 @@ import {
   type TallyPlate,
 } from '@/hooks/preflight';
 import {
+  airLineKey,
   selectHoldRemaining,
   selectHoldWindow,
   selectStatusKey,
@@ -36,6 +40,7 @@ import {
 import { useEngine, useEngineSelector } from '@/hooks/useCaptureEngine';
 import { useFormatTime } from '@/hooks/useFormatTime';
 import { usePorts } from '@/hooks/usePorts';
+import { useViewersConfirmed } from '@/hooks/viewersLatch';
 
 type Kind = SessionState['kind'];
 export type ViewfinderAction = 'goLive' | 'stop' | 'none';
@@ -132,6 +137,7 @@ export function useViewfinder(): Viewfinder {
   const court = useEngineSelector(selectCourt);
   const starting = useEngineSelector(selectStarting);
   const backupOnly = useEngineSelector(selectBackupOnly);
+  const stage = useAirStage(kind);
   return useMemo(
     () => ({
       ...project({
@@ -146,6 +152,7 @@ export function useViewfinder(): Viewfinder {
         court,
         starting,
         backupOnly,
+        stage,
       }),
       ...countdown,
       ...intents,
@@ -162,6 +169,7 @@ export function useViewfinder(): Viewfinder {
       court,
       starting,
       backupOnly,
+      stage,
       countdown,
       intents,
     ],
@@ -182,6 +190,8 @@ type ProjectInput = {
   readonly starting: boolean;
   /** Degraded for the fall to RTMPS alone: publishing on the backup link reads LIVE. */
   readonly backupOnly: boolean;
+  /** The viewers' picture (owner, 2026-11-26): Going live until confirmed, then LIVE; LIVE with the warning at 60 s. */
+  readonly stage: AirStage;
 };
 
 /**
@@ -193,12 +203,12 @@ type ProjectInput = {
 function project(
   input: ProjectInput,
 ): Omit<Viewfinder, 'holdRemaining' | 'holdWindow' | 'start' | 'stop'> {
-  const { kind, blocker, waiting, engineSilent, court, starting, backupOnly } = input;
+  const { kind, blocker, waiting, engineSilent, court, starting, backupOnly, stage } = input;
   const action = ACTION[kind];
   return {
     kind,
-    plate: engineSilent ? 'trouble' : plateFor(kind, blocker === null, starting, backupOnly),
-    statusKey: engineSilent ? 'stream.status.engineSilent' : input.engineKey,
+    plate: engineSilent ? 'trouble' : plateFor(kind, blocker === null, starting, backupOnly, stage),
+    statusKey: engineSilent ? 'stream.status.engineSilent' : airLineKey(input.engineKey, stage),
     preflight: input.preflight,
     blocker,
     reason: blockerReason(blocker),
@@ -216,8 +226,27 @@ function project(
 }
 
 /** The tally plate: the hold's start in flight reads Connecting, as the Arming it leads to (court stream Task 13, P2). */
-function plateFor(kind: Kind, ready: boolean, starting: boolean, backupOnly: boolean): TallyPlate {
-  return starting ? 'connecting' : tallyPlateFor(kind, ready, backupOnly);
+function plateFor(
+  kind: Kind,
+  ready: boolean,
+  starting: boolean,
+  backupOnly: boolean,
+  stage: AirStage,
+): TallyPlate {
+  return starting ? 'connecting' : tallyPlateFor(kind, ready, backupOnly, stage);
+}
+
+/**
+ * The viewers' picture stage (owner, 2026-11-26), from three primitives: the latch (`viewersLatch.ts`), whether this
+ * broadcast has anything that could confirm it, and whether the upload connected 60 s ago by native's clock. Each
+ * turns once a broadcast, so a 1 Hz tick re-renders nothing (AGENTS §8). Shared with Settings' plate (`LivePlate`).
+ */
+export function useAirStage(kind: Kind): AirStage {
+  const confirmed = useViewersConfirmed();
+  const hasSource = useEngineSelector(selectConfirmSource);
+  const late = useEngineSelector(selectConfirmLate);
+  const onAir = kind === 'publishing' || kind === 'degraded';
+  return airStage({ onAir, confirmed, hasSource, late });
 }
 
 type WaitingFields = {

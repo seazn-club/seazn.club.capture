@@ -31,6 +31,8 @@ type StageProps = {
   readonly line: string;
   /** Which tier that line is (`LINE_TIER`): an urgent line always wins the strip's one message line. */
   readonly lineTier: LineTier;
+  /** The line is a caution (`CAUTION_LINES`): drawn orange, the 60 s viewers' picture warning alone (owner, 2026-11-26). */
+  readonly lineCaution?: boolean;
   /**
    * What viewers see (D2 §4.3): open over the camera box, or idle. Null when it is hidden (`FEATURES.viewerCheck`, the
    * owner's ruling of 2026-10-09): then neither its feed nor its cover mounts, and the heat caption does not name it.
@@ -111,6 +113,7 @@ export const StreamStage = memo(function StreamStage(props: StageProps) {
       <StatusStrip
         line={props.line}
         lineTier={props.lineTier}
+        lineCaution={props.lineCaution}
         advisory={advisory}
         onLabelHeight={setLabelHeight}
       />

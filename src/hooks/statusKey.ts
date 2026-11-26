@@ -5,6 +5,7 @@ import type {
   ReconnectCause,
   SessionState,
 } from '@/domain/session/SessionState';
+import type { AirStage } from '@/domain/session/viewersConfirmed';
 import type { CameraState, EngineSnapshot } from '@/engine/CaptureEnginePort';
 import {
   selectCourt,
@@ -250,6 +251,8 @@ const CALM_ON_AIR: ReadonlySet<StatusKey> = new Set<StatusKey>([
   'stream.status.goingLiveMatch',
   'stream.status.rejoining',
   'stream.status.live',
+  // Owner, 2026-11-26: Going live's line is plain progress, as Live is.
+  'stream.status.viewersPending',
   // A court's live line names the next match (court stream §6.2); Back's "hold Stop" stands in for it as for Live.
   'stream.status.courtNextAt',
   'stream.status.courtNext',
@@ -311,6 +314,12 @@ export const LINE_TIER: Readonly<Record<LineKey, LineTier>> = {
   'stream.status.notReadyHeld': 'urgent',
   'stream.status.connecting': 'routine',
   'stream.status.live': 'routine',
+  // Owner, 2026-11-26: the upload is connected and the viewers' picture is being confirmed, which takes seconds.
+  // Nobody needs to act yet: plain progress, as "Opening the link." is, so a phone warning may take the line.
+  'stream.status.viewersPending': 'routine',
+  // 60 s on air and nothing confirms the viewers' picture: the operator should check the match page. A request to act,
+  // so it always wins the line (urgent), and a caption never hides it (spec 2026-11-24 §3a).
+  'stream.status.viewersUnconfirmed': 'urgent',
   'stream.status.fellBack': 'urgent',
   'stream.status.weakSignal': 'urgent',
   'stream.status.notDelivered': 'urgent',
@@ -336,6 +345,35 @@ export const LINE_TIER: Readonly<Record<LineKey, LineTier>> = {
   'stream.status.engineSilent': 'urgent',
   'stream.leaveOnAir': 'urgent',
 };
+
+/**
+ * The on-air lines that the viewers' picture stage stands in for (owner, 2026-11-26): the live line, a court's Next
+ * line on air, and the backup link's, which reads Going live before confirmation as the main link does. A camera,
+ * trouble or hold line is the machinery's own and always says itself.
+ */
+const CONFIRMABLE: ReadonlySet<StatusKey> = new Set<StatusKey>([
+  'stream.status.live',
+  'stream.status.courtNext',
+  'stream.status.courtNextAt',
+  'stream.status.fellBack',
+]);
+
+/**
+ * The on-air line for the viewers' picture stage (`airStage`): "Connected · getting viewers' picture ready" while it
+ * is being confirmed, "Viewers' picture not confirmed yet" 60 s on with nothing confirming it, and the state's own line
+ * once confirmed. A display rule over native's line; native's state is untouched (AGENTS §2).
+ */
+export function airLineKey(key: StatusKey, stage: AirStage): StatusKey {
+  if (stage === 'live' || !CONFIRMABLE.has(key)) return key;
+  return stage === 'goingLive'
+    ? 'stream.status.viewersPending'
+    : 'stream.status.viewersUnconfirmed';
+}
+
+/** The lines the strip draws in caution orange (owner's mock, 2026-11-26): the 60 s warning alone. */
+export const CAUTION_LINES: ReadonlySet<LineKey> = new Set<LineKey>([
+  'stream.status.viewersUnconfirmed',
+]);
 
 /** The column's sentence: the status line, or Back's refusal over a calm one. */
 export function columnLineKey(statusKey: StatusKey, leaveRefused: boolean): LineKey {

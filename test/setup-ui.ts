@@ -144,3 +144,10 @@ vi.mock('@/ui/components/HoldFill', async () => {
       } as ViewProps),
   };
 });
+
+// Going live's sweep is a Reanimated worklet (owner's mock, 2026-11-26); tests read only that the plate draws one.
+vi.mock('@/ui/components/PlateSweep', async () => {
+  const { createElement } = await import('react');
+  const { View } = await import('react-native');
+  return { PlateSweep: () => createElement(View, { testID: 'plate-sweep' }) };
+});

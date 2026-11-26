@@ -30,6 +30,8 @@ const ROUTINE: readonly LineKey[] = [
   'stream.status.courtStartRetrying', // can't start yet, retrying
   // Owner, 2026-11-25: the phone's own last session still ends on the server; native asks once more by itself.
   'stream.status.startDraining', // getting ready, going live shortly
+  // Owner, 2026-11-26: the upload is connected and the viewers' picture is being confirmed; nobody needs to act yet.
+  'stream.status.viewersPending', // connected, getting viewers' picture ready
 ];
 
 const URGENT: readonly LineKey[] = [
@@ -68,6 +70,8 @@ const URGENT: readonly LineKey[] = [
   'stream.status.holdingNotDelivered',
   'stream.status.rejoinRetrying',
   'stream.status.engineSilent',
+  // Owner, 2026-11-26: 60 s on air and nothing confirms the viewers' picture: the operator should check the match page.
+  'stream.status.viewersUnconfirmed',
   // A stopped or ended stream: stopped, and how it ended.
   'stream.status.stoppedOrganiser',
   'stream.status.stoppedMatch',
@@ -101,10 +105,10 @@ describe('the strip’s two tiers of line (owner ruling, 2026-10-08)', () => {
     ] as const) {
       expect(dictionaryKeys(dictionary), lang).toEqual(chosen);
     }
-    // Anti-vacuity: the lists are the whole copy, 53 status keys and Back's line.
-    expect(chosen).toHaveLength(54);
-    expect(ROUTINE).toHaveLength(14);
-    expect(URGENT).toHaveLength(40);
+    // Anti-vacuity: the lists are the whole copy, 55 status keys and Back's line.
+    expect(chosen).toHaveLength(56);
+    expect(ROUTINE).toHaveLength(15);
+    expect(URGENT).toHaveLength(41);
     // And the table has an entry for exactly those keys.
     expect(Object.keys(LINE_TIER).sort()).toEqual(chosen);
   });

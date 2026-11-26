@@ -117,6 +117,13 @@ export const plate = {
   healthy: colour.lime,
   degraded: colour.caution,
   inert: colour.surface,
+  /**
+   * Going live (owner's mock, 2026-11-26): the upload is connected and the viewers' picture is not yet confirmed. A dark
+   * plate outlined in live red, its sweep a band of live red at 20%: red edges, never the red area, which means ON AIR.
+   */
+  going: colour.surface2,
+  goingEdge: colour.live,
+  goingSweep: '#ef444433',
 } as const;
 
 /**
@@ -172,6 +179,8 @@ const base = {
   cardBorder: 1,
   /** The tally plate's floor (TallyPlate), unchanged. */
   plateHeight: 56,
+  /** Going live's live-red outline on its dark plate (owner's mock, 2026-11-26): red edges, never a red fill. */
+  plateOutline: 2,
   /** AudioMeter's bar, unchanged. */
   meterHeight: 12,
   /** Board "Before": the controls half's padding and gap. The scoring panel over the camera half keeps both. */

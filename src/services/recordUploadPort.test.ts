@@ -518,9 +518,9 @@ describe('every line the scrub writes passes the upload’s check (N18)', () => 
   const token = vectors.held.secrets[0] ?? '';
   let swept = 0;
 
-  it('holds the vectors’ token, and the file has its 48 rows', () => {
+  it('holds the vectors’ token, and the file has its 49 rows', () => {
     expect(token).toBe('tok-9f3c2a7e5b1d4680ab');
-    expect(vectors.cases).toHaveLength(48);
+    expect(vectors.cases).toHaveLength(49);
   });
 
   it.each(vectors.cases.map((c) => [c.why, c] as const))('%s', (_why, c) => {
@@ -552,7 +552,7 @@ describe('every line the scrub writes passes the upload’s check (N18)', () => 
   });
 
   it('swept every row (anti-vacuity)', () => {
-    expect(swept).toBe(48);
+    expect(swept).toBe(49);
   });
 });
 
@@ -713,6 +713,11 @@ describe('every line fixture of the contract, through the upload', () => {
     'line-server-duplicate-key': 'text-gap',
     // A string under an unlisted key that no scrub wrote (`cred`): the line did not come through a scrub (M7).
     'line-tampered': 'refused-local',
+    // The contract admits a playbackUrl URL, the app never writes one: its scrub masks the key whole (owner,
+    // 2026-11-26), so a real URL here did not come through a scrub, like `line-tampered`'s. Refused, sending
+    // nothing, where masking it in the upload would send a line the app did not write. The masked line passes
+    // (N18), pinned below.
+    'line-valid-url': 'refused-local',
   };
   const LINE_FIXTURES = FIXTURE_NAMES.filter((name) => name.startsWith('line-'));
   const seen: Outcome[] = [];
@@ -770,7 +775,17 @@ describe('every line fixture of the contract, through the upload', () => {
       count('shape-gap'),
       count('secret-gap'),
       count('text-gap'),
-    ]).toEqual([26, 2, 9, 6, 5, 1]);
+    ]).toEqual([25, 2, 10, 6, 5, 1]);
+  });
+
+  it('a playbackUrl the scrub masked is sent as written, the contract listing the key', async () => {
+    const record = createRingRecord();
+    createLogger({ record, now: () => 0 }).info('armed', { playbackUrl: 'https://a.example/x' });
+    const [written = ''] = record.lines();
+    expect(written).toContain('"playbackUrl":"***"');
+    const p = port(answered(201, OK));
+    expect((await p.upload.send([written], credential)).result).toBe('sent');
+    expect(String(p.fetch.mock.calls[0]?.[1]?.body).trim()).toBe(written);
   });
 
   // S1, the one secret rule the app runs itself: the Bearer that sends the record, anywhere in it.

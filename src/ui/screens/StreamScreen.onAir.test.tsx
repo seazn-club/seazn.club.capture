@@ -155,7 +155,6 @@ describe('on air (spec §6, through the fake)', () => {
   });
 
   it.each<[FakeScene, string]>([
-    ['fell-back', 'Switched to backup link (RTMPS)'],
     ['holding', 'Uplink lost — holding, 38 s of 183'],
     ['stalled', 'Video stalled — restarting, 38 s of 183'],
     ['restarting', 'Viewers not receiving — restarting, 38 s of 183'],
@@ -168,6 +167,40 @@ describe('on air (spec §6, through the fake)', () => {
     expect(screen.getByText(line)).toBeTruthy();
     expect(screen.getByText('0:12:34')).toBeTruthy();
     expect(stop()).toBeTruthy();
+  });
+
+  /**
+   * Owner, 2026-11-26: the backup link carrying a clean picture reads LIVE (red), the line still says which link. Native
+   * names a degraded session's first reason in its own order, fell-back last (SnapshotWire.kt), so a fell-back reason
+   * on the wire is the only one standing; another reason arrives as itself.
+   */
+  it('fell-back and publishing reads Live, with the backup line, the clock and Stop', async () => {
+    await onAir('fell-back');
+    expect(plate()).toBe('Live');
+    expect(screen.getByText('Switched to backup link (RTMPS)')).toBeTruthy();
+    expect(screen.getByText('0:12:34')).toBeTruthy();
+    expect(stop()).toBeTruthy();
+  });
+
+  it('on the backup link with another reason standing reads Trouble', async () => {
+    const view = await onAir('fell-back');
+    act(() =>
+      view.engine.forceState({
+        kind: 'degraded',
+        transport: 'rtmps',
+        reason: 'poor-uplink',
+        sinceEpochMs: 1,
+      }),
+    );
+    expect(plate()).toBe('Trouble');
+  });
+
+  it('a reconnect after the fall to backup reads Trouble, and Live again when it is back', async () => {
+    const view = await onAir('fell-back');
+    act(() => view.engine.scene('holding'));
+    expect(plate()).toBe('Trouble');
+    act(() => view.engine.scene('fell-back'));
+    expect(plate()).toBe('Live');
   });
 
   /**

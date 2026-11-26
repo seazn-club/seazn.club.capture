@@ -9,6 +9,7 @@ import {
   selectNextStartMs,
   selectPlaybackUrl,
   selectScheduledStartMs,
+  selectBackupOnly,
   selectStarting,
   selectStateKind,
   selectVenueZone,
@@ -130,6 +131,7 @@ export function useViewfinder(): Viewfinder {
   const engineSilent = useEngineSilent();
   const court = useEngineSelector(selectCourt);
   const starting = useEngineSelector(selectStarting);
+  const backupOnly = useEngineSelector(selectBackupOnly);
   return useMemo(
     () => ({
       ...project({
@@ -143,6 +145,7 @@ export function useViewfinder(): Viewfinder {
         engineSilent,
         court,
         starting,
+        backupOnly,
       }),
       ...countdown,
       ...intents,
@@ -158,6 +161,7 @@ export function useViewfinder(): Viewfinder {
       engineSilent,
       court,
       starting,
+      backupOnly,
       countdown,
       intents,
     ],
@@ -176,6 +180,8 @@ type ProjectInput = {
   readonly engineSilent: boolean;
   readonly court: string | null;
   readonly starting: boolean;
+  /** Degraded for the fall to RTMPS alone: publishing on the backup link reads LIVE. */
+  readonly backupOnly: boolean;
 };
 
 /**
@@ -187,11 +193,11 @@ type ProjectInput = {
 function project(
   input: ProjectInput,
 ): Omit<Viewfinder, 'holdRemaining' | 'holdWindow' | 'start' | 'stop'> {
-  const { kind, blocker, waiting, engineSilent, court, starting } = input;
+  const { kind, blocker, waiting, engineSilent, court, starting, backupOnly } = input;
   const action = ACTION[kind];
   return {
     kind,
-    plate: engineSilent ? 'trouble' : plateFor(kind, blocker === null, starting),
+    plate: engineSilent ? 'trouble' : plateFor(kind, blocker === null, starting, backupOnly),
     statusKey: engineSilent ? 'stream.status.engineSilent' : input.engineKey,
     preflight: input.preflight,
     blocker,
@@ -210,8 +216,8 @@ function project(
 }
 
 /** The tally plate: the hold's start in flight reads Connecting, as the Arming it leads to (court stream Task 13, P2). */
-function plateFor(kind: Kind, ready: boolean, starting: boolean): TallyPlate {
-  return starting ? 'connecting' : tallyPlateFor(kind, ready);
+function plateFor(kind: Kind, ready: boolean, starting: boolean, backupOnly: boolean): TallyPlate {
+  return starting ? 'connecting' : tallyPlateFor(kind, ready, backupOnly);
 }
 
 type WaitingFields = {

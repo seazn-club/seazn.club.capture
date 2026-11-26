@@ -1250,7 +1250,9 @@ the shared record (10,662 lines) was.
 
 **So:** F-P5-7's failed-rate cap (80% of the rate that failed, for 5 minutes) held both. In the first it capped raises at
 563,040; in the second it was 486,400, under the floor, so no raise could happen. Rule 1: a new network, or validation
-after a link remade unvalidated (N52), restarts the regulator from 1.5M with no cap. Rule 2: a cap under 1M is held
+after a link remade unvalidated (N52) naming another network handle than the attempt's (or none known), restarts the
+regulator from 1.5M with no cap; on the same handle the failed rate and its repeats stand. The record carries no
+handle, so the change of network at 20:17 (confirmed by the owner and seaznstream) is not provable from it. Rule 2: a cap under 1M is held
 60 s, doubling to 300 s on repeats. Send and Share read native's record file (`readRecord`, AGENTS §2's third call that
 answers): Send the code's lines (the contract's A1 and A2) within 1,000 lines and 1 MB, Share every line up to 250,000
 characters.

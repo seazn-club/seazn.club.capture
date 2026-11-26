@@ -143,6 +143,20 @@ class RecordFileTest {
   }
 
   @Test
+  fun `a read whose source throws anything, out of memory included, answers null and the next read still works`() {
+    File(dir, RecordFile.NAME).writeText(line(1) + "\n")
+    val pool = Executors.newSingleThreadExecutor()
+    pools += pool
+    var throwing: Throwable? = RuntimeException("the source broke")
+    val record = RecordFile(dir, io = pool, open = { file -> throwing?.let { throw it } ?: java.io.RandomAccessFile(file, "r") })
+    assertNull(record.readSync())
+    throwing = OutOfMemoryError("made up")
+    assertNull(record.readSync())
+    throwing = null
+    assertEquals(line(1) + "\n", record.readSync())
+  }
+
+  @Test
   fun `the record thread runs a read after the appends queued before it`() {
     val queued = mutableListOf<Runnable>()
     val manual = Executor { queued += it }

@@ -637,9 +637,13 @@ describe('Diagnostics inside Settings (spec §6, Q1)', () => {
     expect(view.share.shared[0]).toContain('probe.line-1"');
   });
 
-  it('shares twice when asked twice', async () => {
+  // Review of #80: one share at a time. A second tap before the first settles opens no second sheet; one after does.
+  it('shares twice when asked twice, the second after the first settled', async () => {
     const view = renderSettings();
     fireEvent.click(shareButton());
+    fireEvent.click(shareButton());
+    await waitFor(() => expect(view.share.shared).toHaveLength(1));
+    await act(async () => undefined);
     fireEvent.click(shareButton());
     await waitFor(() => expect(view.share.shared).toHaveLength(2));
   });

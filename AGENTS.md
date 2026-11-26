@@ -724,8 +724,9 @@ Three rules travel with these tokens:
   never goes under the 500k floor, and a quiet picture holds its rate
   (F-P5-7's raise gate). After a cut it caps raises at 80% of the rate that
   failed for 5 minutes, or for 60 s, doubling to 300 s on repeats, when that
-  cap is under 1M; a new network, or validation after a link made unvalidated,
-  restarts it from 1.5M with no cap (N53).
+  cap is under 1M; a new network, or validation on another network after a
+  link made unvalidated, restarts it from 1.5M with no cap, and the same
+  network keeps the failed rate (N53).
 
 **Degradation ladder — in this order, never reordered (D2 §4.2):**
 

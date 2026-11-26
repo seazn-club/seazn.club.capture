@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import type { EngineSnapshot } from '@/engine/CaptureEnginePort';
 import { diagnosticsSections, type DiagnosticsSection } from '@/hooks/diagnostics';
 import { useEngineSelector } from '@/hooks/useCaptureEngine';
@@ -34,7 +34,9 @@ export function useDiagnostics(): readonly DiagnosticsSection[] {
  * is scrubbed when written (Task 1's allow-list; native's in
  * `SessionRecord.append`, before its file sees a line), so sharing sends nothing
  * that was not already safe to keep. A refused share sheet says so and is
- * recorded; the next share that opens clears it.
+ * recorded; the next share that opens clears it. One at a time (review of
+ * #80): a tap while a share is still reading the file or opening the sheet is
+ * dropped, so a double tap reads once, opens one sheet and says nothing failed.
  */
 export function useSessionRecord(): {
   readonly shareFailed: boolean;
@@ -42,8 +44,14 @@ export function useSessionRecord(): {
 } {
   const { record, recordFile, share, logger } = usePorts();
   const [shareFailed, setShareFailed] = useState(false);
+  const sharing = useRef(false);
   const send = useCallback(() => {
-    void shareRecord(share, record, recordFile, logger).then((opened) => setShareFailed(!opened));
+    if (sharing.current) return;
+    sharing.current = true;
+    void shareRecord(share, record, recordFile, logger).then((opened) => {
+      sharing.current = false;
+      setShareFailed(!opened);
+    });
   }, [share, record, recordFile, logger]);
   return { shareFailed, share: send };
 }
@@ -73,5 +81,6 @@ async function shareLines(
   recordFile: RecordFilePort,
 ): Promise<readonly string[]> {
   const file = await recordFile.read();
+  // The port never rejects (`recordFilePort.ts`) and the selection is pure, so the share's guard is always let go.
   return file === null ? record.lines() : selectForShare(mergeRecord(file, record.lines()));
 }

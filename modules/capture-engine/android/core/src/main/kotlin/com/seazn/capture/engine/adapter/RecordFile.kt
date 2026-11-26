@@ -20,6 +20,7 @@ class RecordFile(
   private val maxBytes: Long = MAX_BYTES,
   private val readMaxBytes: Long = READ_MAX_BYTES,
   private val io: Executor = Executors.newSingleThreadExecutor { task -> Thread(task, "capture-record") },
+  private val open: (File) -> RandomAccessFile = { RandomAccessFile(it, "r") },
 ) {
   /** Lines the disk refused, counted and never thrown. Written on the record thread only. */
   @Volatile
@@ -35,7 +36,8 @@ class RecordFile(
    * on the record's thread. That thread writes every line, so a read runs after every line appended before it and before
    * any appended after: it never sees half a line, or a rotation midway. At most [readMaxBytes], the newest, from the
    * start of a line: a current file the rotation failed to move can grow past [maxBytes], and the bridge must not carry
-   * it whole. Empty with no file; null when the disk refused the read.
+   * it whole. Empty with no file; null when the read failed in any way, an [OutOfMemoryError] included (review of #80):
+   * Share is enabled on air, and a throw on the record's thread must never take the app, and the broadcast, with it.
    */
   fun read(answer: (String?) -> Unit) {
     io.execute { answer(readNow()) }
@@ -71,13 +73,13 @@ class RecordFile(
       val text = out.toString(Charsets.UTF_8.name())
       // The first line read over the bound is cut at its start, or is the byte before a whole line: either goes.
       if (over) text.substringAfter('\n', "") else text
-    } catch (e: IOException) {
+    } catch (e: Throwable) {
       null
     }
 
   /** [file]'s bytes from [from] on. */
   private fun tail(file: File, from: Long): ByteArray =
-    RandomAccessFile(file, "r").use { raf ->
+    open(file).use { raf ->
       val bytes = ByteArray((raf.length() - from).coerceAtLeast(0).toInt())
       raf.seek(from)
       raf.readFully(bytes)

@@ -218,19 +218,26 @@ object SessionMachine {
     val told = validatedFact(phase, input.validated, now)
     if (!input.validated) return told.copy(phase = told.phase.withDefaultNetwork(handle))
     val previous = if (phase.networkValidated) phase.defaultNetwork else null
-    val reset = if (relinkedUnvalidated(phase)) Transports.newNetwork(told.phase) else Step(told.phase)
+    val reset = if (relinkedElsewhere(phase, handle)) Transports.newNetwork(told.phase) else Step(told.phase)
     val judged = Transports.network(reset.phase, previous, handle, now)
     return judged.copy(commands = told.commands + reset.commands + judged.commands)
   }
 
   /**
    * N53: validation ends a stretch in which the link was made again while the network was not validated: a connection
-   * made in it (N52's provisional one), or one still to be made. Either is on the network validation now names, a new
-   * link, so the regulator restarts for it ([BitrateRegulator.newNetwork]). A connection that outlived the stretch, made
-   * before it, is the link the regulator was judging, and a flap of validation alone moves nothing.
+   * made in it (N52's provisional one), or one still to be made. When validation names another network than the one the
+   * attempt was asked on ([Session.attemptNetwork]), or either is unknown (as N52's rebind treats it), it is a new link,
+   * so the regulator restarts for it ([BitrateRegulator.newNetwork]). Review of #80: on the same handle it is the link
+   * that just failed (a data stall loses validation, then the drop, then validation again), so its failed rate and its
+   * repeats stand and the low cap's hold escalates. A connection that outlived the stretch, made before it, is the link
+   * the regulator was judging, and a flap of validation alone moves nothing.
    */
-  private fun relinkedUnvalidated(phase: Phase): Boolean =
-    !phase.networkValidated && ((phase is Phase.OnAir && phase.provisional) || phase is Phase.Connecting)
+  private fun relinkedElsewhere(phase: Phase, handle: Long?): Boolean {
+    val relinked = !phase.networkValidated && ((phase is Phase.OnAir && phase.provisional) || phase is Phase.Connecting)
+    if (!relinked) return false
+    val on = phase.session?.attemptNetwork
+    return handle == null || on == null || on != handle
+  }
 
   private fun validatedFact(phase: Phase, validated: Boolean, now: Now): Step {
     if (phase.networkValidated == validated) return Step(phase)

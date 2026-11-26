@@ -84,6 +84,30 @@ describe('the record row (N33, R3)', () => {
     expect(view.share.shared[1]).toBe(view.ports.record.lines().slice(0, -1).join('\n'));
   });
 
+  // Review of #80: one share at a time. A second tap while the file is read reads nothing more and opens no second sheet.
+  it('a double tap on Share reads the file once, opens one sheet, and says nothing failed', async () => {
+    const recordFile = createFakeRecordFile();
+    recordFile.give(['{"at":"2026-11-26T19:00:00.000Z","kind":"pair","tokenTag":"0badc0de"}']);
+    recordFile.hold();
+    const view = renderWithPorts(<RecordRow send={false} />, { recordFile });
+    const share = screen.getByRole('button', { name: 'Share record' });
+    fireEvent.click(share);
+    fireEvent.click(share);
+    await settle();
+    recordFile.release();
+    await settle();
+    expect(recordFile.reads).toBe(1);
+    expect(view.share.shared).toHaveLength(1);
+    expect(
+      screen.getByRole('button', { name: createTranslator('en').t('diag.share') }),
+    ).toBeTruthy();
+    // Once it settles, the next tap shares again.
+    fireEvent.click(share);
+    await settle();
+    expect(recordFile.reads).toBe(2);
+    expect(view.share.shared).toHaveLength(2);
+  });
+
   it('with the switch on and no code: Send is disabled, with one line why (an empty input)', async () => {
     const view = renderWithPorts(<RecordRow send />);
     await settle();

@@ -82,9 +82,12 @@ function readLine(line: string): Read {
  * binds a sid to a pairing). A line goes when its sid is one of those, or when it has no
  * sid and is inside a window. A masked sid, or any other, names no session of the code: the server drops it. A line
  * that is no record line (a torn write) never goes, so the server never sees it, and it closes nothing.
+ *
+ * Known gap (review of #80): a sid is the code's only through its `broadcast-start`, so a broadcast whose start line
+ * fell past the file's 10 MB read bound and out of the ring loses its sid-bearing lines; its lines with no sid still go
+ * inside their window, and the server would have dropped the rest without that start line too.
  */
-function attributed(lines: readonly string[], tag: string): { kept: number[]; pins: Set<number> } {
-  const reads = lines.map(readLine);
+function attributed(reads: readonly Read[], tag: string): { kept: number[]; pins: Set<number> } {
   const inWindow: boolean[] = [];
   const sids = new Set<string>();
   const pins = new Set<number>();
@@ -121,6 +124,7 @@ function attributed(lines: readonly string[], tag: string): { kept: number[]; pi
  */
 function budgeted(
   lines: readonly string[],
+  reads: readonly Read[],
   candidates: readonly number[],
   pins: ReadonlySet<number>,
   cap: {
@@ -129,7 +133,7 @@ function budgeted(
     readonly size: (line: string) => number;
   },
 ): readonly string[] {
-  const kinds = new Map(candidates.map((index) => [index, readLine(lines[index]!)?.kind ?? '']));
+  const kinds = new Map(candidates.map((index) => [index, reads[index]?.kind ?? '']));
   const newest = [...candidates].reverse();
   const order = [
     ...newest.filter((index) => pins.has(index)),
@@ -162,9 +166,11 @@ export function selectForCode(
   maxLines: number,
   maxBytes: number,
 ): readonly string[] {
-  const { kept, pins } = attributed(lines, tag);
+  // Each line is parsed once, here, and the reading reused by the attribution and the budget.
+  const reads = lines.map(readLine);
+  const { kept, pins } = attributed(reads, tag);
   const size = (line: string) => utf8.encode(fitLine(line)).length + 1;
-  return budgeted(lines, kept, pins, { maxLines, maxSize: maxBytes, size });
+  return budgeted(lines, reads, kept, pins, { maxLines, maxSize: maxBytes, size });
 }
 
 /**
@@ -176,7 +182,7 @@ export function selectForShare(
   maxChars: number = SHARE_MAX_CHARS,
 ): readonly string[] {
   const all = lines.map((_, index) => index);
-  return budgeted(lines, all, new Set(), {
+  return budgeted(lines, lines.map(readLine), all, new Set(), {
     maxLines: Number.POSITIVE_INFINITY,
     maxSize: maxChars,
     size: (line) => line.length + 1,

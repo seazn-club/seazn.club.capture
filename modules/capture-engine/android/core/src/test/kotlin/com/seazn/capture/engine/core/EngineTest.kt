@@ -730,6 +730,55 @@ class EngineTest {
     assertTrue(armed.startsWith("""{"at":"2026-09-21T14:13:22.000Z","kind":"armed","""), armed)
   }
 
+  // Owner, 2026-11-26: the record never carries a stream's watch URL. The armed line says the URL's host and
+  // the last six characters of the stream id, under the contract's own `host` and `tag` keys.
+  @Test
+  fun `the armed line names the playback host and a six character tag, never the URL or the stream id`() {
+    val engine = engine()
+    engine.sendAll(Configs.pairInputs(ready = false))
+    scheduler.advanceBy(0)
+    val armed = lines.single { """"kind":"armed"""" in it }
+    assertTrue(""""host":"customer-x.cloudflarestream.com"""" in armed, armed)
+    assertTrue(""""tag":"ff25d2"""" in armed, armed)
+    assertFalse("7e8f90" in armed, armed)
+    assertFalse("playbackUrl" in armed, armed)
+    assertFalse(".m3u8" in armed, armed)
+    assertFalse(Configs.STREAM_ID in armed, armed)
+    // The sweep: no line of the whole run carries a watch URL or a whole stream id.
+    for (line in lines) {
+      assertFalse(".m3u8" in line, line)
+      assertFalse("cloudflarestream.com/" in line, line)
+    }
+  }
+
+  @Test
+  fun `a signed playback URL gives an armed line with neither host nor tag`() {
+    val engine = engine()
+    val d = Configs.descriptor()
+    val signed =
+      BroadcastDescriptor(
+        d.primary, d.fallback, d.holdWindowSeconds,
+        "https://customer-x.cloudflarestream.com/eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJhIn0.c2lnbmF0dXJlLXBhcnQ/manifest/video.m3u8",
+        d.label, d.maxDurationMinutes, d.scoreUpdates,
+      )
+    engine.sendAll(Configs.pairInputs(descriptor = signed, ready = false))
+    scheduler.advanceBy(0)
+    val armed = lines.single { """"kind":"armed"""" in it }
+    assertFalse(""""host":""" in armed, armed)
+    assertFalse(""""tag":""" in armed, armed)
+    assertFalse("eyJ" in armed, armed)
+  }
+
+  @Test
+  fun `an RTMPS-only config tags the armed line the same way`() {
+    val engine = engine()
+    engine.sendAll(Configs.pairInputs(descriptor = Configs.descriptor(primary = Configs.rtmps, fallback = null), ready = false))
+    scheduler.advanceBy(0)
+    val armed = lines.single { """"kind":"armed"""" in it }
+    assertTrue(""""tag":"ff25d2"""" in armed, armed)
+    assertTrue(""""srtOffered":false""" in armed, armed)
+  }
+
   private class SinkCrash : Error("sink crash")
 
   private class LinkCrash : Error("libsrt.so not found")

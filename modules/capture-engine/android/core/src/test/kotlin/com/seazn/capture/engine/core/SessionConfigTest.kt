@@ -152,4 +152,43 @@ class SessionConfigTest {
     assertSame(Configs.srt, Configs.valid().target(Transport.SRT))
     assertNull(Configs.valid(fallback = null).target(Transport.RTMPS))
   }
+
+  private fun tagFor(url: String) = Configs.valid().let { c ->
+    SessionConfig(c.sid, c.token, c.primary, c.fallback, c.holdWindowSeconds, url, c.heartbeatUrl, c.appVersion)
+  }.playbackTag()
+
+  // ff25d2 is `printf %s a1b2c3d4e5f60718293a4b5c6d7e8f90 | shasum -a 256`, first six hex digits.
+  @Test
+  fun `the playback tag is the host and the first six hex digits of the SHA-256 of the uid`() {
+    assertEquals(
+      listOf("host" to "customer-x.cloudflarestream.com", "tag" to "ff25d2"),
+      Configs.valid().playbackTag(),
+    )
+  }
+
+  @Test
+  fun `the tag shares no six-character run with the uid`() {
+    val tag = Configs.valid().playbackTag().single { it.first == "tag" }.second
+    assertFalse(tag in Configs.STREAM_ID)
+    assertFalse(Configs.STREAM_ID.takeLast(6) == tag)
+  }
+
+  @Test
+  fun `a segment that is not a 32 hex uid yields neither host nor tag`() {
+    val host = "https://customer-x.cloudflarestream.com"
+    val jwt = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJhIn0.c2lnbmF0dXJlLXBhcnQ"
+    assertEquals(emptyList(), tagFor("$host/$jwt/manifest/video.m3u8"))
+    assertEquals(emptyList(), tagFor("$host/abc12/manifest/video.m3u8"))
+    assertEquals(emptyList(), tagFor("$host/a1b2c3d4e5f60718293a4b5c6d7e8f9z/manifest/video.m3u8"))
+    assertEquals(emptyList(), tagFor("$host/A1B2C3D4E5F60718293A4B5C6D7E8F90/manifest/video.m3u8"))
+    assertEquals(emptyList(), tagFor("$host/a1b2c3d4e5f60718293a4b5c6d7e8f900/manifest/video.m3u8"))
+  }
+
+  @Test
+  fun `a playback URL that does not parse into a host and a uid yields no tag`() {
+    assertEquals(emptyList(), tagFor(""))
+    assertEquals(emptyList(), tagFor("https://customer-x.cloudflarestream.com/"))
+    assertEquals(emptyList(), tagFor("https://customer-x.cloudflarestream.com/manifest/video.m3u8"))
+    assertEquals(emptyList(), tagFor("https://${"h".repeat(70)}.example/${Configs.STREAM_ID}/manifest/video.m3u8"))
+  }
 }

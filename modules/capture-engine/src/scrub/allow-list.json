@@ -53,7 +53,7 @@
     "transport",
     "word"
   ],
-  "publicUrl": ["url", "playbackUrl", "overlayUrl"],
+  "publicUrl": ["url", "overlayUrl"],
   "text": ["message", "problems"],
   "never": [
     "tok",
@@ -63,7 +63,8 @@
     "streamKey",
     "streamId",
     "bearer",
-    "authorization"
+    "authorization",
+    "playbackUrl"
   ],
   "reasons": {
     "action": "JS: a UI action word; JS: scoring.football.clock / scoring.football.period; native: srt-bind's fresh-socket, a failed acquire's socket closed and a fresh one connected unbound (N49); native: camera-touch's gesture, zoom or meter",
@@ -80,7 +81,7 @@
     "failure": "native: ConnectFailure wire (connect-failed: unresolved, refused, timeout, other, unheld, camera), or StartFailure wire (start-failed)",
     "field": "native: the name of a field the server sent that could not be read, never its value (waiting-unreadable, final review I-2b)",
     "from": "native: a transport (fell-back), a bitrate in bits per second (bitrate), a state or phase name, or where a camera loss was heard (camera-lost: device, start, busy)",
-    "host": "both: a bare host, never a path or query (plan A I1)",
+    "host": "both: a bare host, never a path or query (plan A I1); native: armed, the playback URL's host, which the line says in place of the URL (owner, 2026-11-26)",
     "intent": "native: an intent name",
     "key": "JS: a dictionary or store key name, never a value; native: a private store's file name (phone-id, stopped-records, forgotten-pairing)",
     "kind": "JS: a failure kind word (code.error, surface.unavailable), written to the line as field_kind; native: a Wire",
@@ -109,7 +110,7 @@
     "startFailed": "native: StartFailure wire",
     "state": "both: a state word; native: a stabilisation line's stabiliser state (on or unavailable), a speech-processing line's (on, off or unavailable), a bitrate-mode line's mode (vbr, cbr or unsupported) or an antibanding line's mode (auto, 50hz, 60hz, off, unavailable or unread), or a zoom line's ratio, a number to a tenth; an encoder-format line's stream format, profile-level-entropy (high-4.1-cabac), or an encoder-dump line's end (written, full, overflow, cut or failed)",
     "status": "both: an HTTP status (JS code.error; native code, final-beat, stopped-delivered), a thermal status (native thermal), a check word, or the nudge socket's WebSocket close code (native nudges)",
-    "tag": "plan C: a vendor log's tag, a class name (CD30)",
+    "tag": "plan C: a vendor log's tag, a class name (CD30); native: armed, the last six characters of the playback stream id, in place of the URL (owner, 2026-11-26)",
     "to": "native: a transport (fell-back), a bitrate in bits per second (bitrate), or a state or phase name",
     "tokenTag": "both: which issue of a code, eight hex digits; never the token (carry 2)",
     "transport": "both: srt or rtmps",

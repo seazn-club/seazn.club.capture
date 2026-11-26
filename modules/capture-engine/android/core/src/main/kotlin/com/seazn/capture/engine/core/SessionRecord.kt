@@ -274,7 +274,7 @@ class SessionRecord(
     // holds these to it, and scrub.ts keeps the same sets. Add a key there, here and in JS.
 
     /** Public by construction: every viewer's player and every overlay browser source holds them. */
-    val PUBLIC_URL_KEYS = setOf("url", "playbackUrl", "overlayUrl")
+    val PUBLIC_URL_KEYS = setOf("url", "overlayUrl")
 
     /** Free text from a library or the platform, which can quote a URL or a key. Masked by value. */
     val TEXT_KEYS = setOf("message", "problems")
@@ -290,7 +290,7 @@ class SessionRecord(
       )
 
     /** Never written, whatever the value, and never allowed onto the lists above. A line never carries a code. */
-    val NEVER = setOf("tok", "token", "code", "passphrase", "streamKey", "streamId", "bearer", "authorization")
+    val NEVER = setOf("tok", "token", "code", "passphrase", "streamKey", "streamId", "bearer", "authorization", "playbackUrl")
 
     /** Keys every line starts with. A field under one of them is written as `field_<key>` (CD7). */
     val RESERVED_KEYS = setOf("at", "kind", "level")

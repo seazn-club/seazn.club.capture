@@ -878,8 +878,8 @@ class BodiesTest {
       for ((key, value) in entry.fields) {
         val text = value?.toString() ?: continue
         for (secret in SECRETS + SHORT) assertFalse(secret in text, "${entry.kind}.$key")
-        // The stream id is a path segment of the public playback URL, and only there (the scrub's notInUrls).
-        if (key != "playbackUrl") assertFalse(Configs.STREAM_ID in text, "${entry.kind}.$key")
+        assertFalse(Configs.STREAM_ID in text, "${entry.kind}.$key")
+        assertFalse(".m3u8" in text, "${entry.kind}.$key")
       }
     }
     for (json in wires) {

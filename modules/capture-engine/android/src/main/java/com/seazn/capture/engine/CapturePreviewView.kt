@@ -38,7 +38,7 @@ import kotlinx.coroutines.launch
  * Spec 2026-11-25-zoom-and-metering (owner, 2026-11-24): a pinch zooms and a tap meters focus and exposure there; a
  * double tap gives the camera its own metering back. The view only reads the gestures and hands each to the capture
  * ([CameraTouch]): the capture decides, so the mis-tap this view once refused outright ("a tap on a tripod is a
- * mis-tap") still never moves the picture on air (the zoom is locked from Arming on) and a tap moves no frame.
+ * mis-tap") is a tap that moves no frame, and a pinch zooms on air as before it (owner, 2026-11-26).
  * StreamPack's own pinch and tap stay off: they set whatever source it holds, open or not, and its tap locks focus. It
  * follows the pairing's streamer while attached, and only then. It tells the engine
  * whether the viewfinder is shown (CD37): attached to a window that is visible. A screen pushed over the
@@ -91,6 +91,10 @@ class CapturePreviewView(context: Context, appContext: AppContext) : ExpoView(co
           touched(CameraTouch.Pinch(detector.scaleFactor))
           return true
         }
+
+        override fun onScaleEnd(detector: ScaleGestureDetector) {
+          touched(CameraTouch.PinchEnd)
+        }
       },
     ).apply { isQuickScaleEnabled = false } // a double tap and drag is one finger: never a zoom, nor a reset
 
@@ -110,7 +114,18 @@ class CapturePreviewView(context: Context, appContext: AppContext) : ExpoView(co
         }
 
         override fun onDoubleTap(e: MotionEvent): Boolean {
+          noPan = true // its second press may be dragged: that is no pan
           touched(CameraTouch.Reset)
+          return true
+        }
+
+        /**
+         * Spec §3.5: one finger past the system's touch slop (a press that moves less is a tap), the share of the picture
+         * it moved. Never while two fingers have been down (the detector reports a pinch's focal move as a scroll too).
+         */
+        override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
+          if (multi || noPan || pinch.isInProgress) return true
+          touched(CameraTouch.Drag(-distanceX / preview.width, -distanceY / preview.height))
           return true
         }
       },
@@ -155,7 +170,20 @@ class CapturePreviewView(context: Context, appContext: AppContext) : ExpoView(co
     preview.setOnTouchListener { _, event -> gestured(event) }
   }
 
+  /** Two fingers have been down since the press began: its scrolls are a pinch's, never a pan. */
+  private var multi = false
+
+  /** The press began as a double tap's second, which resets metering and pans nothing. */
+  private var noPan = false
+
   private fun gestured(event: MotionEvent): Boolean {
+    when (event.actionMasked) {
+      MotionEvent.ACTION_DOWN -> {
+        multi = false
+        noPan = false
+      }
+      MotionEvent.ACTION_POINTER_DOWN -> multi = true
+    }
     try {
       pinch.onTouchEvent(event)
       taps.onTouchEvent(event)

@@ -149,6 +149,7 @@ class CaptureRun(
 
   /** Spec §3: pinches waiting for the queue, taken as one. */
   private val pinches = PinchBuffer()
+  private val drags = DragBuffer()
 
   fun open(asked: PairRequest) = serial.submit { opened(asked) }
 
@@ -192,6 +193,10 @@ class CaptureRun(
    * come faster than the queue takes them are one, by their product ([PinchBuffer]).
    */
   fun touch(touch: CameraTouch) {
+    if (touch is CameraTouch.Drag) {
+      if (drags.offer(touch.dx, touch.dy)) serial.submit { drags.take().let { framing.touch(CameraTouch.Drag(it.first, it.second), frameDegrees()) } }
+      return
+    }
     if (touch !is CameraTouch.Pinch) return serial.submit { framing.touch(touch, frameDegrees()) }
     if (pinches.offer(touch.scale)) serial.submit { framing.touch(CameraTouch.Pinch(pinches.take()), frameDegrees()) }
   }

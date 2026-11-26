@@ -7,11 +7,19 @@ only.
 
 The owner, 2026-11-24:
 
-1. **Pinch zoom, before air only.** A pinch zooms. From Arming on a pinch does nothing. The zoom goes back to 1× on a
-   camera switch and on a new pairing. One record line when air starts says the zoom in use.
+1. **Pinch zoom, before air only.** _Superseded 2026-11-26, below._ A pinch zooms. From Arming on a pinch does nothing.
+   The zoom goes back to 1× on a camera switch and on a new pairing. One record line when air starts says the zoom in use.
 2. **A tap sets the focus and exposure area.** One tap meters there, and focus stays continuous. A double tap gives the
    camera its own metering back. A tap is allowed on air. No JS overlay on the camera box; a native focus ring is
    optional (not built, §7).
+
+The owner, 2026-11-26 (option B), **supersedes ruling 1's air lock**: a pinch zooms on air exactly as it does before
+air, the same full range, no easing, no cap. The lock was meant to stop a mis-pinch (a pocket, a volunteer steadying the
+phone) moving the picture, but reframing during a match is worth more than that risk. The owner chose B over A (keep the
+lock) and C (zoom on air, eased or capped). Everything else in ruling 1 stands: 1× on a camera switch and a new pairing,
+and the record line at air start. Taps and metering are unchanged. See §3.2 and §3.4.
+
+The owner, 2026-11-26, then added **drag to move the zoomed frame**, before air and on it (§3.5).
 
 The controller's recommendation, built here: **the zoom survives Settings closing and reopening the capture** (§3.3).
 
@@ -44,12 +52,12 @@ its own metering back.
 Quick scale (a double tap and drag with one finger) is turned off on the detector: one finger never zooms, and the
 double tap only resets the metering.
 
-### 3.2 The lock
+### 3.2 The lock (removed, 2026-11-26)
 
-The run asks `broadcastHeld` on every pinch, before anything else. It reads the machine's own word, the last published
-snapshot's `Phase.holdsBroadcast`, which holds from Arming to the end of the broadcast. So a pinch made while the start
-is asked and not yet answered still zooms (nothing is held yet), and one made the moment Arming begins does not. A tick
-that ends the broadcast with no input after it frees the lock too (it publishes). Native decides; JS is not asked.
+Ruling 1 of 2026-11-24 locked the pinch from Arming on: the run asked `BridgeCore.broadcastHeld()` (the last published
+snapshot's `Phase.holdsBroadcast`) on every pinch and refused with a `camera-touch` line, reason `broadcast`. The owner
+removed that lock on 2026-11-26 (option B, above): `CameraFraming.pinch` no longer asks, and the `broadcast` refusal no
+longer exists. `broadcastHeld` stays wired, now only to decide whether a gesture's end writes a record line (§3.4).
 
 ### 3.3 What keeps it and what resets it
 
@@ -74,6 +82,45 @@ capture that is still open sets 1× and clears the region at once.
 `signals.connected`). A failed start writes none; a rebuild within the broadcast writes none; the next broadcast writes
 its own. `state` is the allow-list's plain key (a word or a number), so no new key was needed; a tenth is enough to
 tell 1× from a zoomed shot without writing noise.
+
+On air a pinch also writes the same `zoom` line, once per gesture: the preview's `onScaleEnd` sends `CameraTouch.PinchEnd`,
+and if the ratio moved since the last gesture ended and the machine holds a broadcast (`broadcastHeld`), the ratio at that
+end is one line. Never per frame; a gesture that moves nothing (already at the top, or at 1×) writes none. Before air the
+line at air start says the zoom in use, so a pinch's end writes none.
+
+### 3.5 Drag to move the zoomed frame (owner, 2026-11-26, "yes")
+
+Above 1× a one-finger drag on the preview moves the crop: left, right, up and down, 1:1 with the finger, no easing, before
+air and on it, clamped to the picture's own field (the 16:9 centre of the sensor that the 1× picture is). At 1× a drag
+does nothing. A camera switch and a new pairing put the crop back in the middle with the zoom at 1×, and a reopen of the
+same camera puts back the crop it had, as it does the zoom (§3.3).
+
+**Feasibility.** StreamPack 3.2.1's `RZoom.setZoomRatio` is `settings.set(CONTROL_ZOOM_RATIO, …)` then
+`applyRepeatingSession()` (javap), and `Meters` sets the metering regions the same way. A crop region is one more key in
+that repeating request (`Pans.kt`, `settings.set(CaptureRequest.SCALER_CROP_REGION, …)`): no capture session restart and
+no encoder restart. The ratio and the crop go in one request, so no frame has one and not the other.
+
+**The maths** (`Pan`, pure, JVM-tested). Camera2 zooms about the centre of `SCALER_CROP_REGION`. For a window of
+field / Z centred at C, the crop is the largest window centred at C that stays inside the field (S), and the ratio is
+S / (field / Z): so S is as far from the field's edge as C is, and a window at the edge is the crop itself at ratio 1. A
+centred window is today's frame (whole array, ratio Z), set back with the whole array when the crop returns to the middle.
+A drag of d (a share of the visible picture) moves C by d / Z the other way (the content follows the finger), kept at
+least 0.5 / Z from each edge. A pinch re-clamps C to the new Z. The picture's axes become the sensor's through
+`Metering.onSensor`, the same turn and front-camera mirror as a tap, so a drag follows the finger held either way round.
+
+**Gestures** (`CapturePreviewView`). The `GestureDetector`'s scroll starts only past the system's touch slop, so a press
+that moves less is a tap and one that moves more is a drag, never both. Scrolls are ignored while a pinch is in progress
+and for the rest of any press that has had two fingers down (the detector reports a pinch's focal move as a scroll), and
+for a press that began as a double tap's second (`noPan`): quick scale stays off, and that press resets metering and
+pans nothing. A drag moves the place tapped to the camera's own metering, as a pinch does.
+
+**Record.** None. The contract's keys are fixed and the `zoom` line's `state` is the ratio, which a drag does not change;
+no listed key carries two numbers for a centre, and a line with an unchanged ratio would misreport. A pan on air is
+therefore not in the post-match record; a key is a contract change for the web repo.
+
+**Unverified.** That the camera honours `SCALER_CROP_REGION` together with `CONTROL_ZOOM_RATIO` as Camera2 documents
+(§8), and that a tap's region lands right on a panned frame (§4.2 says the regions are in the zoomed picture's own
+coordinates; a panned crop is a different zoom about a different centre).
 
 ## 4. Metering
 
@@ -130,8 +177,8 @@ the picture goes on as it was.
 ## 6. Rejected
 
 - **StreamPack's own gestures** (`enableZoomOnPinch`, `enableTapToFocus`). They act on whatever source is held, with no
-  open check and no air lock, so a pinch on air would move the picture and a tap during a busy open would open the
-  device. They stay off, and our listener consumes every touch so `PreviewView.onTouchEvent` never runs.
+  open check, so a pinch or a tap during a busy open would open the device (and, until 2026-11-26, a pinch ignored the
+  air lock). They stay off, and our listener consumes every touch so `PreviewView.onTouchEvent` never runs.
 - **`FocusMetering.tapToFocus`.** It sets `CONTROL_AF_MODE_AUTO` and triggers an AF scan and AE precapture: focus
   locks, and on air the lens visibly hunts. Its `cancelFocusAndMetering` cancels the triggers but never puts continuous
   AF back. Ruling 2 keeps continuous AF.
@@ -164,4 +211,7 @@ the picture goes on as it was.
   zooms.
 - The adapter's check-then-set window (§5) never reopens a camera another app took.
 - The zoom comes back after Settings, the slate and a side change; it goes to 1× after a switch and a new pairing.
-- A pinch from Arming on does nothing visible.
+- A drag above 1× moves the frame 1:1 under the finger, both ways round and on the front camera, with no jump or blip on
+  air; at the field's edge it stops; a tap after a pan meters where it was tapped; a double tap's second press dragged
+  pans nothing; a pinch never also pans.
+- A pinch from Arming on zooms the picture as it does before air, and each gesture on air writes one `zoom` line.

@@ -8,6 +8,7 @@ import com.seazn.capture.engine.core.Command
 import com.seazn.capture.engine.core.Input
 import com.seazn.capture.engine.core.MeterPoint
 import com.seazn.capture.engine.core.PairRequest
+import com.seazn.capture.engine.core.PanCentre
 import com.seazn.capture.engine.core.RecordEntry
 import com.seazn.capture.engine.core.SpeechState
 import com.seazn.capture.engine.core.Tuning
@@ -383,6 +384,18 @@ class FakeParts : CaptureParts {
     if (!zoomable || !openNow(cameraId)) return false
     zoomFailure?.let { throw it }
     zooms += cameraId to ratio
+    return true
+  }
+
+  /** Spec §3.5: each ratio and crop centre set together, in order. */
+  val pans = mutableListOf<Panned>()
+
+  data class Panned(val camera: String, val ratio: Float, val centre: PanCentre, val degrees: Int)
+
+  override suspend fun pan(cameraId: String, ratio: Float, centre: PanCentre, frameDegrees: Int): Boolean {
+    if (!zoomable || !openNow(cameraId)) return false
+    zoomFailure?.let { throw it }
+    pans += Panned(cameraId, ratio, centre, frameDegrees)
     return true
   }
 

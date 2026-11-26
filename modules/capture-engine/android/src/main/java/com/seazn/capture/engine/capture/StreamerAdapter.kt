@@ -33,6 +33,7 @@ import com.seazn.capture.engine.core.CameraTouch
 import com.seazn.capture.engine.core.Command
 import com.seazn.capture.engine.core.Encode
 import com.seazn.capture.engine.core.MeterPoint
+import com.seazn.capture.engine.core.PanCentre
 import com.seazn.capture.engine.core.PairRequest
 import com.seazn.capture.engine.core.RecordEntry
 import com.seazn.capture.engine.core.RtmpsTarget
@@ -488,6 +489,13 @@ class StreamerAdapter(
     override suspend fun zoom(cameraId: String, ratio: Float): Boolean {
       val camera = openCamera(cameraId) ?: return false
       camera.settings.zoom.setZoomRatio(ratio)
+      return true
+    }
+
+    /** Spec §3.5: the ratio and the crop region, together, on the held camera source [cameraId], only while it is open now. */
+    override suspend fun pan(cameraId: String, ratio: Float, centre: PanCentre, frameDegrees: Int): Boolean {
+      val camera = openCamera(cameraId) ?: return false
+      Pans.set(camera, ratio, centre, frameDegrees)
       return true
     }
 

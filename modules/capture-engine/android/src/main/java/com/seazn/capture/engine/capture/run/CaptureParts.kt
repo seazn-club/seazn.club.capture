@@ -4,6 +4,7 @@ import com.seazn.capture.engine.core.Antibanding
 import com.seazn.capture.engine.core.BitrateMode
 import com.seazn.capture.engine.core.Command
 import com.seazn.capture.engine.core.MeterPoint
+import com.seazn.capture.engine.core.PanCentre
 import com.seazn.capture.engine.core.SpeechState
 import com.seazn.capture.engine.core.Tuning
 import com.seazn.capture.engine.core.ZoomRange
@@ -134,6 +135,13 @@ interface CaptureParts {
 
   /** Spec §3: [ratio] on the held, open camera source [cameraId]; false, with nothing set, when it is not held or open. */
   suspend fun zoom(cameraId: String, ratio: Float): Boolean
+
+  /**
+   * Spec §3.5: [ratio] with the crop centred at [centre], in one repeating request (the ratio and `SCALER_CROP_REGION`
+   * together); the whole array when centred. False, with nothing set, when the held source is not camera [cameraId] or
+   * is not open now.
+   */
+  suspend fun pan(cameraId: String, ratio: Float, centre: PanCentre, frameDegrees: Int): Boolean
 
   /**
    * Spec §4: focus and exposure metered at [point] of the picture encoded at [frameDegrees], or the camera's own

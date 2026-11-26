@@ -30,7 +30,7 @@ internal object Meters {
     if (focuses || exposes) settings.applyRepeatingSession()
   }
 
-  private fun sensor(characteristics: CameraCharacteristics): SensorFacts {
+  fun sensor(characteristics: CameraCharacteristics): SensorFacts {
     val active = checkNotNull(characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)) { "no active array" }
     return SensorFacts(
       orientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0,

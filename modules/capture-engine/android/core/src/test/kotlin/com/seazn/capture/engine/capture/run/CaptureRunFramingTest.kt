@@ -5,7 +5,9 @@ import com.seazn.capture.engine.core.Command
 import com.seazn.capture.engine.core.Configs
 import com.seazn.capture.engine.core.MeterPoint
 import com.seazn.capture.engine.core.RecordEntry
+import com.seazn.capture.engine.core.PanCentre
 import com.seazn.capture.engine.core.Side
+import com.seazn.capture.engine.core.Zoom
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -97,18 +99,151 @@ class CaptureRunFramingTest : CaptureRunTestKit() {
     }
 
   @Test
-  fun `from Arming on a pinch does nothing and says so once, and a tap still meters`() =
+  fun `from Arming on a pinch zooms as before it, with no easing or cap, and a tap still meters`() =
     runTest {
       val s = ready()
       touched(s, CameraTouch.Pinch(2f))
       s.told.held = true // the machine holds a broadcast from Arming on (BridgeCore.broadcastHeld)
       touched(s, CameraTouch.Pinch(2f), CameraTouch.Pinch(2f), CameraTouch.Tap(spot))
-      assertEquals(listOf("0" to 2f), s.parts.zooms, "the picture on air never moves by a finger")
-      assertEquals(listOf(ignoredLine("zoom", "broadcast")), ignored(s))
+      assertEquals(listOf("0" to 2f, "0" to 8f), s.parts.zooms, "owner 2026-11-26: the same range on air; the two pinches are one turn")
+      assertEquals(emptyList(), ignored(s),"no 'broadcast' refusal is said any more")
       assertEquals(listOf(metered("0", spot, 90)), s.parts.meters, "a tap moves no frame, so it goes on air too")
-      s.told.held = false
+    }
+
+  @Test
+  fun `on air a gesture's end writes one zoom line with the ratio, and none when it moved nothing`() =
+    runTest {
+      val s = ready()
+      touched(s, CameraTouch.Pinch(2f), CameraTouch.PinchEnd)
+      assertEquals(emptyList(), zoomLines(s), "before air the line at air start says the zoom, not each gesture")
+      s.told.held = true
+      touched(s, CameraTouch.Pinch(1.5f))
+      touched(s, CameraTouch.Pinch(1.2f))
+      assertEquals(emptyList(), zoomLines(s), "no line per move")
+      touched(s, CameraTouch.PinchEnd)
+      assertEquals(listOf(Zoom.entry(3.6f)), zoomLines(s), "one line, the ratio to a tenth")
+      touched(s, CameraTouch.PinchEnd)
+      assertEquals(1, zoomLines(s).size, "a second end with no move since writes nothing")
+      touched(s, CameraTouch.Pinch(1.1f), CameraTouch.PinchEnd)
+      assertEquals(listOf(Zoom.entry(3.6f), Zoom.entry(4f)), zoomLines(s), "the next gesture writes its own")
+    }
+
+  @Test
+  fun `a pinch at the top of the range moves nothing and so writes no line on air`() =
+    runTest {
+      val s = ready()
+      s.told.held = true
+      touched(s, CameraTouch.Pinch(100f), CameraTouch.PinchEnd)
+      val top = zoomLines(s).size
+      touched(s, CameraTouch.Pinch(2f), CameraTouch.PinchEnd)
+      assertEquals(top, zoomLines(s).size, "already at the camera's top: no change, no line")
+    }
+
+  @Test
+  fun `a camera switch puts the zoom back at 1x even after an on-air pinch`() =
+    runTest {
+      val s = ready()
+      s.told.held = true
+      touched(s, CameraTouch.Pinch(2f), CameraTouch.PinchEnd)
+      reported(s, "1")
       touched(s, CameraTouch.Pinch(2f))
-      assertEquals(listOf("0" to 2f, "0" to 4f), s.parts.zooms, "after the broadcast it zooms again")
+      assertEquals(listOf("0" to 2f, "1" to 2f), s.parts.zooms, "the other camera starts at 1x, so one pinch of 2 is 2x")
+    }
+
+  private fun panned(ratio: Float, x: Float, y: Float, degrees: Int = 90) = FakeParts.Panned("0", ratio, PanCentre(x, y), degrees)
+
+  @Test
+  fun `a drag at 1x does nothing, before air and on it`() =
+    runTest {
+      val s = ready()
+      touched(s, CameraTouch.Drag(0.3f, 0.3f))
+      s.told.held = true
+      touched(s, CameraTouch.Drag(0.3f, 0.3f))
+      assertEquals(emptyList(), s.parts.pans)
+      assertEquals(emptyList(), s.parts.zooms)
+      assertEquals(emptyList(), ignored(s))
+    }
+
+  @Test
+  fun `a drag above 1x moves the crop 1 to 1, and the drags the queue had not taken are one move`() =
+    runTest {
+      val s = ready()
+      touched(s, CameraTouch.Pinch(2f))
+      touched(s, CameraTouch.Drag(0.1f, 0f), CameraTouch.Drag(0.1f, 0f))
+      assertEquals(listOf(panned(2f, 0.4f, 0.5f)), s.parts.pans)
+      touched(s, CameraTouch.Drag(-0.2f, 0.2f))
+      assertEquals(panned(2f, 0.5f, 0.4f), s.parts.pans.last(), "from where it was, not from the middle")
+      touched(s, CameraTouch.Drag(5f, 5f))
+      assertEquals(panned(2f, 0.25f, 0.25f), s.parts.pans.last(), "clamped to the field")
+    }
+
+  @Test
+  fun `a drag on air pans the same, and writes no line`() =
+    runTest {
+      val s = ready()
+      touched(s, CameraTouch.Pinch(2f))
+      s.told.held = true
+      touched(s, CameraTouch.Drag(0.2f, 0f), CameraTouch.PinchEnd)
+      assertEquals(listOf(panned(2f, 0.4f, 0.5f)), s.parts.pans)
+      assertEquals(emptyList(), zoomLines(s).filter { it != Zoom.entry(2f) }, "no contract key carries a pan, so none is said")
+    }
+
+  @Test
+  fun `a pinch while panned keeps the crop inside the field, and back to 1x puts the whole array back`() =
+    runTest {
+      val s = ready()
+      touched(s, CameraTouch.Pinch(4f))
+      touched(s, CameraTouch.Drag(-5f, 0f)) // 4x: the centre goes to its edge, 0.875
+      assertEquals(panned(4f, 0.875f, 0.5f), s.parts.pans.last())
+      touched(s, CameraTouch.Pinch(0.5f))
+      assertEquals(panned(2f, 0.75f, 0.5f), s.parts.pans.last(), "the centre is brought in: 2x keeps 0.25 from the edge")
+      touched(s, CameraTouch.Pinch(0.25f))
+      assertEquals(panned(1f, 0.5f, 0.5f), s.parts.pans.last(), "1x is centred, and the crop region is set back to the whole array")
+      touched(s, CameraTouch.Pinch(2f))
+      assertEquals("0" to 2f, s.parts.zooms.last(), "centred and whole again: the plain zoom")
+    }
+
+  @Test
+  fun `a drag moves the place tapped to the camera's own metering, as a pinch does`() =
+    runTest {
+      val s = ready()
+      touched(s, CameraTouch.Pinch(2f), CameraTouch.Tap(spot), CameraTouch.Drag(0.2f, 0f))
+      assertEquals(listOf(metered("0", spot, 90), metered("0", null, 90)), s.parts.meters)
+    }
+
+  @Test
+  fun `a tap still meters while zoomed, and a drag that moves nothing sets nothing`() =
+    runTest {
+      val s = ready()
+      touched(s, CameraTouch.Pinch(2f), CameraTouch.Tap(spot))
+      assertEquals(listOf(metered("0", spot, 90)), s.parts.meters)
+      touched(s, CameraTouch.Drag(0f, 0f))
+      assertEquals(emptyList(), s.parts.pans)
+    }
+
+  @Test
+  fun `a camera switch and a new pairing re-centre the crop, and the same camera's reopen puts it back`() =
+    runTest {
+      val s = ready()
+      touched(s, CameraTouch.Pinch(2f), CameraTouch.Drag(0.2f, 0f))
+      reported(s, "0") // Settings closed and reopened the capture: the same camera, a new source at the defaults
+      assertEquals(panned(2f, 0.4f, 0.5f), s.parts.pans.last())
+      assertEquals(2, s.parts.pans.size, "put back with the crop, once")
+      s.run.open(Configs.pairRequest()) // a new pairing over the held capture
+      advanceUntilIdle()
+      assertEquals(panned(1f, 0.5f, 0.5f), s.parts.pans.last(), "centred at 1x, whole array")
+      touched(s, CameraTouch.Drag(0.3f, 0.3f))
+      assertEquals(3, s.parts.pans.size, "and a drag at 1x does nothing")
+      touched(s, CameraTouch.Pinch(2f), CameraTouch.Drag(0.2f, 0f))
+      assertEquals(4, s.parts.pans.size)
+      does(s, Command.SwitchCamera)
+      reported(s, "1")
+      touched(s, CameraTouch.Drag(0.2f, 0f))
+      assertEquals(4, s.parts.pans.size, "the other camera is at 1x: no pan")
+      does(s, Command.SwitchCamera)
+      reported(s, "0")
+      touched(s, CameraTouch.Pinch(2f))
+      assertEquals("0" to 2f, s.parts.zooms.last(), "back on the first camera it starts again at 1x, centred")
     }
 
   @Test

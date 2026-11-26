@@ -33,7 +33,7 @@ sealed interface CameraTouch {
   }
 }
 
-/** A camera's zoom ratios as Camera2 lists them (`CONTROL_ZOOM_RATIO_RANGE`). */
+/** The digital zoom the pinch may reach: 1x to `SCALER_AVAILABLE_MAX_DIGITAL_ZOOM`. Zoom is a crop; the camera's ratio stays 1.0. */
 data class ZoomRange(val lower: Float, val upper: Float)
 
 /** Spec §3: the pinch zoom. */
@@ -68,8 +68,8 @@ data class MeterArea(val left: Int, val top: Int, val width: Int, val height: In
 data class SensorFacts(val orientation: Int, val front: Boolean, val width: Int, val height: Int)
 
 /**
- * Spec §4: a tap meters focus and exposure at the place tapped. The regions are in the active array's coordinates,
- * which under `CONTROL_ZOOM_RATIO` are the zoomed picture's (Camera2), so the zoom never enters the sum.
+ * Spec §4: a tap meters focus and exposure at the place tapped. Zoom is a crop with `CONTROL_ZOOM_RATIO` at 1.0, so the
+ * regions are plain active-array coordinates, and a tap is placed inside the visible crop window (see [area]).
  */
 object Metering {
   /** Camera2's `MeteringRectangle.METERING_WEIGHT_MAX`. */

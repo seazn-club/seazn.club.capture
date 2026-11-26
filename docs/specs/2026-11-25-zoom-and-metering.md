@@ -88,6 +88,8 @@ and if the ratio moved since the last gesture ended and the machine holds a broa
 end is one line. Never per frame; a gesture that moves nothing (already at the top, or at 1×) writes none. Before air the
 line at air start says the zoom in use, so a pinch's end writes none.
 
+From this PR (owner, 2026-11-26) both the air-start and the on-air `zoom` lines report the crop zoom (field width over crop width, up to `SCALER_AVAILABLE_MAX_DIGITAL_ZOOM`). Records from before it reported the camera's zoom ratio, so the two are not comparable.
+
 ### 3.5 Zoom is a digital crop; drag to move it (owner, 2026-11-26)
 
 Above 1× a one-finger drag on the preview moves the crop: left, right, up and down, 1:1 with the finger, no easing, before
@@ -219,6 +221,8 @@ the picture goes on as it was.
 
 ## 8. Device-only
 
+- On a logical multi-camera a crop at ratio 1.0 never changes the physical lens.
+- The preview surface's aspect matches the encode's; a 4:3 preview would offset drags and taps.
 - A pinch zooms smoothly and the tap's region lands where tapped, held left and held right, on the back and the front
   camera (the mirror is StreamPack's rule, unverified on our phones).
 - Continuous AF and AE follow the region without a hunt, on air too.

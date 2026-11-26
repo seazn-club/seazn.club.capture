@@ -215,7 +215,7 @@ internal object Starts {
         defaultNetwork = arming.defaultNetwork,
         micSilenced = arming.micSilenced,
       )
-    val armed = line("armed", "sid" to arming.sid, "transport" to config.primary.transport, "srtOffered" to descriptor.srtOffered, "playbackUrl" to config.playbackUrl)
+    val armed = line("armed", "sid" to arming.sid, "transport" to config.primary.transport, "srtOffered" to descriptor.srtOffered, *config.playbackTag().toTypedArray())
     return Step(Phase.Armed(session), listOfNotNull(unreadable, armed))
   }
 

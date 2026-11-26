@@ -42,8 +42,8 @@ describe('carry 11: one scrub, pinned by the file native reads too', () => {
   });
 
   // The files' row counts, so an emptied or truncated file cannot pass by sweeping nothing (PV12).
-  it('sweeps all 48 shared cases and 4 shared kinds', () => {
-    expect(vectors.cases).toHaveLength(48);
+  it('sweeps all 49 shared cases and 4 shared kinds', () => {
+    expect(vectors.cases).toHaveLength(49);
     expect(vectors.kinds).toHaveLength(4);
   });
 

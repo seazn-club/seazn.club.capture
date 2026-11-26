@@ -39,6 +39,22 @@ class SessionConfig(
   fun target(transport: Transport): IngestTarget? =
     listOfNotNull(primary, fallback).firstOrNull { it.transport == transport }
 
+  /**
+   * What the record says of the watch URL instead of the URL (owner, 2026-11-26): its host and the last
+   * six characters of the stream id before `/manifest`, under the contract's own `host` and `tag` keys.
+   * Whether a bare URL plays without a token is the web's signed-URL setting, which the phone cannot
+   * see, so the URL itself is never written. Nothing that fits a plain word (`[A-Za-z0-9_.:-]{1,64}`)
+   * yields no field at all.
+   */
+  fun playbackTag(): List<Pair<String, String>> {
+    val uri = runCatching { java.net.URI(playbackUrl) }.getOrNull() ?: return emptyList()
+    val host = uri.host?.takeIf { PLAIN_WORD.matches(it) } ?: return emptyList()
+    val segments = (uri.path ?: "").split('/').filter { it.isNotEmpty() }
+    val id = segments.getOrNull(segments.indexOf("manifest") - 1)?.takeIf { segments.indexOf("manifest") > 0 } ?: return emptyList()
+    val tail = id.takeLast(6)
+    return if (PLAIN_WORD.matches(tail)) listOf("host" to host, "tag" to tail) else emptyList()
+  }
+
   /** Values the record must never carry, whatever key they arrive under. Blank ones are no secret. */
   fun secrets(): List<String> {
     val srt = listOfNotNull(primary, fallback).filterIsInstance<SrtTarget>()
@@ -77,4 +93,8 @@ class SessionConfig(
 
   override fun toString(): String =
     "SessionConfig(sid=$sid, token=<${token.length} chars>, primary=$primary, fallback=$fallback)"
+
+  private companion object {
+    val PLAIN_WORD = Regex("^[A-Za-z0-9_.:-]{1,64}$")
+  }
 }

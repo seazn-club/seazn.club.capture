@@ -32,7 +32,7 @@ class SessionRecordTest {
 
   @Test
   fun `P5 scrub rule - a public URL passes verbatim though the stream id is in it`() {
-    assertTrue(Configs.PLAYBACK_URL in write("playbackUrl" to Configs.PLAYBACK_URL))
+    assertTrue(Configs.PLAYBACK_URL in write("url" to Configs.PLAYBACK_URL))
   }
 
   // Task 10 (CD6): was "the token is masked even inside a public URL", in place. A public URL now
@@ -41,9 +41,9 @@ class SessionRecordTest {
   fun `a public URL with a query is masked whole, so nothing in it reaches the line`() {
     // Fix round 1: so is the passphrase, raw and URL-encoded, which the brief masks everywhere.
     val url = "${Configs.PLAYBACK_URL}?tok=${Configs.TOKEN}&passphrase=${Configs.PASSPHRASE}&passphrase=pass%2Bphrase%2F6d1e8b0c"
-    val line = write("playbackUrl" to url)
+    val line = write("url" to url)
     assertFalse(Configs.TOKEN in line)
-    assertEquals("""{"at":"2026-09-30T14:32:05.123Z","kind":"test","playbackUrl":"***"}""", line)
+    assertEquals("""{"at":"2026-09-30T14:32:05.123Z","kind":"test","url":"***"}""", line)
   }
 
   @Test
@@ -51,6 +51,11 @@ class SessionRecordTest {
     val line =
       write("tok" to Configs.TOKEN, "passphrase" to Configs.PASSPHRASE, "streamKey" to Configs.STREAM_KEY, "streamId" to Configs.STREAM_ID)
     for (secret in secrets) assertFalse(secret in line, "leaked $secret")
+  }
+
+  @Test
+  fun `a playback URL is masked under its own name, even a clean one`() {
+    assertEquals("""{"at":"2026-09-30T14:32:05.123Z","kind":"test","playbackUrl":"***"}""", write("playbackUrl" to Configs.PLAYBACK_URL))
   }
 
   @Test
@@ -208,11 +213,11 @@ class SessionRecordTest {
     val encoded = URLEncoder.encode(Configs.PASSPHRASE, "UTF-8")
     // Task 10 (CD6): the URL is a clean one now; one with a query is masked whole, whatever it holds.
     val fields = listOf(
-      "playbackUrl" to Configs.PLAYBACK_URL,
+      "url" to Configs.PLAYBACK_URL,
       "message" to "streamid=${Configs.STREAM_ID} passphrase=$encoded key=${Configs.STREAM_KEY} Bearer ${Configs.TOKEN}",
     )
     rtmpsFirst.append(1_790_778_725_123, RecordEntry("test", fields))
-    val expected = """{"at":"2026-09-30T14:32:05.123Z","kind":"test","playbackUrl":"${Configs.PLAYBACK_URL}",""" +
+    val expected = """{"at":"2026-09-30T14:32:05.123Z","kind":"test","url":"${Configs.PLAYBACK_URL}",""" +
       """"message":"streamid=*** passphrase=*** key=*** Bearer ***"}"""
     assertEquals(expected, out.single())
   }
@@ -223,11 +228,11 @@ class SessionRecordTest {
     val out = mutableListOf<String>()
     val rtmpsOnly = SessionRecord { out += it }.apply { protectConfig(Configs.valid(primary = Configs.rtmps, fallback = null)) }
     val fields = listOf(
-      "playbackUrl" to "${Configs.PLAYBACK_URL}?key=${Configs.STREAM_KEY}&tok=${Configs.TOKEN}",
+      "url" to "${Configs.PLAYBACK_URL}?key=${Configs.STREAM_KEY}&tok=${Configs.TOKEN}",
       "message" to "rtmps://live.cloudflare.com:443/live/${Configs.STREAM_KEY} Bearer ${Configs.TOKEN}",
     )
     rtmpsOnly.append(1_790_778_725_123, RecordEntry("test", fields))
-    val expected = """{"at":"2026-09-30T14:32:05.123Z","kind":"test","playbackUrl":"***",""" +
+    val expected = """{"at":"2026-09-30T14:32:05.123Z","kind":"test","url":"***",""" +
       """"message":"rtmps://live.cloudflare.com:443/live/*** Bearer ***"}"""
     assertEquals(expected, out.single())
   }
@@ -246,10 +251,10 @@ class SessionRecordTest {
       appVersion = "1.0.0",
     )
     record.protectConfig(second)
-    val line = write("playbackUrl" to "${Configs.PLAYBACK_URL}?tok=${Configs.TOKEN}", "message" to "first ${Configs.STREAM_KEY} second $secondToken")
+    val line = write("url" to "${Configs.PLAYBACK_URL}?tok=${Configs.TOKEN}", "message" to "first ${Configs.STREAM_KEY} second $secondToken")
     // Task 10 (CD6): the URL is masked whole now (it has a query); the message's point is unchanged.
     assertEquals(
-      """{"at":"2026-09-30T14:32:05.123Z","kind":"test","playbackUrl":"***","message":"first *** second ***"}""",
+      """{"at":"2026-09-30T14:32:05.123Z","kind":"test","url":"***","message":"first *** second ***"}""",
       line,
     )
   }

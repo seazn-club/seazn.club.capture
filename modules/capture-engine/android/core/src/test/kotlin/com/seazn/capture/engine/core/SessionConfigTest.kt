@@ -152,4 +152,24 @@ class SessionConfigTest {
     assertSame(Configs.srt, Configs.valid().target(Transport.SRT))
     assertNull(Configs.valid(fallback = null).target(Transport.RTMPS))
   }
+
+  @Test
+  fun `the playback tag is the host and the last six characters of the stream id`() {
+    assertEquals(
+      listOf("host" to "customer-x.cloudflarestream.com", "tag" to "7e8f90"),
+      Configs.valid().playbackTag(),
+    )
+  }
+
+  @Test
+  fun `a playback URL that does not parse into a host and a stream id yields no tag`() {
+    fun tagFor(url: String) = Configs.valid().let { c ->
+      SessionConfig(c.sid, c.token, c.primary, c.fallback, c.holdWindowSeconds, url, c.heartbeatUrl, c.appVersion)
+    }.playbackTag()
+    assertEquals(emptyList(), tagFor(""))
+    assertEquals(emptyList(), tagFor("https://customer-x.cloudflarestream.com/"))
+    assertEquals(emptyList(), tagFor("https://customer-x.cloudflarestream.com/manifest/video.m3u8"))
+    assertEquals(emptyList(), tagFor("https://customer-x.cloudflarestream.com/a b/manifest/video.m3u8"))
+    assertEquals(emptyList(), tagFor("https://${"h".repeat(70)}.example/abcdef/manifest/video.m3u8"))
+  }
 }

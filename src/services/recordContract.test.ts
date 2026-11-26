@@ -141,8 +141,12 @@ describe('the record contract’s keys', () => {
     expect(RECORD_LINE_KEYS.size).toBe(104);
   });
 
-  it('lists no never key', () => {
-    expect(list.never.filter((key) => RECORD_LINE_KEYS.has(key))).toEqual([]);
+  // The one never key the contract still lists: the web admits a stream's watch URL on a line, the app never
+  // writes one (owner, 2026-11-26), so the key is kept in the contract and refused on this side.
+  const WEB_ONLY_KEYS = ['playbackUrl'];
+
+  it('lists no never key but the web-only ones', () => {
+    expect(list.never.filter((key) => RECORD_LINE_KEYS.has(key))).toEqual(WEB_ONLY_KEYS);
   });
 
   // The web takes its keys from the allow-list (capture ebac190 at web 55ac34d5d, which added the five the app wrote
@@ -155,6 +159,7 @@ describe('the record contract’s keys', () => {
       ...list.publicUrl,
       ...list.text,
       ...Object.keys(list.scalars),
+      ...WEB_ONLY_KEYS,
     ];
     expect(written.sort()).toEqual(Object.keys(contract.properties).sort());
     expect(written.filter((key) => !RECORD_LINE_KEYS.has(key))).toEqual([]);

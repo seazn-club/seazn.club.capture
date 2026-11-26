@@ -85,7 +85,7 @@ export const PLAIN_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 /** Public by construction: every viewer's player and every overlay browser source holds them. */
-export const PUBLIC_URL_KEYS: ReadonlySet<string> = new Set(['url', 'playbackUrl', 'overlayUrl']);
+export const PUBLIC_URL_KEYS: ReadonlySet<string> = new Set(['url', 'overlayUrl']);
 
 /** Free text from a library or the platform, which can quote a URL or a key. */
 export const TEXT_KEYS: ReadonlySet<string> = new Set(['message', 'problems']);
@@ -100,6 +100,8 @@ export const NEVER_KEYS: ReadonlySet<string> = new Set([
   'streamId',
   'bearer',
   'authorization',
+  // A stream's watch URL: whether it plays bare is the web's signed-URL setting, which the phone cannot see.
+  'playbackUrl',
 ]);
 
 /**

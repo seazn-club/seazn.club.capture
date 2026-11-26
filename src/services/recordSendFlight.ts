@@ -1,4 +1,8 @@
-import { RECORD_MAX_LINES } from '@/services/recordContract';
+import { tokenTag } from '@/domain/credentials/tokenTag';
+import type { UploadCredential } from '@/domain/credentials/uploadCredential';
+import { RECORD_MAX_BYTES, RECORD_MAX_LINES } from '@/services/recordContract';
+import type { RecordFilePort } from '@/services/recordFilePort';
+import { mergeRecord, selectForCode } from '@/services/recordSelection';
 import type { RecordSendResult, RecordUploadPort } from '@/services/recordUploadPort';
 import type { SessionRecord } from '@/services/sessionRecord';
 import type { UploadCredentialStore } from '@/services/uploadCredentialStore';
@@ -53,9 +57,9 @@ export type RecordSendFlight = {
   /** Reads the credential again: at the row's mount and at every return to the foreground (it can expire in a pocket). */
   refresh(): void;
   /**
-   * The JS ring's newest lines, as Share record shares them (R9 of the D3 findings design, the controller's,
-   * 2026-10-11), with the pairing's pinned lines ahead of them (N38, `recordPins.ts`): 1,000 in all, on the operator's
-   * tap only. One at a time.
+   * The code's lines (N53, `recordLinesFor`): from native's record file and the JS ring, the ones the server files under
+   * the code, within the contract's caps; with no file, the JS ring's newest with the pairing's pinned lines ahead of
+   * them (N38, `recordPins.ts`), as before. On the operator's tap only. One at a time.
    */
   send(): void;
 };
@@ -64,6 +68,7 @@ type Deps = {
   readonly credentials: UploadCredentialStore;
   readonly upload: RecordUploadPort;
   readonly record: SessionRecord;
+  readonly recordFile: RecordFilePort;
 };
 
 const IDLE: SendState = { kind: 'idle' };
@@ -126,7 +131,7 @@ type Answer = { readonly next: SendState | typeof GONE; readonly codeUrl: string
  * stays on Sending… (N13).
  */
 async function sendOnce(
-  { credentials, upload, record }: Deps,
+  { credentials, upload, record, recordFile }: Deps,
   seen: (codeUrl: string | null) => void,
 ): Promise<Answer> {
   let codeUrl: string | null = null;
@@ -135,7 +140,10 @@ async function sendOnce(
     seen(credential?.codeUrl ?? null);
     if (credential === null) return { next: GONE, codeUrl };
     codeUrl = credential.codeUrl;
-    const outcome = await upload.send(record.linesToSend(RECORD_MAX_LINES), credential);
+    const outcome = await upload.send(
+      await recordLinesFor(record, recordFile, credential),
+      credential,
+    );
     const next: SendState =
       outcome.result === 'sent' && outcome.ref !== null
         ? { kind: 'sent', ref: outcome.ref }
@@ -144,4 +152,31 @@ async function sendOnce(
   } catch {
     return { next: FAILED, codeUrl };
   }
+}
+
+/**
+ * N53: what one send posts. Native's record file holds every line of every pairing on this phone, across an app
+ * restart, where the JS ring holds its last 1,000 since the app started; the web keeps a line only when it belongs to the
+ * sending code (the contract's A1 and A2). So the file and the ring are merged (`mergeRecord`: the ring adds JavaScript's
+ * lines from outside a pairing, and any the file's rotation let go of), and the lines the server files under the
+ * credential's code are picked (`selectForCode`), up to 1,000 lines and 1 MB. With no file (iOS, a stale build, a read
+ * refused or past its bound), or none of the code's lines in it, the ring's lines go, as before N53: never less than
+ * Send had.
+ */
+export async function recordLinesFor(
+  record: SessionRecord,
+  recordFile: RecordFilePort,
+  credential: UploadCredential,
+): Promise<readonly string[]> {
+  const ring = record.linesToSend(RECORD_MAX_LINES);
+  const file = await recordFile.read();
+  if (file === null) return ring;
+  const merged = mergeRecord(file, record.linesToSend(Number.POSITIVE_INFINITY));
+  const picked = selectForCode(
+    merged,
+    tokenTag(credential.token),
+    RECORD_MAX_LINES,
+    RECORD_MAX_BYTES,
+  );
+  return picked.length > 0 ? picked : ring;
 }

@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import type { EngineSnapshot } from '@/engine/CaptureEnginePort';
 import { diagnosticsSections, type DiagnosticsSection } from '@/hooks/diagnostics';
 import { useEngineSelector } from '@/hooks/useCaptureEngine';
@@ -6,6 +6,8 @@ import { useT } from '@/hooks/useLanguage';
 import { usePorts } from '@/hooks/usePorts';
 import type { SharePort } from '@/services/devicePorts';
 import type { Logger } from '@/services/logger';
+import type { RecordFilePort } from '@/services/recordFilePort';
+import { mergeRecord, selectForShare } from '@/services/recordSelection';
 import type { SessionRecord } from '@/services/sessionRecord';
 
 /**
@@ -25,21 +27,32 @@ export function useDiagnostics(): readonly DiagnosticsSection[] {
 
 /**
  * Share record (D21): the whole session record, as it is when the press lands.
- * Nothing here subscribes to the record, so its growth re-renders no one (the
- * screen shows no line of it, spec §6). The record is scrubbed when written
- * (Task 1's allow-list), so sharing sends nothing that was not already safe to
- * keep. A refused share sheet says so and is recorded; the next share that
- * opens clears it.
+ * N53: native's record file (every code's lines, across an app restart) merged
+ * with the JS ring, within the share sheet's size (`selectForShare`); with no
+ * file, the ring, as before. Nothing here subscribes to the record, so its
+ * growth re-renders no one (the screen shows no line of it, spec §6). The record
+ * is scrubbed when written (Task 1's allow-list; native's in
+ * `SessionRecord.append`, before its file sees a line), so sharing sends nothing
+ * that was not already safe to keep. A refused share sheet says so and is
+ * recorded; the next share that opens clears it. One at a time (review of
+ * #80): a tap while a share is still reading the file or opening the sheet is
+ * dropped, so a double tap reads once, opens one sheet and says nothing failed.
  */
 export function useSessionRecord(): {
   readonly shareFailed: boolean;
   share(): void;
 } {
-  const { record, share, logger } = usePorts();
+  const { record, recordFile, share, logger } = usePorts();
   const [shareFailed, setShareFailed] = useState(false);
+  const sharing = useRef(false);
   const send = useCallback(() => {
-    void shareRecord(share, record, logger).then((opened) => setShareFailed(!opened));
-  }, [share, record, logger]);
+    if (sharing.current) return;
+    sharing.current = true;
+    void shareRecord(share, record, recordFile, logger).then((opened) => {
+      sharing.current = false;
+      setShareFailed(!opened);
+    });
+  }, [share, record, recordFile, logger]);
   return { shareFailed, share: send };
 }
 
@@ -47,10 +60,12 @@ export function useSessionRecord(): {
 async function shareRecord(
   share: SharePort,
   record: SessionRecord,
+  recordFile: RecordFilePort,
   logger: Logger,
 ): Promise<boolean> {
-  const lines = record.lines();
+  let lines: readonly string[];
   try {
+    lines = await shareLines(record, recordFile);
     await share.share(lines.join('\n'));
   } catch {
     logger.warn('record.share-failed');
@@ -59,4 +74,14 @@ async function shareRecord(
   // M15: `count` is on the scrub's allow-list; `lines` would be scrubbed.
   logger.info('record.shared', { count: lines.length });
   return true;
+}
+
+/** N53: the file merged with the ring and fitted to the share sheet, or the ring alone when there is no file. */
+async function shareLines(
+  record: SessionRecord,
+  recordFile: RecordFilePort,
+): Promise<readonly string[]> {
+  const file = await recordFile.read();
+  // The port never rejects (`recordFilePort.ts`); a throw here still lands in shareRecord's catch, so the share's guard is let go.
+  return file === null ? record.lines() : selectForShare(mergeRecord(file, record.lines()));
 }

@@ -1,8 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { tokenTag } from '@/domain/credentials/tokenTag';
 import type { UploadCredential } from '@/domain/credentials/uploadCredential';
+import { createLogger } from '@/services/logger';
 import { createRecordSendFlight } from '@/services/recordSendFlight';
+import { createRecordUploadPort, type PostFetch } from '@/services/recordUploadPort';
 import { createRingRecord } from '@/services/sessionRecord';
-import { createFakeRecordUpload, createFakeUploadCredential } from '../../test/fakePorts';
+import {
+  createFakeRecordFile,
+  createFakeRecordUpload,
+  createFakeUploadCredential,
+} from '../../test/fakePorts';
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -19,8 +26,9 @@ function rig(credential: UploadCredential | null = CREDENTIAL) {
   const credentials = createFakeUploadCredential(credential);
   const upload = createFakeRecordUpload();
   const record = createRingRecord();
-  const flight = createRecordSendFlight({ credentials, upload, record });
-  return { credentials, upload, record, flight };
+  const recordFile = createFakeRecordFile();
+  const flight = createRecordSendFlight({ credentials, upload, record, recordFile });
+  return { credentials, upload, record, recordFile, flight };
 }
 
 // Important 3 of the Batch 6 review: the request lives in the ports, built once, so a rotation or a way out and back
@@ -225,5 +233,122 @@ describe('an answer belongs to the code it was sent under (R1-1)', () => {
     r.upload.release();
     await settle();
     expect(r.flight.getSnapshot()).toEqual({ state: { kind: 'idle' }, available: true });
+  });
+});
+
+// N53: Send reads native's record file (every line of every pairing, across an app restart), merged with the ring, and
+// posts the lines the server files under the credential's code; with no file, the ring as before.
+describe('what the flight hands the port with a record file (N53)', () => {
+  const TAG = tokenTag(CREDENTIAL.token);
+  const OTHER = tokenTag('made-up-token-of-another-code');
+  const at = (second: number) => new Date(Date.UTC(2026, 10, 26, 20, 0, second)).toISOString();
+  const line = (second: number, kind: string, extra = '') =>
+    `{"at":"${at(second)}","kind":"${kind}"${extra}}`;
+  const pair = (second: number, tag: string) =>
+    line(second, 'pair', `,"claim":"new","tokenTag":"${tag}"`);
+  const SID = '66753ccd-a784-4799-b0bf-5a80fb7f5e37';
+
+  it("posts the code's lines from the file, those from before an app restart included, and none of another code's", async () => {
+    const r = rig();
+    const before = [
+      pair(1, TAG),
+      line(2, 'broadcast-start', `,"sid":"${SID}"`),
+      line(3, 'live'),
+      line(4, 'reset'),
+    ];
+    const theirs = [pair(5, OTHER), line(6, 'live')];
+    const now = [pair(7, TAG), line(8, 'paired')];
+    r.recordFile.give([...before, ...theirs, ...now]);
+    // The ring since this launch: native's lines echoed, and JavaScript's from outside any pairing.
+    for (const each of [line(0, 'app.start'), ...now]) r.record.appendLine(each);
+    r.flight.send();
+    await settle();
+    expect(r.recordFile.reads).toBe(1);
+    expect(r.upload.sent[0]?.lines).toEqual([...before, ...now]);
+  });
+
+  it("a ring line the file's rotation let go of, inside the code's window, still goes, once", async () => {
+    const r = rig();
+    const lost = line(3, 'intent.start');
+    r.recordFile.give([pair(1, TAG), line(2, 'paired'), line(4, 'live')]);
+    for (const each of [pair(1, TAG), line(2, 'paired'), lost, line(4, 'live')])
+      r.record.appendLine(each);
+    r.flight.send();
+    await settle();
+    expect(r.upload.sent[0]?.lines).toEqual([
+      pair(1, TAG),
+      line(2, 'paired'),
+      lost,
+      line(4, 'live'),
+    ]);
+  });
+
+  it('no file (iOS, a stale build, a refused or late read) sends the ring as before', async () => {
+    const r = rig();
+    for (const each of [line(1, 'app.start'), line(2, 'live')]) r.record.appendLine(each);
+    r.flight.send();
+    await settle();
+    expect(r.upload.sent[0]?.lines).toEqual([line(1, 'app.start'), line(2, 'live')]);
+  });
+
+  it('a file with nothing of the code (an empty input) sends the ring, never nothing', async () => {
+    const r = rig();
+    r.recordFile.give([]);
+    r.record.appendLine(line(1, 'live'));
+    r.flight.send();
+    await settle();
+    expect(r.upload.sent[0]?.lines).toEqual([line(1, 'live')]);
+    r.recordFile.give([pair(2, OTHER), line(3, 'live')]);
+    r.flight.send();
+    await settle();
+    expect(r.upload.sent[1]?.lines).toEqual([line(1, 'live')]);
+  });
+
+  it('a second tap while the file is read reads once and sends once', async () => {
+    const r = rig();
+    r.recordFile.give([pair(1, TAG)]);
+    r.recordFile.hold();
+    r.flight.send();
+    await settle();
+    r.flight.send();
+    await settle();
+    expect(r.flight.getSnapshot().state).toEqual({ kind: 'sending' });
+    r.recordFile.release();
+    await settle();
+    expect(r.recordFile.reads).toBe(1);
+    expect(r.upload.calls).toBe(1);
+    expect(r.flight.getSnapshot().state).toEqual({ kind: 'sent', ref: 'R-TEST' });
+  });
+});
+
+// N53: the file's lines were scrubbed before native wrote them (`SessionRecord.append`), and the upload still fails
+// closed: a token in any line of the code's sends nothing, so it never leaves the phone.
+describe('a token in the record file never leaves (N53)', () => {
+  it('a line of the code that names the token is refused before any request', async () => {
+    const fetch = vi.fn<PostFetch>(async () => ({
+      status: 201,
+      json: async () => ({ ref: 'R-7K2Q' }),
+    }));
+    const upload = createRecordUploadPort({
+      fetch,
+      logger: createLogger({ record: createRingRecord(), now: () => 0 }),
+      host: 'stg.seazn.club',
+    });
+    const recordFile = createFakeRecordFile();
+    const tag = tokenTag(CREDENTIAL.token);
+    recordFile.give([
+      `{"at":"2026-11-26T20:00:01.000Z","kind":"pair","claim":"new","tokenTag":"${tag}"}`,
+      `{"at":"2026-11-26T20:00:02.000Z","kind":"code","message":"Bearer ${CREDENTIAL.token}"}`,
+    ]);
+    const flight = createRecordSendFlight({
+      credentials: createFakeUploadCredential(CREDENTIAL),
+      upload,
+      record: createRingRecord(),
+      recordFile,
+    });
+    flight.send();
+    await settle();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(flight.getSnapshot().state).toEqual({ kind: 'failed', why: 'mismatch' });
   });
 });

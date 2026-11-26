@@ -218,8 +218,25 @@ object SessionMachine {
     val told = validatedFact(phase, input.validated, now)
     if (!input.validated) return told.copy(phase = told.phase.withDefaultNetwork(handle))
     val previous = if (phase.networkValidated) phase.defaultNetwork else null
-    val judged = Transports.network(told.phase, previous, handle, now)
-    return judged.copy(commands = told.commands + judged.commands)
+    val reset = if (relinkedElsewhere(phase, handle)) Transports.newNetwork(told.phase) else Step(told.phase)
+    val judged = Transports.network(reset.phase, previous, handle, now)
+    return judged.copy(commands = told.commands + reset.commands + judged.commands)
+  }
+
+  /**
+   * N53: validation ends a stretch in which the link was made again while the network was not validated: a connection
+   * made in it (N52's provisional one), or one still to be made. When validation names another network than the one the
+   * attempt was asked on ([Session.attemptNetwork]), or either is unknown (as N52's rebind treats it), it is a new link,
+   * so the regulator restarts for it ([BitrateRegulator.newNetwork]). Review of #80: on the same handle it is the link
+   * that just failed (a data stall loses validation, then the drop, then validation again), so its failed rate and its
+   * repeats stand and the low cap's hold escalates. A connection that outlived the stretch, made before it, is the link
+   * the regulator was judging, and a flap of validation alone moves nothing.
+   */
+  private fun relinkedElsewhere(phase: Phase, handle: Long?): Boolean {
+    val relinked = !phase.networkValidated && ((phase is Phase.OnAir && phase.provisional) || phase is Phase.Connecting)
+    if (!relinked) return false
+    val on = phase.session?.attemptNetwork
+    return handle == null || on == null || on != handle
   }
 
   private fun validatedFact(phase: Phase, validated: Boolean, now: Now): Step {
@@ -465,7 +482,10 @@ internal object Transports {
     val asked = next is Phase.OnAir || (next as? Phase.Connecting)?.step is ConnectStep.Requested
     if (session == null || !asked) {
       if (previous == null) return Step(next)
-      return Step(next, listOf(switchLine(if (next is Phase.Connecting) NetworkSwitch.BETWEEN_ATTEMPTS else NetworkSwitch.NOT_ON_AIR, next)))
+      if (next !is Phase.Connecting) return Step(next, listOf(switchLine(NetworkSwitch.NOT_ON_AIR, next)))
+      // N53: the next attempt is asked on the new network, a new link.
+      val reset = newNetwork(next)
+      return reset.copy(commands = listOf(switchLine(NetworkSwitch.BETWEEN_ATTEMPTS, next)) + reset.commands)
     }
     if (next is Phase.OnAir && next.provisional) return provisionalValidated(next, session, handle, now)
     val on = session.attemptNetwork ?: return Step(next.withSession(session.copy(attemptNetwork = handle)))
@@ -494,15 +514,37 @@ internal object Transports {
 
   /**
    * N49: the attempt replaced for a switch, a new link on another network (fix round 1, items 3 and 4). The regulator
-   * forgets the rate the old link failed ([BitrateRegulator.newLink]), and the delivery watch starts its session again,
-   * with no verdict for [DeliveryWatch.SWITCH_GRACE_MS] ([DeliveryWatch.switched]).
+   * restarts for it (N53, [BitrateRegulator.newNetwork]), so the new attempt is asked at that target, and the delivery
+   * watch starts its session again, with no verdict for [DeliveryWatch.SWITCH_GRACE_MS] ([DeliveryWatch.switched]).
    */
   private fun switchedOver(onAir: Phase.OnAir, outage: Outage?, now: Now, provisional: Boolean = false): Step {
     val line = switchLine(NetworkSwitch.REPLACED, onAir, provisional)
-    val old = onAir.session
-    val session = old.copy(regulation = BitrateRegulator.newLink(old.regulation), delivery = old.delivery.switched(now.monoMs))
+    val reset = newNetwork(onAir)
+    val old = reset.phase.session ?: return Step(onAir)
+    val session = old.copy(delivery = old.delivery.switched(now.monoMs))
     val step = replace(onAir, session, outage, now) { Command.StartNewSession(onAir.attemptId, it) }
-    return step.copy(commands = listOf(line) + step.commands)
+    return step.copy(commands = listOf(line) + reset.commands + step.commands)
+  }
+
+  /**
+   * N53: the regulator restarted for a new network ([BitrateRegulator.newNetwork]). A target it moved is said as a
+   * `bitrate` line, reason `new-network`, as a drop's move is ([dropMoved]); on air the encoder hears it at once, as it
+   * hears a reading's move. A phase with no session has no regulator.
+   */
+  fun newNetwork(phase: Phase): Step {
+    val session = phase.session ?: return Step(phase)
+    val regulation = BitrateRegulator.newNetwork(session.regulation)
+    val next = phase.withSession(session.copy(regulation = regulation))
+    val before = session.regulation.targetBps
+    val after = regulation.targetBps
+    if (after == before) return Step(next)
+    val commands = mutableListOf<Command>()
+    if (phase is Phase.OnAir) {
+      commands += Command.SetBitrate(phase.attemptId, after)
+      if (phase.transport == Transport.SRT) commands += Command.SetMaxBw(phase.attemptId, SrtBandwidth.maxBwBytesPerSecond(after))
+    }
+    commands += record("bitrate", "from" to before, "to" to after, "reason" to BitrateMove.NEW_NETWORK)
+    return Step(next, commands)
   }
 
   /** An outage only exists for a session that has been live: before that, there is nothing to hold. */

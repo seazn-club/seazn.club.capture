@@ -6,6 +6,7 @@ import com.seazn.capture.engine.adapter.HttpOutcome
 import com.seazn.capture.engine.adapter.HttpRequest
 import com.seazn.capture.engine.adapter.Platform
 import com.seazn.capture.engine.adapter.PlatformFacts
+import com.seazn.capture.engine.adapter.RecordFile
 import com.seazn.capture.engine.capture.Capture
 import com.seazn.capture.engine.core.Command
 import com.seazn.capture.engine.core.PairRequest

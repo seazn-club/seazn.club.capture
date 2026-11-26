@@ -345,9 +345,10 @@ const RECORD_DEPS = "fetch:(url, init) => fetch(url, init), host:hosts[0] ?? '',
 const RECORD_UPLOAD =
   "createRecordUploadPort({ fetch: (url, init) => fetch(url, init), logger, host: hosts[0] ?? '' })";
 // The flight sends through the very credential store and upload port the ports hand out, and the app's record.
-const FLIGHT_DEPS = 'credentials:uploadCredential, record:record, upload:recordUpload';
+const FLIGHT_DEPS =
+  'credentials:uploadCredential, record:record, recordFile:recordFile, upload:recordUpload';
 const FLIGHT =
-  'createRecordSendFlight({ credentials: uploadCredential, upload: recordUpload, record })';
+  'createRecordSendFlight({ credentials: uploadCredential, upload: recordUpload, record, recordFile })';
 const RECORD_SKELETON = (
   upload: string,
   modeStore = 'modeStore',

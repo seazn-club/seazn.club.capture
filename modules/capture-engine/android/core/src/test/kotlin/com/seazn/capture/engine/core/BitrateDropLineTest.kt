@@ -20,7 +20,7 @@ class BitrateDropLineTest {
 
   @Test
   fun `the drop's reason words`() {
-    assertEquals(listOf("drops", "backlog", "raise", "clamp", "drop-halved", "drop-restored"), BitrateMove.entries.map { it.wire })
+    assertEquals(listOf("drops", "backlog", "raise", "clamp", "drop-halved", "drop-restored", "new-network"), BitrateMove.entries.map { it.wire })
   }
 
   @Test

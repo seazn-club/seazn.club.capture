@@ -90,6 +90,10 @@ class HostModule implements CaptureEngineNative {
   takePhoto(): Promise<unknown> {
     return Promise.reject(new Error('the host has no camera'));
   }
+  /** N53: the record file is the Android platform's (`RecordFile`), which the JVM host has none of: no file. */
+  readRecord(): Promise<unknown> {
+    return Promise.resolve(null);
+  }
   /** The JVM host has no battery: its mode is unknown, as a phone that cannot read it says (R5). */
   powerMode(): unknown {
     return null;

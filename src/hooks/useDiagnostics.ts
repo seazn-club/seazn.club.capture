@@ -63,8 +63,9 @@ async function shareRecord(
   recordFile: RecordFilePort,
   logger: Logger,
 ): Promise<boolean> {
-  const lines = await shareLines(record, recordFile);
+  let lines: readonly string[];
   try {
+    lines = await shareLines(record, recordFile);
     await share.share(lines.join('\n'));
   } catch {
     logger.warn('record.share-failed');
@@ -81,6 +82,6 @@ async function shareLines(
   recordFile: RecordFilePort,
 ): Promise<readonly string[]> {
   const file = await recordFile.read();
-  // The port never rejects (`recordFilePort.ts`) and the selection is pure, so the share's guard is always let go.
+  // The port never rejects (`recordFilePort.ts`); a throw here still lands in shareRecord's catch, so the share's guard is let go.
   return file === null ? record.lines() : selectForShare(mergeRecord(file, record.lines()));
 }

@@ -85,7 +85,7 @@ The web's wire, confirmed by the web side on 2026-11-24, is what this section an
 
 ## 3. T46 delivery facts: native, snapshot, Diagnostics
 
-**Diagnostics only** (owner, 2026-11-24). The server's delivery facts (`telemetry.server`) appear in the Diagnostics card and the record, and nowhere else: they never drive the status line (`statusKey.ts`, `LINE_TIER`), a caption, the notification or any HUD state. As built, the one reader in JS is `serverRows` in `src/hooks/diagnostics.ts`, and in native the snapshot (`Projection.kt`, `SnapshotWire.kt`) and the `server-delivery` lines (`Nudges.kt`).
+~~**Diagnostics only** (owner, 2026-11-24).~~ **Reversed on 2026-11-26** (owner: "build"): one fact, the programme phase, now also confirms the viewers' picture for the tally plate (§3a). Everything else below stands: the other facts appear in the Diagnostics card and the record only, and none of them drives a caption or the notification. As built, the JS readers are `serverRows` in `src/hooks/diagnostics.ts` and, since §3a, `viewersFactsOf` and `selectConfirmSource` in `src/hooks/engineSelectors.ts`; in native the snapshot (`Projection.kt`, `SnapshotWire.kt`) and the `server-delivery` lines (`Nudges.kt`).
 
 - **Native read.** `Bodies.kt` reads the optional `delivery` on go-live and live answers: `relayOutput`, `programmePhase`, `fps`, `kbps`, `cameraIngest`, `programmeIngest`.
   - Each member is optional. An unknown word means not known, and an integer out of range means not known.
@@ -95,6 +95,54 @@ The web's wire, confirmed by the web side on 2026-11-24, is what this section an
 - **Snapshot.** The snapshot carries `telemetry.server: {relayOutput, programmePhase, fps, kbps, cameraIngest, programmeIngest, ageS}` or null, each member nullable, `ageS` whole seconds to the snapshot's own clock. It sits in telemetry, so it is cleared with it and a build before T46 (no key) still reads. A `snapshotWire.ts` reader reads it member by member (a garbled member is null, a garbled whole is null, never a refused snapshot), with shared vectors.
 - **Diagnostics.** The card gains four rows under Server, after Delivery: Relay, Programme, Camera feed and Programme feed. All four languages, house voice. They show only on air (publishing, degraded, reconnecting). A live programme reads as its rate ("30 fps 2800k"); any other phase is its word, since the word and the rate together do not fit the row at 640 in every language (`settingsFit.test.ts`). On air the card is 13 rows, 332 dp, and its half scrolls (owner, 2026-11-24: allow scroll); off air it is Q1's nine.
 - **Record.** A `server-delivery {source, state}` line per word that changed (`source`: relay, programme, camera-ingest, programme-ingest; `state` the word, or `unknown`), on go-live and live answers only, so the record can line up the phone's view with the relay's. Existing keys only.
+
+## 3a. Going live: red LIVE means viewers can see the picture (owner, 2026-11-26)
+
+The owner's ruling: "Red LIVE must mean viewers can see the picture", with the mock agreed in the session ("build").
+Before it, the plate went red when the phone's upload connected (native's LIVE gate, F-P5-6), whether or not anything
+reached a viewer; a broadcast Cloudflare accepted but did not deliver read LIVE for its first minute.
+
+**The stages**, a projection of native's snapshot (AGENTS §2):
+
+| Stage             | When                                                                                               | Plate                                                         | Clock  | Status line (tier)                                                                                 |
+| ----------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- | ------ | -------------------------------------------------------------------------------------------------- |
+| Going live        | upload connected (publishing, or degraded on the backup link alone), not yet confirmed, under 60 s | GOING LIVE: `surface2`, a 2 dp live-red outline, a slow sweep | `ink3` | "Connected · getting viewers' picture ready" (routine)                                             |
+| Live              | confirmed, latched for the broadcast                                                               | LIVE, red                                                     | lime   | the state's own line: "Live. Sound and picture going out.", the backup link's, a court's Next line |
+| Live, unconfirmed | 60 s after the connect and still not confirmed                                                     | LIVE, red                                                     | lime   | "Viewers' picture not confirmed yet" (urgent, orange)                                              |
+| No source         | no playback URL and no programme phase                                                             | LIVE at once, as before                                       | lime   | as before                                                                                          |
+
+- **Confirmed** is whichever comes first: the server's `programmePhase === 'live'` (capture-beat.v1 `delivery`, §3,
+  `telemetry.server.programmePhase`) or the phone's own playlist check seeing new frames (DeliveryWatch, polled every
+  2 s; native's `telemetry.delivery === 'ok'`, which needs the head to advance in the variant). Only while frames
+  advance (publishing or degraded) does either count.
+- **The latch** is per broadcast sid (`latchViewers`, `src/domain/session/viewersConfirmed.ts`), folded over every
+  snapshot by one subscription per engine (`src/hooks/viewersLatch.ts`), so the viewfinder and Settings' plate read one
+  latch and a confirmation seen with Settings open is kept. Once confirmed it stays confirmed for the broadcast: a later
+  frozen programme, a quiet playlist or a reconnect is the existing Degraded and Reconnecting machinery's job (TROUBLE
+  and its line), not this one. A new sid, a court's next match included, proves itself again.
+- **The 60 s** is the snapshot's own report time less `sinceEpochMs` (the broadcast's first live time, which survives a
+  drop), read as a boolean (`selectConfirmLate`): no JS timer, and the HUD re-renders once when it turns (AGENTS §8).
+- **No source.** Native refuses a session without an https playback URL (`SessionConfig.problems`), so a fixture's or a
+  court's broadcast always has one and always goes through Going live; the no-source rule covers a broadcast with
+  neither a playback URL nor a programme phase, which reads LIVE at once with no warning, as before the ruling.
+- **The backup link** (#75, `selectBackupOnly`) reads Going live before confirmation, as the main link does, with the
+  Going live line; once confirmed it reads LIVE with its own line.
+- **Remote and console starts, rejoins and court codes** go through the same stages: the rule reads the snapshot, never
+  who started it.
+- **A process restart mid-broadcast** forgets the latch with native's own session. The rejoin connects, the plate reads
+  Going live, and turns LIVE at the first confirmation: the playlist check's first advance (two polls, about 4 s, once
+  Cloudflare serves the variant) or the first beat answer carrying `programmePhase: live`, whichever lands first. The
+  60 s counts from the rejoin's own connect.
+
+**The warning's tier is urgent.** "Viewers' picture not confirmed yet" asks the operator to do something, check the
+match page, which is the tier rule's test for urgent (`LINE_TIER`, owner 2026-10-08). As routine, a Not charging or Keep
+the app open caption would hide it, and a minute of a broadcast nobody may be seeing is worth more than either caption.
+It is drawn orange (`CAUTION_LINES`), caution, never red. Going live's own line is routine: it is plain progress, and a
+phone warning before the picture is confirmed is the more useful sentence.
+
+**Rejected:** keep the plate red at the connect and change only the line ("Live · confirming viewers' picture"). Red is
+read peripherally at two metres (AGENTS §5), the line at arm's length: a red plate would still tell a volunteer across
+the ground that viewers have the picture when nothing says so yet, which is the very lie the ruling removes.
 
 ## 4. Match Day nudge: JS
 
@@ -137,6 +185,6 @@ The web's wire, confirmed by the web side on 2026-11-24, is what this section an
 
 ## 7. Open questions (each with a recommendation)
 
-1. **Should the status line use the relay facts?** Closed: **no**. Diagnostics only (owner, 2026-11-24; §3). The facts never reach the status line or the HUD. The recommendation was "not yet", until the device test showed the facts were timely (relay beats are 5 s; facts older than 15 s are dropped).
+1. **Should the status line use the relay facts?** Closed: **no**. Diagnostics only (owner, 2026-11-24; §3). The facts never reach the status line or the HUD. The recommendation was "not yet", until the device test showed the facts were timely (relay beats are 5 s; facts older than 15 s are dropped). **Reopened and reversed for one fact on 2026-11-26** (owner, "build"; §3a): the programme phase `live` confirms the viewers' picture, and the plate reads Going live until it, or the phone's own playlist check, does.
 2. **Nudge socket while paired but waiting far from the start** (the 60 s cadence). Recommend **yes**: that is where it saves the most (up to 60 s to about 1 s), and the cost is one idle socket.
 3. **Match Day refresh while the list is open for hours.** Recommend refreshing at 80% of the TTL as above. The door is metered at 120 a minute per code, so this is well inside it.

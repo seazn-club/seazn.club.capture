@@ -1231,7 +1231,7 @@ reconnected at 17:55:28.8Z while Android had not validated the network yet, brok
 waited today's 2 s; validation came at 40.2. Viewers were back about 10 s later than they might have been.
 
 **So:** a connection made while the default network is not validated is provisional. Its break retries at once,
-within a flap bound of 3 a 30 s window spaced 1 s, with no step of the never-live ladder; the fallback count already
+within a flap bound of 3 in any 30 s (a sliding window) spaced 1 s, with no step of the never-live ladder; the fallback count already
 skipped it. The hold is not skipped: it is the platform's clock. Validation on the network the attempt was asked on
 confirms it with no reconnect; on another network, or with none known, it is replaced at once. The record says it with
 listed keys only: `connected {validated: false}`, `dropped {retryMs}`, `network-switched {reason: provisional}`.

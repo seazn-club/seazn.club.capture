@@ -73,6 +73,17 @@ class VendorLinesTest {
     assertEquals(listOf("VideoEncoder", "***", "***", "***"), lines.map { JSONObject(it).getString("tag") })
   }
 
+  @Test
+  fun `review of #79 - only AudioEncoder is rewritten - another Word(123) is still masked`() {
+    val lines =
+      recorded { vendor, _ ->
+        vendor.w("VideoEncoder(123)", "m", null)
+        vendor.w("Word(123)", "m", null)
+        vendor.w("audioencoder(123)", "m", null)
+      }
+    assertEquals(listOf("***", "***", "***"), lines.map { JSONObject(it).getString("tag") })
+  }
+
   /**
    * F-S4-1: StreamPack 3.2.1 has no public word that the camera device was lost; its `CameraUtils.openCamera`
    * logs it, and only it: `onDisconnected` warns "Camera $id has been disconnected", `onError` errs

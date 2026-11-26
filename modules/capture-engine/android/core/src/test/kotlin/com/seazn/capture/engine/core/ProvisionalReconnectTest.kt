@@ -201,6 +201,45 @@ class ProvisionalReconnectTest {
   }
 
   @Test
+  fun `review of #79 - a validated fact naming no network still confirms the provisional connection, with no reconnect`() {
+    // Asked while no network was known, so the validated report names none: there is no handle to replace it on.
+    val rig = provisional(network = null)
+    assertTrue(rig.onAir.provisional)
+    assertFalse(rig.send(Input.Network(true, null)).opens())
+    assertFalse(rig.onAir.provisional, "provisional always means not validated since it connected")
+    rig.send(Input.Dropped(2, DropReason.ENDPOINT_CLOSED, null))
+    assertEquals(rig.mono + SessionMachine.RETRY_MS, ((rig.phase as Phase.Connecting).step as ConnectStep.Waiting).connectAtMs)
+  }
+
+  @Test
+  fun `review of #79 Q1 - provisional connections that never publish a frame do not starve the hold - it ends on time`() {
+    val rig = provisional(Configs.descriptor(holdWindowSeconds = mapOf(Transport.SRT to 20, Transport.RTMPS to 20)))
+    rig.send(Input.Dropped(2, DropReason.ENDPOINT_CLOSED, null))
+    val hold = (rig.phase as Phase.Connecting).outage!!.hold
+    var drops = 1
+    while (rig.phase.session != null) {
+      check(rig.mono < hold.startedAtMs + 30_000) { "the hold never ended: ${rig.phase.name}" }
+      val phase = rig.phase
+      when {
+        phase is Phase.OnAir -> {
+          assertEquals(hold, phase.outage?.hold, "the hold is the first drop's, whatever the connects")
+          rig.send(Input.Dropped(phase.attemptId, DropReason.ENDPOINT_CLOSED, null))
+          drops++
+        }
+        phase is Phase.Connecting && phase.step is ConnectStep.Requested -> {
+          assertEquals(hold, phase.outage?.hold)
+          rig.send(Input.Connected((phase.step as ConnectStep.Requested).attemptId))
+        }
+      }
+      rig.advance(500, feeding = false)
+    }
+    assertIs<Phase.Paired>(rig.phase)
+    assertEquals(LastEnd.HOLD_WINDOW_EXPIRED, rig.phase.pairing?.lastEnd)
+    assertTrue(rig.mono - hold.startedAtMs in 20_000L..20_500L, "ended ${rig.mono - hold.startedAtMs} ms after the first drop")
+    assertTrue(drops > ProvisionalRetries.MAX_IMMEDIATE, "past the bound too: $drops drops")
+  }
+
+  @Test
   fun `a second validated report is idempotent`() {
     val rig = provisional()
     rig.send(Input.Network(true, cellular))
@@ -249,7 +288,7 @@ class ProvisionalReconnectTest {
       old.send(Input.Dropped(old.attempt!!, DropReason.ENDPOINT_CLOSED, null))
       old.send(Input.Connected(old.attempt!!))
     }
-    assertEquals(3, old.session.provisional.count)
+    assertEquals(3, old.session.provisional.recentAtMs.size)
     // The new process: the engine starts from Idle, and its network watch tells the default as it finds it.
     val rig = provisional()
     assertEquals(ProvisionalRetries(), rig.session.provisional)

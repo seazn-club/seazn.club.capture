@@ -455,8 +455,12 @@ internal object Transports {
    * already reads. It is no failure: the fallback policy never hears it.
    */
   fun network(phase: Phase, previous: Long?, handle: Long?, now: Now): Step {
-    val next = phase.withDefaultNetwork(handle)
-    if (handle == null || handle == previous) return Step(next)
+    val defaulted = phase.withDefaultNetwork(handle)
+    // N52, review of #79: every validated fact ends a provisional connection, so provisional always means connected and
+    // not validated since. One that names no network, or none new, confirms it here; any other is judged below.
+    val unjudged = handle == null || handle == previous
+    val next = if (unjudged && defaulted is Phase.OnAir && defaulted.provisional) defaulted.copy(provisional = false) else defaulted
+    if (unjudged) return Step(next)
     val session = next.session
     val asked = next is Phase.OnAir || (next as? Phase.Connecting)?.step is ConnectStep.Requested
     if (session == null || !asked) {

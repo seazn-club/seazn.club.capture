@@ -82,14 +82,18 @@ adapter changed.
 
 ## 4. The flap bound
 
-At most **3** immediate retries in a **30 s** window, which opens at the first of them, each asked at least **1 s**
-after the one before (`ProvisionalRetries`: `MAX_IMMEDIATE`, `WINDOW_MS`, `MIN_SPACING_MS`). Past the cap, a provisional
-break is today's: the 2 s wait on air, the never-live ladder before. A new window opens once 30 s have passed since the
-last one opened.
+At most **3** immediate retries in **any 30 s**, each asked at least **1 s** after the one before (`ProvisionalRetries`:
+`MAX_IMMEDIATE`, `WINDOW_MS`, `MIN_SPACING_MS`). The window slides: the bound keeps the last three retries' times, and a
+slot frees only when the oldest is 30 s old. A fixed window would let six fall across its edge (review of #79): retries
+at 0, 28, 29 and 30 s go, and 31 and 32 s do not. Past the cap, a provisional break is today's: the 2 s wait on air, the
+never-live ladder before.
+
+The hold is never starved by it: connects that publish no frame keep the first drop's outage and its hold, which ends
+the broadcast on time however many quick retries come between.
 
 Why: R-SAV6 broke twice in 6 s on a network that took about 21 s to validate, so three in 30 s covers that outage with
 one to spare. A second's spacing is more than SRT's connect took there (about 0.9 s), so two retries never overlap.
-The worst case on a network that never validates and breaks every socket at once is 3 quick retries every 30 s, the
+The worst case on a network that never validates and breaks every socket at once is 3 quick retries in any 30 s, the
 rest at today's pace. Kept per session and never stored: a new process starts a new session with an empty bound.
 
 Validation that flaps on one network causes no reconnect at all: a not-validated report never touches a connection,

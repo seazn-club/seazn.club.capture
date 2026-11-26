@@ -3,6 +3,7 @@ import { createAbsentCaptureEngine } from '@/engine/absentCaptureEngine';
 import { createFakeCaptureEngine, type FakeCaptureEngine } from '@/engine/FakeCaptureEngine';
 import { createNativeCaptureEngine, type NativeCaptureEngine } from '@/engine/nativeCaptureEngine';
 import type { CaptureEngineNative } from '@/engine/nativeModule';
+import { viewersLatchOf } from '@/hooks/viewersLatch';
 import {
   createRoutedRecord,
   recordGoesNative,
@@ -33,6 +34,14 @@ export function chooseEngine(input: {
   /** N38: native's pinned lines, for the ring to adopt ahead of its lines (`RingRecord.adoptPins`). */
   onRecordPins: (pins: readonly string[]) => void;
 }): WiredEngine {
+  const wired = wiredEngine(input);
+  // Owner, 2026-11-26: the viewers' picture latch is born with the engine, so it sees every snapshot from the first,
+  // whatever screen is drawn (PR #78 review).
+  viewersLatchOf(wired.engine);
+  return wired;
+}
+
+function wiredEngine(input: Parameters<typeof chooseEngine>[0]): WiredEngine {
   if (input.dev && input.fakeFlag === '1') {
     const fake = createFakeCaptureEngine(input.now);
     return { engine: fake, devEngine: fake, native: null };

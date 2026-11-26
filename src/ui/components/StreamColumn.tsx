@@ -53,7 +53,9 @@ export const StreamColumn = memo(function StreamColumn(props: ColumnProps) {
         <View style={styles.cell}>
           <TallyPlate plate={view.plate} />
         </View>
-        <View style={styles.cell}>{view.onAir ? <Elapsed /> : <AudioMeter />}</View>
+        <View style={styles.cell}>
+          {view.onAir ? <Elapsed pending={view.plate === 'goingLive'} /> : <AudioMeter />}
+        </View>
       </View>
       {view.onAir ? <AudioMeter /> : null}
       {view.action === 'goLive' ? (

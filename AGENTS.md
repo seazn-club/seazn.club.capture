@@ -351,7 +351,7 @@ take its palette rather than inventing a second dark theme for one company.
 | `ground` / `surface` / `surface2` | `#150b36` / `#1d1145` / `#241650` | `--mk-night`, `--mk-night-2`           | The board                                                                                                                                  |
 | `ink` / `ink2` / `ink3`           | `#f5f0e8` / 80% / `#b7aede`       | `--mk-cream`                           | Primary / secondary / inert                                                                                                                |
 | `lime`                            | `#9ae600`                         | `--sport-led`                          | The LED: elapsed clock, ready, hairlines                                                                                                   |
-| `live`                            | `#ef4444`                         | `--mk-live`                            | **ON AIR**                                                                                                                                 |
+| `live`                            | `#ef4444`                         | `--mk-live`                            | **ON AIR**: viewers' picture confirmed, or 60 s on (owner, 2026-11-26)                                                                     |
 | `caution`                         | `#fb923c`                         | `--mk-orange`                          | Degraded, fell back, thermal, and failures                                                                                                 |
 | `violet`                          | `#7c3aed`                         | `--mk-purple`                          | Brand. Decorative only — see below                                                                                                         |
 | `cardCaution` / `cardDismissal`   | `#d97706` / `#dc2626`             | `--sport-caution`, `--sport-dismissal` | The scoring pad's card icons, and nothing else: Remote Scoring has no broadcast, so red here is never ON AIR (owner ruling 56, 2026-11-04) |
@@ -362,9 +362,16 @@ Three rules travel with these tokens:
   `#150b36` and fails AA. The web flips primary buttons to a lime plate with
   night ink; so do we. Lime text _on night_ is correct and is what the scoring
   pad does — the web rule being "never lime on a light ground".
-- **Red means ON AIR**, following the broadcast tally convention the product's
-  own `--mk-live` already encodes. Nothing red is left for failures: a crash
-  reads orange, so it can never be mistaken for a live indicator.
+- **Red means ON AIR: viewers can see the picture** (owner, 2026-11-26:
+  "Red LIVE must mean viewers can see the picture"), following the broadcast
+  tally convention the product's own `--mk-live` already encodes. The plate
+  goes red when the viewers' picture is confirmed (the server's programme
+  phase `live`, or the phone's own playlist check seeing new frames), or 60 s
+  after the upload connected with nothing confirming it, beside an orange
+  "Viewers' picture not confirmed yet". Before that it reads GOING LIVE, a dark
+  plate with a red outline: red edges, never the red area (§6). Nothing red is
+  left for failures: a crash reads orange, so it can never be mistaken for a
+  live indicator.
   A broadcast carried by the backup link (RTMPS) and publishing cleanly reads
   LIVE, red, with the status line "Switched to backup link (RTMPS)" in its
   caution tone: the plate is TROUBLE only for real trouble (a reconnect, or any
@@ -506,6 +513,22 @@ Three rules travel with these tokens:
   scoring panel is titled with the answer's label ("Score A v B"), cut the same
   way, and hides when `selectCourtMatchKey` (the held sid, the match label and
   the next match) changes, so an answer for the old match is never shown.
+- **The tally plate reads GOING LIVE until the viewers' picture is confirmed**
+  (owner, 2026-11-26; realtime nudge spec §3a). When the upload connects the
+  plate is `surface2` with a 2 dp live-red outline and a slow sweep (a
+  Reanimated worklet; under reduced motion no sweep, the outline alone), the
+  clock counts in `ink3`, and the line says "Connected · getting viewers'
+  picture ready" (routine). Confirmed is the server's programme phase `live` or
+  the phone's playlist check seeing new frames, whichever comes first, latched
+  for the broadcast's sid (`viewersConfirmed.ts`, `viewersLatch.ts`): then red
+  LIVE, the lime clock and the state's own line. 60 s after the connect (the
+  snapshot's report less `sinceEpochMs`, never a JS timer) with nothing
+  confirming it, the plate is red LIVE and the line is "Viewers' picture not
+  confirmed yet", urgent and orange: it asks the operator to check the match
+  page. A broadcast with nothing that could confirm it (no playback URL and no
+  programme phase) is red at once, as before. The backup link, remote and
+  console starts, rejoins and court codes take the same stages; trouble stays
+  TROUBLE whatever the stage. Settings' LIVE plate reads the same latch.
 - Every QR carries the Seazn logo in the centre at error correction H
   (`src/domain/qr/seaznQr.ts`); the app draws it from a pure plan, at a whole
   number of dp per module. Nobody screenshots a QR; the app adds no screenshot

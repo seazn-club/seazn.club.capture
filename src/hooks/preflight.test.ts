@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SessionState } from '@/domain/session/SessionState';
+import type { AirStage } from '@/domain/session/viewersConfirmed';
 import type { NotReady, Readiness } from '@/domain/session/Pairing';
 import type { CameraState, EngineSnapshot } from '@/engine/CaptureEnginePort';
 import { IDLE_TELEMETRY } from '@/engine/unreported';
@@ -174,12 +175,28 @@ describe('the tally plate (spec §4, D14)', () => {
     expect(tallyPlateFor('connecting', true)).not.toBe('live');
   });
 
-  it('is red only for LIVE: red means on air (AGENTS §5)', () => {
+  // Owner, 2026-11-26: red LIVE means viewers can see the picture.
+  it.each<[string, SessionState['kind'], boolean, AirStage, TallyPlate]>([
+    ['connected, not yet confirmed', 'publishing', false, 'goingLive', 'goingLive'],
+    ['confirmed', 'publishing', false, 'live', 'live'],
+    ['60 s and still not confirmed', 'publishing', false, 'unconfirmed', 'live'],
+    ['the backup link, before confirmation', 'degraded', true, 'goingLive', 'goingLive'],
+    ['the backup link, confirmed', 'degraded', true, 'live', 'live'],
+    ['the backup link, 60 s unconfirmed', 'degraded', true, 'unconfirmed', 'live'],
+    ['trouble is trouble, confirmed or not', 'degraded', false, 'goingLive', 'trouble'],
+    ['a reconnect is trouble, confirmed or not', 'reconnecting', false, 'goingLive', 'trouble'],
+    ['connecting is before air', 'connecting', false, 'goingLive', 'connecting'],
+  ])('reads %s', (_name, kind, backupOnly, stage, plate) => {
+    expect(tallyPlateFor(kind, true, backupOnly, stage)).toBe(plate);
+  });
+
+  it('is red only for LIVE: red means the viewers’ picture is confirmed, or 60 s gone (AGENTS §5)', () => {
     const plates: TallyPlate[] = [
       'starting',
       'notReady',
       'ready',
       'connecting',
+      'goingLive',
       'live',
       'trouble',
       'ended',
@@ -194,6 +211,7 @@ describe('the tally plate (spec §4, D14)', () => {
     ['notReady', 'inert'],
     ['ready', 'healthy'],
     ['connecting', 'inert'],
+    ['goingLive', 'going'],
     ['live', 'live'],
     ['trouble', 'degraded'],
     ['ended', 'inert'],

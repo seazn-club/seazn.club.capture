@@ -1,6 +1,6 @@
 import { StyleSheet } from 'react-native';
 import { Text } from '@/ui/components/Text';
-import { layout } from '@/ui/theme/tokens';
+import { colour, layout } from '@/ui/theme/tokens';
 import { typeScale, type TypeRole } from '@/ui/theme/type';
 
 /** Home's three lines, which the `status` reservation below is made for (a token: homeFit.test.ts adds them up). */
@@ -12,6 +12,8 @@ type StatusLineProps = {
   readonly variant?: Extract<TypeRole, 'status' | 'body'>;
   /** The lines it may take before it ellipsises: Home's three, or the strip's `messageLines` (one). */
   readonly numberOfLines?: number;
+  /** `caution`: orange, a line that asks the operator to check something (the 60 s viewers' picture warning). */
+  readonly tone?: 'plain' | 'caution';
 };
 
 /**
@@ -25,9 +27,15 @@ export function StatusLine({
   children,
   variant = 'status',
   numberOfLines = HOME_LINES,
+  tone = 'plain',
 }: StatusLineProps) {
   return (
-    <Text variant={variant} numberOfLines={numberOfLines} style={STYLE[variant]}>
+    <Text
+      variant={variant}
+      numberOfLines={numberOfLines}
+      testID="status-line"
+      style={tone === 'caution' ? CAUTION[variant] : STYLE[variant]}
+    >
       {children}
     </Text>
   );
@@ -48,6 +56,12 @@ const styles = StyleSheet.create({
   body: {
     minHeight: layout.messageLines * typeScale.body.lineHeight,
   },
+  // Orange, never red: red means ON AIR (AGENTS §5).
+  caution: { color: colour.caution },
 });
 
 const STYLE = { status: styles.status, body: styles.body } as const;
+const CAUTION = {
+  status: [styles.status, styles.caution],
+  body: [styles.body, styles.caution],
+} as const;

@@ -1,6 +1,7 @@
 import { NO_NAME, type CodeName } from '@/domain/mode/codeName';
 import type { EngineStatus } from '@/domain/mode/reopen';
 import { roundLine } from '@/domain/session/stageLine';
+import { pastConfirmWindow, type ViewersFacts } from '@/domain/session/viewersConfirmed';
 import type { EngineSnapshot } from '@/engine/CaptureEnginePort';
 
 /**
@@ -67,6 +68,40 @@ export const selectStateKind = (snapshot: EngineSnapshot) => snapshot.state.kind
  */
 export const selectBackupOnly = (snapshot: EngineSnapshot) =>
   snapshot.state.kind === 'degraded' && snapshot.state.reason === 'fell-back-to-rtmps';
+/**
+ * What this snapshot says about the viewers' picture (owner, 2026-11-26), for the latch (`viewersLatch.ts`) to fold:
+ * the held sid, the upload connected (publishing or degraded: native's LIVE gate, frames advancing), the server's
+ * programme phase `live` (T46's facts) and the phone's playlist check seeing new frames (native's `delivery: ok`,
+ * DeliveryWatch). A new object each call: one-off reads only, never `useEngineSelector`.
+ */
+export function viewersFactsOf(snapshot: EngineSnapshot): ViewersFacts {
+  const kind = snapshot.state.kind;
+  return {
+    sid: snapshot.broadcast?.sid ?? null,
+    onAir: kind === 'publishing' || kind === 'degraded',
+    programmeLive: snapshot.telemetry.server?.programmePhase === 'live',
+    playlistFresh: snapshot.telemetry.delivery === 'ok',
+    late: selectConfirmLate(snapshot),
+  };
+}
+/**
+ * Something could confirm the viewers' picture of this broadcast: a playback URL for the phone's playlist check, or a
+ * programme phase from the server. With neither the plate reads LIVE at once, as before the ruling (owner, 2026-11-26).
+ * No real broadcast has neither today: native refuses a session without an https playbackUrl (`SessionConfig.problems`).
+ */
+export const selectConfirmSource = (snapshot: EngineSnapshot): boolean =>
+  (snapshot.broadcast?.playbackUrl ?? '') !== '' ||
+  (snapshot.telemetry.server?.programmePhase ?? null) !== null;
+/**
+ * The upload connected 60 s or more ago, by native's own clock: its report's time less the time the broadcast first
+ * went live (`sinceEpochMs`, which survives a drop). From the snapshot, never a timer of ours (AGENTS §8); a boolean,
+ * so it re-renders once, when it turns. Both times are native's wall clock (`Now.wallMs`: `reportedAtMs` in
+ * `Projection.snapshot`, `liveSinceEpochMs` in `SessionMachine`), so the subtraction is one clock's.
+ */
+export const selectConfirmLate = (snapshot: EngineSnapshot): boolean => {
+  const since = selectSinceEpochMs(snapshot);
+  return pastConfirmWindow(since === null ? null : snapshot.reportedAtMs - since);
+};
 export const selectBitrateKbps = (snapshot: EngineSnapshot) => snapshot.telemetry.bitrateKbps;
 export const selectAudioLevel = (snapshot: EngineSnapshot) => snapshot.telemetry.audioLevel;
 export const selectShed = (snapshot: EngineSnapshot) => snapshot.telemetry.shed;

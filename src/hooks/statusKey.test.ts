@@ -5,6 +5,8 @@ import type { CameraState, EngineSnapshot, Telemetry } from '@/engine/CaptureEng
 import { createFakeCaptureEngine } from '@/engine/FakeCaptureEngine';
 import { IDLE_TELEMETRY } from '@/engine/unreported';
 import {
+  airLineKey,
+  CAUTION_LINES,
   columnLineKey,
   selectHoldRemaining,
   selectHoldWindow,
@@ -565,6 +567,8 @@ describe('Back’s line on air (ruling I2)', () => {
     'stream.status.goingLiveOrganiser',
     'stream.status.goingLiveMatch',
     'stream.status.rejoining',
+    // Owner, 2026-11-26: Going live's line is plain progress, as Live is.
+    'stream.status.viewersPending',
   ] as const)('stands in for the calm line %s', (key) => {
     expect(columnLineKey(key, true)).toBe('stream.leaveOnAir');
   });
@@ -584,14 +588,18 @@ describe('Back’s line on air (ruling I2)', () => {
     'stream.status.rejoinRetrying',
     'stream.status.startRetrying',
     'stream.status.notReadyHeld',
+    // Owner, 2026-11-26: 60 s with the viewers' picture not confirmed asks the operator to look.
+    'stream.status.viewersUnconfirmed',
   ] as const)('is outranked by the fault line %s', (key) => {
     expect(columnLineKey(key, true)).toBe(key);
   });
 
   // N2: built from the dictionary, so a status line added later is covered
-  // without anyone remembering this list. Only the seven calm lines yield: the five, and a court's two Next lines on air.
+  // without anyone remembering this list. Only the eight calm lines yield: the five, a court's two Next lines on air,
+  // and Going live's (owner, 2026-11-26).
   it('is outranked by every other status line in the dictionary', () => {
     const calm = [
+      'stream.status.viewersPending',
       'stream.status.connecting',
       'stream.status.live',
       'stream.status.goingLiveOrganiser',
@@ -611,5 +619,59 @@ describe('Back’s line on air (ruling I2)', () => {
 
   it('is not shown without a refused Back', () => {
     expect(columnLineKey('stream.status.live', false)).toBe('stream.status.live');
+  });
+});
+
+/**
+ * Owner, 2026-11-26: red LIVE means viewers can see the picture. Until the picture is confirmed the on-air line says
+ * the phone is connected and the picture is being got ready; 60 s on with nothing confirming it, it says so. The keys
+ * are written out here, never read from the rule.
+ */
+describe('the viewers’ picture line (owner, 2026-11-26)', () => {
+  it.each([
+    ['stream.status.live'],
+    ['stream.status.courtNext'],
+    ['stream.status.courtNextAt'],
+    // The backup link reads Going live too, before confirmation, as on the main link.
+    ['stream.status.fellBack'],
+  ] as const)('stands in for %s while the picture is being confirmed, and after 60 s', (key) => {
+    expect(airLineKey(key, 'goingLive')).toBe('stream.status.viewersPending');
+    expect(airLineKey(key, 'unconfirmed')).toBe('stream.status.viewersUnconfirmed');
+    expect(airLineKey(key, 'live')).toBe(key);
+  });
+
+  it.each([
+    ['stream.status.cameraReopening'],
+    ['stream.status.cameraTaken'],
+    ['stream.status.weakSignal'],
+    ['stream.status.notDelivered'],
+    ['stream.status.micSilenced'],
+    ['stream.status.holding'],
+    ['stream.status.connecting'],
+    ['stream.status.engineSilent'],
+  ] as const)('never stands in for %s', (key) => {
+    expect(airLineKey(key, 'goingLive')).toBe(key);
+    expect(airLineKey(key, 'unconfirmed')).toBe(key);
+  });
+
+  it('says it in every language, from the dictionary', () => {
+    const lines = Object.fromEntries(
+      (['en', 'es', 'fr', 'nl'] as const).map((lang) => {
+        const { t } = createTranslator(lang);
+        return [lang, [t('stream.status.viewersPending'), t('stream.status.viewersUnconfirmed')]];
+      }),
+    );
+    expect(lines).toEqual({
+      en: [en['stream.status.viewersPending'], en['stream.status.viewersUnconfirmed']],
+      es: [es['stream.status.viewersPending'], es['stream.status.viewersUnconfirmed']],
+      fr: [fr['stream.status.viewersPending'], fr['stream.status.viewersUnconfirmed']],
+      nl: [nl['stream.status.viewersPending'], nl['stream.status.viewersUnconfirmed']],
+    });
+    expect(en['stream.status.viewersPending']).toBe("Connected · getting viewers' picture ready");
+    expect(en['stream.status.viewersUnconfirmed']).toBe("Viewers' picture not confirmed yet");
+  });
+
+  it('colours only the 60 s warning as a caution', () => {
+    expect([...CAUTION_LINES]).toEqual(['stream.status.viewersUnconfirmed']);
   });
 });

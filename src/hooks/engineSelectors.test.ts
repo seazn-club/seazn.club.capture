@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { EngineStatus } from '@/domain/mode/reopen';
 import type { SessionState } from '@/domain/session/SessionState';
 import type { BroadcastInfo, PairingInfo, Unpaired } from '@/domain/session/Pairing';
-import type { EngineSnapshot, Telemetry } from '@/engine/CaptureEnginePort';
+import type { EngineSnapshot, ServerFacts, Telemetry } from '@/engine/CaptureEnginePort';
 import { FAKE_PAIRING } from '@/engine/FakeCaptureEngine';
 import { IDLE_TELEMETRY } from '@/engine/unreported';
 import { toEngineSnapshot } from '@/engine/snapshotWire';
@@ -12,6 +12,9 @@ import {
   METER_SEGMENTS,
   selectBackupOnly,
   selectBitrateKbps,
+  selectConfirmLate,
+  selectConfirmSource,
+  viewersFactsOf,
   selectEngineStatus,
   selectHeldCode,
   selectHeldName,
@@ -545,5 +548,113 @@ describe('selectBackupOnly: degraded for the fall to RTMPS alone (owner, 2026-11
     ],
   ])('%s: %s', (_name, state, expected) => {
     expect(selectBackupOnly(snapshot(state))).toBe(expected);
+  });
+});
+
+/** T46's facts with only the programme phase known. */
+const serverSays = (programmePhase: ServerFacts['programmePhase']): ServerFacts => ({
+  relayOutput: null,
+  programmePhase,
+  fps: null,
+  kbps: null,
+  cameraIngest: null,
+  programmeIngest: null,
+  ageS: 0,
+});
+
+describe('the viewers’ picture selectors (owner, 2026-11-26)', () => {
+  const held = { pairing: FAKE_PAIRING, broadcast: BROADCAST };
+
+  it('read the sid, the connect, the programme phase and the playlist check', () => {
+    expect(viewersFactsOf(snapshot(LIVE, {}, held))).toEqual({
+      sid: 'fake-sid-1',
+      onAir: true,
+      programmeLive: false,
+      playlistFresh: false,
+      late: false,
+    });
+    expect(
+      viewersFactsOf(snapshot(LIVE, { delivery: 'ok', server: serverSays('live') }, held)),
+    ).toEqual({
+      sid: 'fake-sid-1',
+      onAir: true,
+      programmeLive: true,
+      playlistFresh: true,
+      late: false,
+    });
+  });
+
+  it.each<[string, SessionState, boolean]>([
+    ['publishing', LIVE, true],
+    [
+      'degraded (the backup link)',
+      { kind: 'degraded', transport: 'rtmps', reason: 'fell-back-to-rtmps', sinceEpochMs: NOW },
+      true,
+    ],
+    ['connecting', { kind: 'connecting', transport: 'srt' }, false],
+    [
+      'reconnecting',
+      {
+        kind: 'reconnecting',
+        cause: 'uplink-lost',
+        holdRemainingSeconds: 30,
+        holdWindowSeconds: 60,
+        sinceEpochMs: NOW,
+      },
+      false,
+    ],
+    ['armed', ARMED, false],
+  ])('call the upload connected only while frames advance: %s', (_name, state, onAir) => {
+    expect(viewersFactsOf(snapshot(state, {}, held)).onAir).toBe(onAir);
+  });
+
+  it.each<[ServerFacts['programmePhase']]>([
+    ['waiting'],
+    ['frozen'],
+    ['reconnecting'],
+    ['final'],
+    [null],
+  ])('read only `live` as the programme confirmed: %s is not', (phase) => {
+    const facts = viewersFactsOf(snapshot(LIVE, { server: serverSays(phase) }, held));
+    expect(facts.programmeLive).toBe(false);
+  });
+
+  it.each<[Telemetry['delivery']]>([['stalled'], ['unknown']])(
+    'read only `ok` as the playlist fresh: %s is not',
+    (delivery) => {
+      expect(viewersFactsOf(snapshot(LIVE, { delivery }, held)).playlistFresh).toBe(false);
+    },
+  );
+
+  it('read no sid with no broadcast held, and no facts with no server answer', () => {
+    expect(viewersFactsOf(snapshot(PAIRED, {}, { pairing: FAKE_PAIRING })).sid).toBeNull();
+    expect(viewersFactsOf(snapshot(LIVE, { server: null }, held)).programmeLive).toBe(false);
+  });
+
+  it('have a source with a playback URL, or with a programme phase alone, and none with neither', () => {
+    expect(selectConfirmSource(snapshot(LIVE, {}, held))).toBe(true);
+    const noUrl = { pairing: FAKE_PAIRING, broadcast: { ...BROADCAST, playbackUrl: '' } };
+    expect(selectConfirmSource(snapshot(LIVE, { server: serverSays('waiting') }, noUrl))).toBe(
+      true,
+    );
+    expect(selectConfirmSource(snapshot(LIVE, { server: serverSays(null) }, noUrl))).toBe(false);
+    expect(selectConfirmSource(snapshot(LIVE, {}, noUrl))).toBe(false);
+    expect(selectConfirmSource(snapshot(LIVE))).toBe(false);
+  });
+
+  it.each<[string, number, boolean]>([
+    ['at the connect', 0, false],
+    ['59 s on', 59_000, false],
+    ['59.999 s on', 59_999, false],
+    ['60 s on', 60_000, true],
+    ['ten minutes on', 600_000, true],
+  ])('turn late 60 s after the upload connected, by the report’s own time: %s', (_n, on, late) => {
+    const state: SessionState = { kind: 'publishing', transport: 'srt', sinceEpochMs: NOW - on };
+    expect(selectConfirmLate(snapshot(state, {}, held))).toBe(late);
+  });
+
+  it('are never late off air', () => {
+    const connecting: SessionState = { kind: 'connecting', transport: 'srt' };
+    expect(selectConfirmLate(snapshot(connecting, {}, held))).toBe(false);
   });
 });

@@ -260,7 +260,7 @@ describe('the clock cell holds the clock at its widest', () => {
     expect(clockWidth(formatElapsed(100 * 3600 * 1000))).toBeGreaterThan(layout.clockCell);
   });
 
-  it('the plate’s words fit the cell beside it, in the cell the half gives: 7 plates × 4 languages', () => {
+  it('the plate’s words fit the cell beside it, in the cell the half gives: 8 plates × 4 languages', () => {
     const CELL = (CONTENT - GAP) / 2;
     expect(CELL).toBe(layout.clockCell);
     let checked = 0;
@@ -271,14 +271,17 @@ describe('the clock cell holds the clock at its widest', () => {
         'notReady',
         'ready',
         'connecting',
+        'goingLive',
         'live',
         'trouble',
         'ended',
       ] as const) {
         const text = (dictionary as Dictionary)[`stream.tally.${plate}`] ?? '';
+        // Going live's red outline is inside the plate (owner's mock, 2026-11-26): its word has that much less room.
+        const outline = plate === 'goingLive' ? 2 * layout.plateOutline : 0;
         // The plate may take a second line (its minHeight is 56 against two 17 dp lines), so each WORD must fit.
         for (const piece of wordsOf(text)) {
-          const width = stateWidth(piece) + 2 * space.sm;
+          const width = stateWidth(piece) + 2 * space.sm + outline;
           widest = Math.max(widest, width);
           expect({ lang, plate, piece, fits: width <= CELL }).toEqual({
             lang,
@@ -290,7 +293,7 @@ describe('the clock cell holds the clock at its widest', () => {
         checked += 1;
       }
     }
-    expect(checked).toBe(28);
+    expect(checked).toBe(32);
     expect(widest).toBeGreaterThan(0);
   });
 });

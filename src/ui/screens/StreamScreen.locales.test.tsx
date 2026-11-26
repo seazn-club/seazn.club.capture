@@ -137,9 +137,9 @@ describe('the paired and starting lines read in every language', () => {
 
 describe('no screen in any state shows a raw key (AGENTS §10, question 4)', () => {
   // Review M3: an empty table registers no case and passes. Update the counts
-  // when a scene or a sub-state is added: 4 languages × 25 scenes, × 6 sub-states.
+  // when a scene or a sub-state is added: 4 languages × 26 scenes (going-live, 2026-11-26), × 6 sub-states.
   it('sweeps every scene and every sub-state, in every language', () => {
-    expect(SCENE_CASES).toHaveLength(100);
+    expect(SCENE_CASES).toHaveLength(104);
     expect(SUB_STATE_CASES).toHaveLength(24);
   });
 

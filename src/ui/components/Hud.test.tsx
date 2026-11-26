@@ -30,6 +30,7 @@ const TOKEN = StyleSheet.create({
   caution: { backgroundColor: colour.caution },
   unlit: { backgroundColor: colour.surface2 },
   surface: { backgroundColor: colour.surface },
+  going: { backgroundColor: plateColour.going },
 });
 
 function paintOf(style: ViewStyle): string {
@@ -122,6 +123,57 @@ describe('TallyPlate', () => {
     renderWithPorts(<TallyPlate plate="live" />, { deviceLanguages: ['fr'] });
     expect(screen.getByTestId('tally-plate').textContent).toBe('En direct');
   });
+
+  // Owner, 2026-11-26: Going live is the dark plate with a red outline and a slow sweep; red fill is LIVE alone.
+  describe('Going live', () => {
+    it('reads its word in each language, from the dictionary', () => {
+      for (const [lang, word] of [
+        ['en', 'Going live'],
+        ['es', 'Lanzando'],
+        ['fr', 'Lancement'],
+        ['nl', 'Gaat live'],
+      ] as const) {
+        const view = renderWithPorts(<TallyPlate plate="goingLive" />, { deviceLanguages: [lang] });
+        expect({ lang, word: screen.getByTestId('tally-plate').textContent }).toEqual({
+          lang,
+          word,
+        });
+        view.unmount();
+      }
+      expect(en['stream.tally.goingLive']).toBe('Going live');
+    });
+
+    it('is painted surface2, never the live red, and outlined in live red', () => {
+      renderWithPorts(<TallyPlate plate="goingLive" />);
+      const plate = screen.getByTestId('tally-plate');
+      expect(backgroundOf(plate)).toBe(paintOf(TOKEN.going));
+      expect(backgroundOf(plate)).not.toBe(paintOf(TOKEN.live));
+      expect(getComputedStyle(plate).borderTopColor).toBe(inkOf({ color: plateColour.goingEdge }));
+      expect(getComputedStyle(plate).borderTopWidth).toBe(`${layout.plateOutline}px`);
+    });
+
+    it('sets its word in cream, as the inert plate does', () => {
+      renderWithPorts(<TallyPlate plate="goingLive" />);
+      expect(getComputedStyle(screen.getByText('Going live')).color).toBe(inkOf(INK.onInert));
+    });
+
+    it('draws the sweep, and no other plate does', () => {
+      const view = renderWithPorts(<TallyPlate plate="goingLive" />);
+      expect(screen.getByTestId('plate-sweep')).toBeTruthy();
+      for (const plate of ['live', 'connecting', 'trouble', 'ready'] as const) {
+        view.rerender(<TallyPlate plate={plate} />);
+        expect({ plate, sweep: screen.queryByTestId('plate-sweep') }).toEqual({
+          plate,
+          sweep: null,
+        });
+      }
+    });
+
+    it('is as tall as the fit reserves for it (56 dp): its outline is inside the plate', () => {
+      renderWithPorts(<TallyPlate plate="goingLive" />);
+      expect(getComputedStyle(screen.getByTestId('tally-plate')).minHeight).toBe('56px');
+    });
+  });
 });
 
 describe('LivePlate (beside Back on Settings)', () => {
@@ -164,6 +216,17 @@ describe('LivePlate (beside Back on Settings)', () => {
     const view = renderWithPorts(<LivePlate />);
     act(() => view.engine.scene('connecting'));
     expect(backgroundOf(screen.getByTestId('tally-plate'))).toBe(paintOf(TOKEN.inert));
+  });
+
+  // Owner, 2026-11-26: Settings' plate reads the viewfinder's latch, so the two never disagree.
+  it('reads Going live until the viewers’ picture is confirmed, then LIVE, and stays LIVE', () => {
+    const view = renderWithPorts(<LivePlate />);
+    act(() => view.engine.scene('going-live'));
+    expect(screen.getByTestId('tally-plate').textContent).toBe('Going live');
+    act(() => view.engine.patch({ delivery: 'ok' }));
+    expect(screen.getByTestId('tally-plate').textContent).toBe('Live');
+    act(() => view.engine.patch({ delivery: 'unknown' }));
+    expect(screen.getByTestId('tally-plate').textContent).toBe('Live');
   });
 });
 
@@ -240,6 +303,20 @@ describe('Elapsed', () => {
     clock.mockClear();
     act(() => vi.advanceTimersByTime(5000));
     expect(clock).not.toHaveBeenCalled();
+  });
+
+  // Owner's mock, 2026-11-26: the clock counts in lilac while the plate reads Going live, lime once it is LIVE.
+  it('counts in ink3 while pending, and in the lime LED otherwise', () => {
+    const view = renderElapsed();
+    act(() => view.engine.scene('live'));
+    expect(getComputedStyle(screen.getByTestId('elapsed')).color).toBe(
+      inkOf({ color: colour.lime }),
+    );
+    view.rerender(<Elapsed pending />);
+    expect(getComputedStyle(screen.getByTestId('elapsed')).color).toBe(
+      inkOf({ color: colour.ink3 }),
+    );
+    expect(screen.getByText('0:12:34')).toBeTruthy();
   });
 
   it('counts a second broadcast from its own start', () => {

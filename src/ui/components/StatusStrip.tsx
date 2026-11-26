@@ -20,6 +20,8 @@ type StatusStripProps = {
    * stream, Back's "hold Stop") always wins the one message line; a ROUTINE one gives way to a caption.
    */
   readonly lineTier: LineTier;
+  /** The status line is a caution: orange, the 60 s viewers' picture warning (owner, 2026-11-26). */
+  readonly lineCaution?: boolean;
   /** The one caption at a time (`topAdvisory`), or none. */
   readonly advisory: Advisory | null;
   /**
@@ -44,6 +46,7 @@ type StatusStripProps = {
 export const StatusStrip = memo(function StatusStrip({
   line,
   lineTier,
+  lineCaution = false,
   advisory,
   onLabelHeight,
 }: StatusStripProps) {
@@ -62,7 +65,11 @@ export const StatusStrip = memo(function StatusStrip({
             {t(ADVISORY_KEY[advisory])}
           </Text>
         ) : (
-          <StatusLine variant="body" numberOfLines={layout.messageLines}>
+          <StatusLine
+            variant="body"
+            numberOfLines={layout.messageLines}
+            tone={lineCaution ? 'caution' : 'plain'}
+          >
             {line}
           </StatusLine>
         )}

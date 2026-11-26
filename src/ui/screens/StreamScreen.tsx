@@ -1,7 +1,7 @@
 import { StyleSheet, View } from 'react-native';
 import { cutDestination } from '@/domain/session/destination';
 import { cutNextLabel } from '@/domain/session/nextLine';
-import { columnLineKey, LINE_TIER, type LineTier } from '@/hooks/statusKey';
+import { CAUTION_LINES, columnLineKey, LINE_TIER, type LineTier } from '@/hooks/statusKey';
 import { useT } from '@/hooks/useLanguage';
 import { useEndedToHome } from '@/hooks/useEndedNotice';
 import { useBackCloses } from '@/hooks/useBackCloses';
@@ -116,6 +116,7 @@ function TwoHalves(props: HalvesProps & { readonly viewer: ViewerCheckView | nul
       <StreamStage
         line={line.text}
         lineTier={line.tier}
+        lineCaution={line.caution}
         viewer={viewer}
         scoring={scoring.view}
         scoringSecondsLeft={scoring.secondsLeft}
@@ -135,7 +136,7 @@ function TwoHalves(props: HalvesProps & { readonly viewer: ViewerCheckView | nul
   );
 }
 
-type ColumnLine = { readonly text: string; readonly tier: LineTier };
+type ColumnLine = { readonly text: string; readonly tier: LineTier; readonly caution: boolean };
 
 /**
  * The one true sentence: the status line, or Back's refusal over a calm one
@@ -154,7 +155,7 @@ function useColumnLine(view: Viewfinder, blocked: boolean): ColumnLine {
     time: view.nextAt ?? '',
   };
   const key = columnLineKey(view.statusKey, blocked);
-  return { text: t(key, vars), tier: LINE_TIER[key] };
+  return { text: t(key, vars), tier: LINE_TIER[key], caution: CAUTION_LINES.has(key) };
 }
 
 const styles = StyleSheet.create({

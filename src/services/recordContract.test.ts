@@ -142,7 +142,8 @@ describe('the record contract’s keys', () => {
   });
 
   // The one never key the contract still lists: the web admits a stream's watch URL on a line, the app never
-  // writes one (owner, 2026-11-26), so the key is kept in the contract and refused on this side.
+  // writes one (owner, 2026-11-26), so the key is kept in the contract and refused on this side. It must stay listed: a masked `***` under an
+  // unlisted key is an unknown key, and the server closes the pair window on one.
   const WEB_ONLY_KEYS = ['playbackUrl'];
 
   it('lists no never key but the web-only ones', () => {

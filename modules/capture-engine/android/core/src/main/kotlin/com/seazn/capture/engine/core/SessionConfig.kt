@@ -40,19 +40,24 @@ class SessionConfig(
     listOfNotNull(primary, fallback).firstOrNull { it.transport == transport }
 
   /**
-   * What the record says of the watch URL instead of the URL (owner, 2026-11-26): its host and the last
-   * six characters of the stream id before `/manifest`, under the contract's own `host` and `tag` keys.
-   * Whether a bare URL plays without a token is the web's signed-URL setting, which the phone cannot
-   * see, so the URL itself is never written. Nothing that fits a plain word (`[A-Za-z0-9_.:-]{1,64}`)
-   * yields no field at all.
+   * What the record says of the watch URL instead of the URL (owner, 2026-11-26): its host and a tag,
+   * under the contract's own `host` and `tag` keys. Whether a bare URL plays without a token is the web's
+   * signed-URL setting, which the phone cannot see, so the URL itself is never written.
+   *
+   * The tag is the first six hex characters of SHA-256 of the stream's uid (the path segment before
+   * `/manifest`), never the uid's own characters: the uid is also the SRT stream id, a secret (controller,
+   * 2026-11-26). The server can match it by hashing a uid it holds. Only a 32-character lowercase hex uid
+   * is tagged; any other segment (a signed URL puts a JWT there) gives neither field, since a slice of it
+   * could be part of a signature.
    */
   fun playbackTag(): List<Pair<String, String>> {
     val uri = runCatching { java.net.URI(playbackUrl) }.getOrNull() ?: return emptyList()
     val host = uri.host?.takeIf { PLAIN_WORD.matches(it) } ?: return emptyList()
     val segments = (uri.path ?: "").split('/').filter { it.isNotEmpty() }
-    val id = segments.getOrNull(segments.indexOf("manifest") - 1)?.takeIf { segments.indexOf("manifest") > 0 } ?: return emptyList()
-    val tail = id.takeLast(6)
-    return if (PLAIN_WORD.matches(tail)) listOf("host" to host, "tag" to tail) else emptyList()
+    val at = segments.indexOf("manifest")
+    val uid = segments.getOrNull(at - 1)?.takeIf { at > 0 && UID.matches(it) } ?: return emptyList()
+    val digest = java.security.MessageDigest.getInstance("SHA-256").digest(uid.toByteArray(Charsets.UTF_8))
+    return listOf("host" to host, "tag" to digest.joinToString("") { "%02x".format(it) }.take(6))
   }
 
   /** Values the record must never carry, whatever key they arrive under. Blank ones are no secret. */
@@ -96,5 +101,6 @@ class SessionConfig(
 
   private companion object {
     val PLAIN_WORD = Regex("^[A-Za-z0-9_.:-]{1,64}$")
+    val UID = Regex("^[0-9a-f]{32}$")
   }
 }

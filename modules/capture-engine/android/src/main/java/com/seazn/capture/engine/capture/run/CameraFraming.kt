@@ -2,6 +2,8 @@ package com.seazn.capture.engine.capture.run
 
 import com.seazn.capture.engine.core.CameraTouch
 import com.seazn.capture.engine.core.MeterPoint
+import com.seazn.capture.engine.core.Pan
+import com.seazn.capture.engine.core.PanCentre
 import com.seazn.capture.engine.core.PairRequest
 import com.seazn.capture.engine.core.RecordEntry
 import com.seazn.capture.engine.core.Zoom
@@ -25,6 +27,10 @@ class CameraFraming(private val parts: CaptureParts, private val line: (RecordEn
   private var camera: String? = null
 
   private var ratio = Zoom.DEFAULT
+
+  /** Where the zoomed crop is centred (spec §3.5); the middle at 1x. */
+  private var centre = Pan.CENTRE
+
   private var point: MeterPoint? = null
 
   /** The camera whose open was last accepted, until a new open is asked, a busy word or a loss is heard, or the release. */
@@ -32,6 +38,9 @@ class CameraFraming(private val parts: CaptureParts, private val line: (RecordEn
 
   /** The ignored lines said in this opening, by gesture and reason: one each. */
   private val ignoredSaid = mutableSetOf<Pair<String, String>>()
+
+  /** A pinch has moved the ratio since the last gesture ended. */
+  private var reframed = false
 
   /** Whether this broadcast's zoom line is written. */
   private var aired = false
@@ -44,11 +53,12 @@ class CameraFraming(private val parts: CaptureParts, private val line: (RecordEn
     val zoomed = ratio != Zoom.DEFAULT
     val pointed = point != null
     ratio = Zoom.DEFAULT
+    centre = Pan.CENTRE
     point = null
     camera = id
     if (id == null) return
-    if (zoomed) guarded("zoom") { parts.zoom(id, Zoom.DEFAULT) }
-    if (pointed) guarded("metering") { parts.meter(id, null, frameDegrees) }
+    if (zoomed) guarded("zoom") { parts.pan(id, Zoom.DEFAULT, Pan.CENTRE, frameDegrees) }
+    if (pointed) guarded("metering") { parts.meter(id, null, frameDegrees, Zoom.DEFAULT, Pan.CENTRE) }
   }
 
   /** StreamPack reported camera [cameraId] open, and the run accepted it. Its own camera gets back what it had. */
@@ -57,11 +67,12 @@ class CameraFraming(private val parts: CaptureParts, private val line: (RecordEn
     if (camera != cameraId) {
       camera = cameraId
       ratio = Zoom.DEFAULT
+      centre = Pan.CENTRE
       point = null
       return
     }
-    if (ratio != Zoom.DEFAULT) guarded("zoom") { parts.zoom(cameraId, ratio) }
-    point?.let { guarded("metering") { parts.meter(cameraId, it, frameDegrees) } }
+    if (ratio != Zoom.DEFAULT) guarded("zoom") { framed(cameraId, frameDegrees) }
+    point?.let { guarded("metering") { parts.meter(cameraId, it, frameDegrees, ratio, centre) } }
   }
 
   /** A new open is asked ([cameraId] null), or camera [cameraId] was lost or met another app's hold: nothing is open. */
@@ -91,34 +102,74 @@ class CameraFraming(private val parts: CaptureParts, private val line: (RecordEn
   suspend fun touch(touch: CameraTouch, frameDegrees: Int) {
     when (touch) {
       is CameraTouch.Pinch -> pinch(touch.scale, frameDegrees)
+      CameraTouch.PinchEnd -> pinchEnded()
+      is CameraTouch.Drag -> drag(touch.dx, touch.dy, frameDegrees)
       is CameraTouch.Tap -> meter(touch.point, frameDegrees)
       CameraTouch.Reset -> meter(null, frameDegrees)
     }
   }
 
-  /** Before air only (owner, 2026-11-24): from Arming on the picture never moves by a finger. */
+  /**
+   * Before air and on it alike (owner, 2026-11-26, superseding 2026-11-24's "before air only"): the same range, no
+   * easing. The range is the camera's digital zoom, a crop of the one camera (no lens switch). On air the ratio a gesture ends on is one record line ([pinchEnded]).
+   */
   private suspend fun pinch(scale: Float, frameDegrees: Int) {
-    if (broadcastHeld()) return ignored("zoom", "broadcast")
     val id = open ?: return ignored("zoom", "closed")
     guarded("zoom") {
       val range = parts.zoomRange(id) ?: return@guarded ignored("zoom", "closed")
       val next = Zoom.next(ratio, scale, range)
       if (next == ratio) return@guarded
-      if (!parts.zoom(id, next)) return@guarded ignored("zoom", "closed")
+      val held = Pan.clamp(centre, next)
+      if (!framed(id, frameDegrees, next, held)) return@guarded ignored("zoom", "closed")
       ratio = next
+      centre = held
+      reframed = true
       // The place tapped has moved in the picture: the camera's own metering again.
       if (point != null) {
         point = null
-        parts.meter(id, null, frameDegrees)
+        parts.meter(id, null, frameDegrees, ratio, centre)
       }
     }
+  }
+
+  /**
+   * Spec §3.5 (owner, 2026-11-26): above 1x one finger moves the crop, 1:1, before air and on it. At 1x it does nothing.
+   * The place tapped has moved in the picture, as for a pinch. No record line: no contract key carries a pan.
+   */
+  private suspend fun drag(dx: Float, dy: Float, frameDegrees: Int) {
+    if (ratio <= Zoom.DEFAULT) return
+    val id = open ?: return ignored("zoom", "closed")
+    val moved = Pan.drag(centre, dx, dy, ratio)
+    if (moved == centre) return
+    guarded("zoom") {
+      if (!framed(id, frameDegrees, ratio, moved)) return@guarded ignored("zoom", "closed")
+      centre = moved
+      if (point != null) {
+        point = null
+        parts.meter(id, null, frameDegrees, ratio, centre)
+      }
+    }
+  }
+
+  /** Zoom and pan are one thing: the crop of the camera's picture ([Pan.frame]), set whole, centred or not. */
+  private suspend fun framed(id: String, frameDegrees: Int, at: Float = ratio, around: PanCentre = centre): Boolean =
+    parts.pan(id, at, around, frameDegrees)
+
+  /**
+   * A gesture ended: on air, and only if it moved the ratio, one `zoom` line says where the picture was reframed to, so a
+   * post-match record shows when. Once a gesture, never a frame. Before air the line at air start says the zoom in use.
+   */
+  private fun pinchEnded() {
+    val moved = reframed
+    reframed = false
+    if (moved && broadcastHeld()) line(Zoom.entry(ratio))
   }
 
   /** On air too: a tap moves no frame. [at] null is the double tap's reset. */
   private suspend fun meter(at: MeterPoint?, frameDegrees: Int) {
     val id = open ?: return ignored("meter", "closed")
     guarded("metering") {
-      if (!parts.meter(id, at, frameDegrees)) return@guarded ignored("meter", "closed")
+      if (!parts.meter(id, at, frameDegrees, ratio, centre)) return@guarded ignored("meter", "closed")
       point = at
     }
   }
@@ -136,6 +187,32 @@ class CameraFraming(private val parts: CaptureParts, private val line: (RecordEn
     } catch (e: Exception) {
       line(RecordEntry("capture-call-failed", listOf("action" to action, "error" to e.javaClass.simpleName)))
     }
+  }
+}
+
+/** Spec §3.5: drags the queue has not taken yet, as one move (their sum), by [PinchBuffer]'s rule. Any thread. */
+class DragBuffer {
+  private var dx = 0f
+  private var dy = 0f
+  private var queued = false
+
+  /** True when the queue must be asked to [take]. */
+  @Synchronized
+  fun offer(moveX: Float, moveY: Float): Boolean {
+    dx += moveX
+    dy += moveY
+    if (queued) return false
+    queued = true
+    return true
+  }
+
+  @Synchronized
+  fun take(): Pair<Float, Float> {
+    val taken = dx to dy
+    dx = 0f
+    dy = 0f
+    queued = false
+    return taken
   }
 }
 

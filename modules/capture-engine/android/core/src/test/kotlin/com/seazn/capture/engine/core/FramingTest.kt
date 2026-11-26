@@ -105,6 +105,100 @@ class FramingTest {
   }
 
   @Test
+  fun `a drag at 1x, or of no number, moves nothing`() {
+    assertEquals(Pan.CENTRE, Pan.drag(Pan.CENTRE, 0.3f, 0.3f, 1f))
+    assertEquals(Pan.CENTRE, Pan.drag(Pan.CENTRE, Float.NaN, 0.1f, 2f))
+    assertEquals(Pan.CENTRE, Pan.drag(Pan.CENTRE, 0.1f, Float.POSITIVE_INFINITY, 2f))
+  }
+
+  @Test
+  fun `a drag moves the window the other way, 1 to 1 of the visible picture`() {
+    // At 2x the window is half the field: a finger across 0.2 of the picture moves the window 0.1 of the field.
+    assertEquals(PanCentre(0.4f, 0.5f), Pan.drag(Pan.CENTRE, 0.2f, 0f, 2f))
+    assertEquals(PanCentre(0.5f, 0.6f), Pan.drag(Pan.CENTRE, 0f, -0.2f, 2f))
+    // At 4x, the same finger moves it 0.05.
+    assertEquals(PanCentre(0.45f, 0.5f), Pan.drag(Pan.CENTRE, 0.2f, 0f, 4f))
+  }
+
+  @Test
+  fun `a drag is clamped to the picture's field, however far the finger goes`() {
+    assertEquals(PanCentre(0.25f, 0.75f), Pan.drag(Pan.CENTRE, 5f, -5f, 2f), "at 2x the centre keeps 0.25 from each edge")
+    assertEquals(PanCentre(0.75f, 0.25f), Pan.drag(Pan.CENTRE, -5f, 5f, 2f))
+  }
+
+  @Test
+  fun `zooming out brings the centre back inside, and to the middle at 1x`() {
+    assertEquals(PanCentre(0.125f, 0.5f), Pan.clamp(PanCentre(0.05f, 0.5f), 4f), "at 4x the centre keeps 0.125 from each edge")
+    assertEquals(PanCentre(0.25f, 0.5f), Pan.clamp(PanCentre(0.1f, 0.5f), 2f))
+    assertEquals(Pan.CENTRE, Pan.clamp(PanCentre(0.25f, 0.75f), 1f))
+  }
+
+  @Test
+  fun `at 1x the frame is the whole array, and the ratio sent is 1 at every zoom`() {
+    assertEquals(PanFrame(1f, null), Pan.frame(PanCentre(0.2f, 0.2f), 1f, left, active), "at 1x nothing pans")
+    for (zoom in listOf(1.5f, 2f, 4f, 8f)) assertEquals(1f, Pan.frame(PanCentre(0.3f, 0.6f), zoom, left, active).ratio, "option A: a crop, never a ratio ($zoom)")
+  }
+
+  @Test
+  fun `a centred zoom is the window of the field about its middle, in the active array`() {
+    // 2x on the 3840 x 2160 field (360 above and below): a 1920 x 1080 window about (1920, 1440).
+    assertEquals(PanFrame(1f, CropRect(960, 900, 1920, 1080)), Pan.frame(Pan.CENTRE, 2f, left, active))
+  }
+
+  @Test
+  fun `a window at the field's left edge starts at the field's left`() {
+    // Centre x 0.25 of the field = 960, so the window's left edge is 960 - 960 = 0.
+    assertEquals(PanFrame(1f, CropRect(0, 900, 1920, 1080)), Pan.frame(PanCentre(0.25f, 0.5f), 2f, left, active))
+  }
+
+  @Test
+  fun `a window off centre is the same size about the centre that was asked`() {
+    // Centre x 0.4 = 1536, y 1440: left 1536 - 960 = 576, top 900.
+    assertEquals(PanFrame(1f, CropRect(576, 900, 1920, 1080)), Pan.frame(PanCentre(0.4f, 0.5f), 2f, left, active))
+  }
+
+  @Test
+  fun `a centre beyond the field is brought inside it, not left to the array's edge`() {
+    // y 0 of the field is 360 on the sensor: the 1080 window's top is 360, not the array's 0.
+    assertEquals(CropRect(960, 360, 1920, 1080), Pan.frame(PanCentre(0.5f, 0f), 2f, left, active).crop)
+  }
+
+  @Test
+  fun `the whole rectangle stays inside the array when rounding would push it past`() {
+    // 3999 x 2999: 2x is 1999.5 wide; its left 1999.5 and width both round up to 2000, ending at 4000. Moved in by one.
+    val odd = active.copy(width = 3999, height = 2999)
+    assertEquals(CropRect(1999, 937, 2000, 1125), Pan.frame(PanCentre(0.75f, 0.5f), 2f, left, odd).crop)
+  }
+
+  @Test
+  fun `held the other way round the same drag lands on the other side of the sensor`() {
+    // Held right the turn is 180: the picture's x 0.25 is the sensor's 0.75, 2880. The window's left is 2880 - 960.
+    assertEquals(PanFrame(1f, CropRect(1920, 900, 1920, 1080)), Pan.frame(PanCentre(0.25f, 0.5f), 2f, right, active))
+  }
+
+  @Test
+  fun `the zoom the crop shows reads back as field width over crop width, to a tenth`() {
+    // 1.6x: the window is 3840 / 1.6 = 2400 wide, and 3840 / 2400 = 1.6, which is what the record line says.
+    val crop = checkNotNull(Pan.frame(Pan.CENTRE, 1.6f, left, active).crop)
+    assertEquals(2400, crop.width)
+    assertEquals(1.6, (3840.0 / crop.width * 10).let { Math.round(it) / 10.0 })
+    assertEquals(RecordEntry("zoom", listOf("state" to 1.6)), Zoom.entry(1.6f))
+  }
+
+  @Test
+  fun `a tap on a zoomed frame is a place in the crop, and a tap after a pan meters the tapped place`() {
+    // 2x about x 0.4 (sensor 1536, y 1440): the picture's middle is that centre. A focus region is 1/6 of the picture,
+    // so 1/12 of the field: 320 x 180, left 1536 - 160, top 1440 - 90.
+    assertEquals(MeterArea(1376, 1350, 320, 180, 1000), Metering.area(MeterPoint(0.5f, 0.5f), left, active, Metering.FOCUS_SIZE, 2f, PanCentre(0.4f, 0.5f)))
+    // A tap left of the middle by 0.25 of the picture is 0.125 of the field: x 0.275 = 1056, so left 896. Inside the
+    // window (576 to 2496), never past it.
+    assertEquals(MeterArea(896, 1350, 320, 180, 1000), Metering.area(MeterPoint(0.25f, 0.5f), left, active, Metering.FOCUS_SIZE, 2f, PanCentre(0.4f, 0.5f)))
+    // The edges of the picture are the edges of the window: x 0 is 576, x 1 is 2496.
+    assertEquals(576, Metering.area(MeterPoint(0f, 0.5f), left, active, 0f, 2f, PanCentre(0.4f, 0.5f)).left)
+    assertEquals(2496, Metering.area(MeterPoint(1f, 0.5f), left, active, 0f, 2f, PanCentre(0.4f, 0.5f)).left)
+  }
+
+  @Test
   fun `the camera's own metering is one region of no weight`() {
     assertEquals(MeterArea(0, 0, 0, 0, 0), Metering.NONE)
   }

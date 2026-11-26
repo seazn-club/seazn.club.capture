@@ -33,6 +33,7 @@ import com.seazn.capture.engine.core.CameraTouch
 import com.seazn.capture.engine.core.Command
 import com.seazn.capture.engine.core.Encode
 import com.seazn.capture.engine.core.MeterPoint
+import com.seazn.capture.engine.core.PanCentre
 import com.seazn.capture.engine.core.PairRequest
 import com.seazn.capture.engine.core.RecordEntry
 import com.seazn.capture.engine.core.RtmpsTarget
@@ -475,26 +476,23 @@ class StreamerAdapter(
     override suspend fun antibanding(cameraId: String): Antibanding? = heldCamera(cameraId)?.let { Antibands.set(it) }
 
     /**
-     * Spec 2026-11-25-zoom-and-metering: StreamPack 3.2.1's zoom range, read from `CONTROL_ZOOM_RATIO_RANGE` (`RZoom`,
-     * the one it builds from API 30; javap), of the held camera source [cameraId] while it is open now.
+     * Spec 2026-11-25-zoom-and-metering (owner, 2026-11-26): zoom is a digital crop of the one camera, 1x to the camera's
+     * `SCALER_AVAILABLE_MAX_DIGITAL_ZOOM`, of the held camera source [cameraId] while it is open now. No lens switch.
      */
     override fun zoomRange(cameraId: String): ZoomRange? =
-      openCamera(cameraId)?.settings?.zoom?.availableRatioRange?.let { ZoomRange(it.lower, it.upper) }
+      openCamera(cameraId)?.let { Pans.range(it.settings.characteristics) }
 
-    /**
-     * Spec §3: `RZoom.setZoomRatio` (javap: sets `CONTROL_ZOOM_RATIO` within the range and applies the repeating request)
-     * on the held camera source [cameraId], only while it is open now.
-     */
-    override suspend fun zoom(cameraId: String, ratio: Float): Boolean {
+    /** Spec §3.5: the crop window for the zoom and centre on the held camera source [cameraId], only while it is open now. */
+    override suspend fun pan(cameraId: String, ratio: Float, centre: PanCentre, frameDegrees: Int): Boolean {
       val camera = openCamera(cameraId) ?: return false
-      camera.settings.zoom.setZoomRatio(ratio)
+      Pans.set(camera, ratio, centre, frameDegrees)
       return true
     }
 
     /** Spec §4: the focus and exposure regions ([Meters]) on the held camera source [cameraId], only while it is open now. */
-    override suspend fun meter(cameraId: String, point: MeterPoint?, frameDegrees: Int): Boolean {
+    override suspend fun meter(cameraId: String, point: MeterPoint?, frameDegrees: Int, ratio: Float, centre: PanCentre): Boolean {
       val camera = openCamera(cameraId) ?: return false
-      Meters.set(camera, point, frameDegrees)
+      Meters.set(camera, point, frameDegrees, ratio, centre)
       return true
     }
 

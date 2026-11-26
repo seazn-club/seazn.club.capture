@@ -155,6 +155,10 @@ data class Session(
   val notDelivered: Boolean = false,
   /** S6: failed attempts before live, and how their lines are held to one a minute. */
   val retries: NeverLiveRetries = NeverLiveRetries(),
+  /** N52: the flap bound on a provisional connection's immediate retries, across attempts. */
+  val provisional: ProvisionalRetries = ProvisionalRetries(),
+  /** R-1PG4: this broadcast's `viewers-confirmed` line was written ([ViewersConfirmed]). */
+  val viewersConfirmed: Boolean = false,
   /** Review of batch 2, item 1: stuck replaces in a row, across attempts. */
   val stuckReplaces: StuckReplaces = StuckReplaces(),
   /** S1: below-floor rebuilds in a row, across attempts, and when the last went. */
@@ -270,6 +274,11 @@ sealed interface Phase {
     val recoveredAtMs: Long? = null,
     /** This attempt's first advancing frame (review of batch 2, item 6): what proves a path, not the connect. */
     val framesAtMs: Long? = null,
+    /**
+     * N52 (owner ruling, 2026-11-26, option B): connected while the default network was not validated. Its break retries
+     * at once and counts toward nothing ([ProvisionalRetries]); validation of the network it was opened on confirms it.
+     */
+    val provisional: Boolean = false,
   ) : Phase {
     override val name = "on-air"
   }

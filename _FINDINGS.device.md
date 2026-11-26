@@ -1219,3 +1219,19 @@ then `MediaCodec.stop`) and resets it (`resetVideoEncoder`: `MediaCodec.reset`, 
 
 **So:** no `requestKeyFrame` on resume; it would ask for what the encoder already does. Open: seeing the IDR as the
 first frame after a reconnect, on the wire, is the device check's (spec 2026-11-24-capture-tuning §7, item 6).
+
+### N52 — A reconnect over a network not yet validated broke again, and its retry waited as any other
+
+**Status:** fixed on `feat/provisional-reconnect` (owner ruling, 2026-11-26, option B); spec
+`docs/specs/2026-11-26-provisional-reconnect.md`. Device check open.
+**Where:** capture app · `SessionMachine` (`Transports.dropped`, `Transports.network`) · `ProvisionalRetries`
+
+**Seen:** record R-SAV6 (staging, 2026-11-26), airplane mode on and off for about 5 s, on air over SRT. SRT
+reconnected at 17:55:28.8Z while Android had not validated the network yet, broke again 5.7 s later, and the retry
+waited today's 2 s; validation came at 40.2. Viewers were back about 10 s later than they might have been.
+
+**So:** a connection made while the default network is not validated is provisional. Its break retries at once,
+within a flap bound of 3 in any 30 s (a sliding window) spaced 1 s, with no step of the never-live ladder; the fallback count already
+skipped it. The hold is not skipped: it is the platform's clock. Validation on the network the attempt was asked on
+confirms it with no reconnect; on another network, or with none known, it is replaced at once. The record says it with
+listed keys only: `connected {validated: false}`, `dropped {retryMs}`, `network-switched {reason: provisional}`.

@@ -47,6 +47,44 @@ class VendorLinesTest {
   }
 
   /**
+   * R-SAV6 (stg, 2026-11-26): "Failed to get input buffer" came out with `tag: "***"`. StreamPack 3.2.1's audio encoder
+   * tags its lines `AudioEncoder(<hashCode>)` (javap, `MediaCodecEncoder.<init>`), and the parentheses are no plain word,
+   * so the scrub masked the tag whole. It is written `AudioEncoder:<hashCode>`; the scrub is unchanged.
+   */
+  @Test
+  fun `StreamPack's audio encoder tag survives as a plain word, its instance kept`() {
+    val lines =
+      recorded { vendor, _ ->
+        vendor.w("AudioEncoder(204331718)", "Failed to get input buffer: IllegalStateException", null)
+        vendor.w("AudioEncoder(-1517293)", "Failed to get input buffer: IllegalStateException", null)
+      }
+    assertEquals(listOf("AudioEncoder:204331718", "AudioEncoder:-1517293"), lines.map { JSONObject(it).getString("tag") })
+  }
+
+  @Test
+  fun `any other tag is written as it came, and the scrub still masks one that names a secret or is no plain word`() {
+    val lines =
+      recorded { vendor, _ ->
+        vendor.w("VideoEncoder", "m", null)
+        vendor.w("AudioEncoder($key)", "m", null)
+        vendor.w("Audio Encoder(12)", "m", null)
+        vendor.w("AudioEncoder(12)x", "m", null)
+      }
+    assertEquals(listOf("VideoEncoder", "***", "***", "***"), lines.map { JSONObject(it).getString("tag") })
+  }
+
+  @Test
+  fun `review of #79 - only AudioEncoder is rewritten - another Word(123) is still masked`() {
+    val lines =
+      recorded { vendor, _ ->
+        vendor.w("VideoEncoder(123)", "m", null)
+        vendor.w("Word(123)", "m", null)
+        vendor.w("audioencoder(123)", "m", null)
+      }
+    assertEquals(listOf("***", "***", "***"), lines.map { JSONObject(it).getString("tag") })
+  }
+
+  /**
    * F-S4-1: StreamPack 3.2.1 has no public word that the camera device was lost; its `CameraUtils.openCamera`
    * logs it, and only it: `onDisconnected` warns "Camera $id has been disconnected", `onError` errs
    * "Camera $id is in error $error" (the sources). A busy error (1, 2: another app's take) is no loss: N45, it is

@@ -571,10 +571,17 @@ describe('the viewers’ picture selectors (owner, 2026-11-26)', () => {
       onAir: true,
       programmeLive: false,
       playlistFresh: false,
+      late: false,
     });
     expect(
       viewersFactsOf(snapshot(LIVE, { delivery: 'ok', server: serverSays('live') }, held)),
-    ).toEqual({ sid: 'fake-sid-1', onAir: true, programmeLive: true, playlistFresh: true });
+    ).toEqual({
+      sid: 'fake-sid-1',
+      onAir: true,
+      programmeLive: true,
+      playlistFresh: true,
+      late: false,
+    });
   });
 
   it.each<[string, SessionState, boolean]>([

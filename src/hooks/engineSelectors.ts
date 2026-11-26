@@ -81,11 +81,13 @@ export function viewersFactsOf(snapshot: EngineSnapshot): ViewersFacts {
     onAir: kind === 'publishing' || kind === 'degraded',
     programmeLive: snapshot.telemetry.server?.programmePhase === 'live',
     playlistFresh: snapshot.telemetry.delivery === 'ok',
+    late: selectConfirmLate(snapshot),
   };
 }
 /**
  * Something could confirm the viewers' picture of this broadcast: a playback URL for the phone's playlist check, or a
  * programme phase from the server. With neither the plate reads LIVE at once, as before the ruling (owner, 2026-11-26).
+ * No real broadcast has neither today: native refuses a session without an https playbackUrl (`SessionConfig.problems`).
  */
 export const selectConfirmSource = (snapshot: EngineSnapshot): boolean =>
   (snapshot.broadcast?.playbackUrl ?? '') !== '' ||
@@ -93,7 +95,8 @@ export const selectConfirmSource = (snapshot: EngineSnapshot): boolean =>
 /**
  * The upload connected 60 s or more ago, by native's own clock: its report's time less the time the broadcast first
  * went live (`sinceEpochMs`, which survives a drop). From the snapshot, never a timer of ours (AGENTS §8); a boolean,
- * so it re-renders once, when it turns.
+ * so it re-renders once, when it turns. Both times are native's wall clock (`Now.wallMs`: `reportedAtMs` in
+ * `Projection.snapshot`, `liveSinceEpochMs` in `SessionMachine`), so the subtraction is one clock's.
  */
 export const selectConfirmLate = (snapshot: EngineSnapshot): boolean => {
   const since = selectSinceEpochMs(snapshot);

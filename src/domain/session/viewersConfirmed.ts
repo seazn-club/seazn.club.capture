@@ -22,12 +22,22 @@ export type ViewersFacts = {
   readonly programmeLive: boolean;
   /** The phone's playlist check saw the viewers' playlist move (`delivery: ok`). */
   readonly playlistFresh: boolean;
+  /** The upload connected {@link UNCONFIRMED_AFTER_MS} or more ago ({@link pastConfirmWindow}). */
+  readonly late: boolean;
 };
 
-/** The broadcast the latch is about, and whether its viewers' picture was ever confirmed. */
-export type ViewersLatch = { readonly sid: string | null; readonly confirmed: boolean };
+/**
+ * The broadcast the latch is about, whether its viewers' picture was ever confirmed, and whether the latch first saw
+ * it already past the 60 s mark (`inherited`): a cold-start rejoin, a JS reload or a late JS start into a broadcast
+ * whose confirmation, if any, the latch never saw.
+ */
+export type ViewersLatch = {
+  readonly sid: string | null;
+  readonly confirmed: boolean;
+  readonly inherited: boolean;
+};
 
-export const NO_LATCH: ViewersLatch = { sid: null, confirmed: false };
+export const NO_LATCH: ViewersLatch = { sid: null, confirmed: false, inherited: false };
 
 const confirms = (facts: ViewersFacts): boolean =>
   facts.onAir && (facts.programmeLive || facts.playlistFresh);
@@ -38,11 +48,13 @@ const confirms = (facts: ViewersFacts): boolean =>
  * return the same latch, so a reader comparing by identity sees no change.
  */
 export function latchViewers(prev: ViewersLatch, facts: ViewersFacts): ViewersLatch {
-  const kept = prev.sid === facts.sid && prev.confirmed;
-  const confirmed = kept || confirms(facts);
-  return prev.sid === facts.sid && prev.confirmed === confirmed
+  const same = prev.sid === facts.sid;
+  const confirmed = (same && prev.confirmed) || confirms(facts);
+  // The controller's ruling (PR #78 review, 2026-11-26): a broadcast first seen past the mark is not warned about.
+  const inherited = same ? prev.inherited : facts.sid !== null && facts.late;
+  return same && prev.confirmed === confirmed && prev.inherited === inherited
     ? prev
-    : { sid: facts.sid, confirmed };
+    : { sid: facts.sid, confirmed, inherited };
 }
 
 /** What the plate and the line show of a broadcast that is going out: Going live, LIVE, or LIVE with the warning. */
@@ -52,6 +64,8 @@ export type AirStageInput = {
   /** The upload is connected and frames advance (publishing or degraded): the only time the stage is not LIVE. */
   readonly onAir: boolean;
   readonly confirmed: boolean;
+  /** The latch first saw this broadcast past the 60 s mark (`ViewersLatch.inherited`): LIVE, with no warning. */
+  readonly inherited: boolean;
   /** Something could confirm this broadcast: a playback URL to check, or the server's programme phase. */
   readonly hasSource: boolean;
   /** The upload connected {@link UNCONFIRMED_AFTER_MS} or more ago ({@link pastConfirmWindow}). */
@@ -65,8 +79,14 @@ export type AirStageInput = {
 export const pastConfirmWindow = (onAirMs: number | null): boolean =>
   onAirMs !== null && onAirMs >= UNCONFIRMED_AFTER_MS;
 
-/** Owner, 2026-11-26: confirmed, or nothing that could confirm it, is LIVE; unconfirmed is Going live for 60 s. */
-export function airStage({ onAir, confirmed, hasSource, late }: AirStageInput): AirStage {
+/**
+ * Owner, 2026-11-26: confirmed, or nothing that could confirm it, is LIVE; unconfirmed is Going live for 60 s. A
+ * broadcast the latch first saw past the mark is LIVE with no warning (the controller's ruling, PR #78 review): the
+ * latch cannot know it was never confirmed, and real trouble is the Degraded and Reconnecting machinery's.
+ */
+export function airStage(input: AirStageInput): AirStage {
+  const { onAir, confirmed, inherited, hasSource, late } = input;
   if (!onAir || confirmed || !hasSource) return 'live';
+  if (inherited) return 'live';
   return late ? 'unconfirmed' : 'goingLive';
 }

@@ -40,7 +40,7 @@ import {
 import { useEngine, useEngineSelector } from '@/hooks/useCaptureEngine';
 import { useFormatTime } from '@/hooks/useFormatTime';
 import { usePorts } from '@/hooks/usePorts';
-import { useViewersConfirmed } from '@/hooks/viewersLatch';
+import { useViewersConfirmed, useViewersInherited } from '@/hooks/viewersLatch';
 
 type Kind = SessionState['kind'];
 export type ViewfinderAction = 'goLive' | 'stop' | 'none';
@@ -243,10 +243,11 @@ function plateFor(
  */
 export function useAirStage(kind: Kind): AirStage {
   const confirmed = useViewersConfirmed();
+  const inherited = useViewersInherited();
   const hasSource = useEngineSelector(selectConfirmSource);
   const late = useEngineSelector(selectConfirmLate);
   const onAir = kind === 'publishing' || kind === 'degraded';
-  return airStage({ onAir, confirmed, hasSource, late });
+  return airStage({ onAir, confirmed, inherited, hasSource, late });
 }
 
 type WaitingFields = {

@@ -6,10 +6,12 @@ import en from '@/i18n/en.json';
 import es from '@/i18n/es.json';
 import fr from '@/i18n/fr.json';
 import nl from '@/i18n/nl.json';
+import { LivePlate } from '@/ui/components/LivePlate';
 import { colour } from '@/ui/theme/tokens';
-import { TEST_NOW } from '../../../test/fakePorts';
+import { TEST_NOW, type FakePorts } from '../../../test/fakePorts';
 import { savedCourtCode } from '../../../test/fixtures/savedStream';
 import { renderViewfinder } from '../../../test/renderViewfinder';
+import { wrapperFor } from '../../../test/renderWithPorts';
 
 /**
  * Owner, 2026-11-26: "Red LIVE must mean viewers can see the picture." What the operator sees at each stage, through
@@ -19,11 +21,12 @@ const plate = () => screen.getByTestId('tally-plate').textContent;
 const line = () => screen.getByTestId('strip-message').textContent;
 const sweep = () => screen.queryByTestId('plate-sweep');
 
-const PENDING = "Connected · getting viewers' picture ready";
-const UNCONFIRMED = "Viewers' picture not confirmed yet";
-const LIVE_LINE = 'Live. Sound and picture going out.';
-const BACKUP_LINE = 'Switched to backup link (RTMPS)';
-const NOT_CHARGING = 'Not charging — plug in for a long match';
+const PENDING = en['stream.status.viewersPending'];
+const UNCONFIRMED = en['stream.status.viewersUnconfirmed'];
+const LIVE_LINE = en['stream.status.live'];
+const BACKUP_LINE = en['stream.status.fellBack'];
+const NOT_CHARGING = en['stream.advisory.notCharging'];
+const GOING_LIVE = en['stream.tally.goingLive'];
 
 /** T46's facts with only the programme phase known. */
 const programme = (programmePhase: ServerFacts['programmePhase']): ServerFacts => ({
@@ -58,6 +61,18 @@ function at(view: View, ms: number) {
   });
 }
 
+/**
+ * A broadcast the upload connected `ms` before the screen (and so its latch) first sees it, nothing confirming it:
+ * the fake's `going-live` at TEST_NOW, and native's next report `ms` later.
+ */
+function startedAgo(ms: number) {
+  return ({ engine, setNow }: FakePorts) => {
+    engine.scene('going-live');
+    setNow(new Date(TEST_NOW.getTime() + ms));
+    engine.patch({});
+  };
+}
+
 /** Connected this moment, with nothing yet confirming the viewers' picture (the fake's `going-live`). */
 async function goingLive(options: Parameters<typeof renderViewfinder>[1] = {}) {
   const view = await renderViewfinder({}, { quiet: true, ...options });
@@ -74,7 +89,6 @@ describe('Going live (owner, 2026-11-26)', () => {
     expect(plate()).toBe(en['stream.tally.goingLive']);
     expect(sweep()).not.toBeNull();
     expect(line()).toBe(PENDING);
-    expect(en['stream.status.viewersPending']).toBe(PENDING);
     // On air all the same: the clock counts and Stop is offered.
     expect(screen.getByTestId('elapsed').textContent).toBe('0:00:00');
     expect(screen.getByRole('button', { name: 'Hold to stop and unpair' })).toBeTruthy();
@@ -83,7 +97,7 @@ describe('Going live (owner, 2026-11-26)', () => {
   it('reads LIVE once the phone’s playlist check sees new frames', async () => {
     const view = await goingLive();
     act(() => view.engine.patch({ delivery: 'ok' }));
-    expect(plate()).toBe('Live');
+    expect(plate()).toBe(en['stream.tally.live']);
     expect(sweep()).toBeNull();
     expect(line()).toBe(LIVE_LINE);
   });
@@ -91,9 +105,9 @@ describe('Going live (owner, 2026-11-26)', () => {
   it('reads LIVE once the server says the programme is live', async () => {
     const view = await goingLive();
     act(() => view.engine.patch({ server: programme('waiting') }));
-    expect(plate()).toBe('Going live');
+    expect(plate()).toBe(GOING_LIVE);
     act(() => view.engine.patch({ server: programme('live') }));
-    expect(plate()).toBe('Live');
+    expect(plate()).toBe(en['stream.tally.live']);
     expect(line()).toBe(LIVE_LINE);
   });
 
@@ -102,7 +116,7 @@ describe('Going live (owner, 2026-11-26)', () => {
     act(() => view.engine.patch({ delivery: 'ok', server: programme('live') }));
     act(() => view.engine.patch({ delivery: 'unknown', server: programme('frozen') }));
     at(view, 90_000);
-    expect(plate()).toBe('Live');
+    expect(plate()).toBe(en['stream.tally.live']);
     expect(line()).toBe(LIVE_LINE);
   });
 
@@ -110,17 +124,17 @@ describe('Going live (owner, 2026-11-26)', () => {
     const view = await goingLive();
     at(view, 1000);
     at(view, 2000);
-    expect(plate()).toBe('Going live');
+    expect(plate()).toBe(GOING_LIVE);
     expect(line()).toBe(PENDING);
   });
 
   it('is still Going live at 59 s, and red LIVE with the warning at 60 s', async () => {
     const view = await goingLive();
     at(view, 59_000);
-    expect(plate()).toBe('Going live');
+    expect(plate()).toBe(GOING_LIVE);
     expect(line()).toBe(PENDING);
     at(view, 60_000);
-    expect(plate()).toBe('Live');
+    expect(plate()).toBe(en['stream.tally.live']);
     expect(sweep()).toBeNull();
     expect(line()).toBe(UNCONFIRMED);
     // A confirmation after the warning takes it down.
@@ -163,7 +177,7 @@ describe('Going live (owner, 2026-11-26)', () => {
     );
     // forceState plays the fake's on-air telemetry, whose playlist moves: the fall itself confirms. A fresh mount
     // over a backup link not yet confirmed is the case below.
-    expect(plate()).toBe('Live');
+    expect(plate()).toBe(en['stream.tally.live']);
     expect(line()).toBe(BACKUP_LINE);
   });
 
@@ -184,17 +198,17 @@ describe('Going live (owner, 2026-11-26)', () => {
         },
       },
     );
-    expect(plate()).toBe('Going live');
+    expect(plate()).toBe(GOING_LIVE);
     expect(line()).toBe(PENDING);
     act(() => view.engine.patch({ delivery: 'ok' }));
-    expect(plate()).toBe('Live');
+    expect(plate()).toBe(en['stream.tally.live']);
     expect(line()).toBe(BACKUP_LINE);
   });
 
   it('keeps TROUBLE for trouble: a reconnect before confirmation is not Going live', async () => {
     const view = await goingLive();
     act(() => view.engine.scene('holding'));
-    expect(plate()).toBe('Trouble');
+    expect(plate()).toBe(en['stream.tally.trouble']);
   });
 
   // A process restart mid-broadcast: native rejoins, and the latch, like native's own session, starts again.
@@ -208,28 +222,61 @@ describe('Going live (owner, 2026-11-26)', () => {
         },
       },
     );
-    expect(plate()).toBe('Going live');
+    expect(plate()).toBe(GOING_LIVE);
     act(() => view.engine.patch({ server: programme('live') }));
-    expect(plate()).toBe('Live');
+    expect(plate()).toBe(en['stream.tally.live']);
   });
 
   it('proves a new broadcast again: a second match does not inherit the first one’s confirmation', async () => {
     const view = await goingLive();
     act(() => view.engine.patch({ delivery: 'ok' }));
-    expect(plate()).toBe('Live');
+    expect(plate()).toBe(en['stream.tally.live']);
     act(() => view.engine.send({ kind: 'stop' }));
     act(() => view.engine.scene('paired-ready'));
     act(() => view.engine.scene('going-live'));
-    expect(plate()).toBe('Going live');
+    expect(plate()).toBe(GOING_LIVE);
   });
 
   it('reads the same on a court code, where the line after confirmation is the court’s Next line', async () => {
     const view = await goingLive({ saved: savedCourtCode() });
-    expect(plate()).toBe('Going live');
+    expect(plate()).toBe(GOING_LIVE);
     expect(line()).toBe(PENDING);
     act(() => view.engine.patch({ delivery: 'ok' }));
-    expect(plate()).toBe('Live');
+    expect(plate()).toBe(en['stream.tally.live']);
     expect(line()).not.toBe(PENDING);
+  });
+
+  // Settings over the viewfinder unmounts the plate, and the viewfinder's comes back after: the latch outlives both.
+  it('keeps LIVE across an unmount and a remount of the plate (Settings ↔ viewfinder)', async () => {
+    const view = await goingLive();
+    act(() => view.engine.patch({ delivery: 'ok' }));
+    expect(plate()).toBe(en['stream.tally.live']);
+    view.unmount();
+    act(() => view.engine.patch({ delivery: 'unknown' }));
+    render(<LivePlate />, { wrapper: wrapperFor(view) });
+    expect(plate()).toBe(en['stream.tally.live']);
+    expect(screen.queryByText(GOING_LIVE)).toBeNull();
+  });
+
+  // The controller's ruling (PR #78 review): a latch that first sees a broadcast past the 60 s mark cannot know
+  // whether it was confirmed, so it shows LIVE with no warning, as a cold-start rejoin, a JS reload or a late start.
+  it('reads red LIVE and no warning for a broadcast first seen 90 s in, and confirms normally', async () => {
+    const view = await renderViewfinder({}, { quiet: true, prepare: startedAgo(90_000) });
+    expect(plate()).toBe(en['stream.tally.live']);
+    expect(line()).toBe(LIVE_LINE);
+    expect(line()).not.toBe(UNCONFIRMED);
+    act(() => view.engine.patch({ delivery: 'ok' }));
+    expect(plate()).toBe(en['stream.tally.live']);
+    expect(line()).toBe(LIVE_LINE);
+  });
+
+  it('reads Going live for a broadcast first seen 10 s in, then the warning at 60 s', async () => {
+    const view = await renderViewfinder({}, { quiet: true, prepare: startedAgo(10_000) });
+    expect(plate()).toBe(GOING_LIVE);
+    expect(line()).toBe(PENDING);
+    at(view, 60_000);
+    expect(plate()).toBe(en['stream.tally.live']);
+    expect(line()).toBe(UNCONFIRMED);
   });
 
   it.each([

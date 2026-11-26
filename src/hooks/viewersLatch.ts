@@ -6,7 +6,8 @@ import { useEngine } from '@/hooks/useCaptureEngine';
 
 /**
  * The viewers' picture latch (owner, 2026-11-26), folded over every snapshot native sends: `latchViewers` is the rule,
- * this only holds its last value. One per engine, made on first read and subscribed for the engine's life, so a
+ * this only holds its last value. One per engine, born with the engine at the composition root (`chooseEngine`) and
+ * subscribed for the engine's life, so a
  * confirmation seen while no screen is drawn (Settings over the viewfinder, a locked phone) is still kept, and the
  * viewfinder and Settings' plate read one latch. The fold is idempotent, so a read folds the current snapshot too and
  * never trails the listener it races.
@@ -36,4 +37,12 @@ export function useViewersConfirmed(): boolean {
   const read = viewersLatchOf(engine);
   const confirmed = useCallback(() => read().confirmed, [read]);
   return useSyncExternalStore(engine.subscribe, confirmed);
+}
+
+/** Whether the latch first saw the held broadcast past the 60 s mark (`ViewersLatch.inherited`). A boolean. */
+export function useViewersInherited(): boolean {
+  const engine = useEngine();
+  const read = viewersLatchOf(engine);
+  const inherited = useCallback(() => read().inherited, [read]);
+  return useSyncExternalStore(engine.subscribe, inherited);
 }

@@ -110,29 +110,48 @@ reached a viewer; a broadcast Cloudflare accepted but did not deliver read LIVE 
 | Live              | confirmed, latched for the broadcast                                                               | LIVE, red                                                     | lime   | the state's own line: "Live. Sound and picture going out.", the backup link's, a court's Next line |
 | Live, unconfirmed | 60 s after the connect and still not confirmed                                                     | LIVE, red                                                     | lime   | "Viewers' picture not confirmed yet" (urgent, orange)                                              |
 | No source         | no playback URL and no programme phase                                                             | LIVE at once, as before                                       | lime   | as before                                                                                          |
+| Inherited         | the latch first saw this broadcast 60 s or more after its connect, and nothing has confirmed it    | LIVE, red                                                     | lime   | the state's own line, no warning                                                                   |
 
 - **Confirmed** is whichever comes first: the server's `programmePhase === 'live'` (capture-beat.v1 `delivery`, §3,
   `telemetry.server.programmePhase`) or the phone's own playlist check seeing new frames (DeliveryWatch, polled every
   2 s; native's `telemetry.delivery === 'ok'`, which needs the head to advance in the variant). Only while frames
   advance (publishing or degraded) does either count.
 - **The latch** is per broadcast sid (`latchViewers`, `src/domain/session/viewersConfirmed.ts`), folded over every
-  snapshot by one subscription per engine (`src/hooks/viewersLatch.ts`), so the viewfinder and Settings' plate read one
-  latch and a confirmation seen with Settings open is kept. Once confirmed it stays confirmed for the broadcast: a later
+  snapshot by one subscription per engine (`src/hooks/viewersLatch.ts`), born with the engine at the composition root
+  (`chooseEngine`, `src/hooks/engineWiring.ts`; PR #78 review), so it hears every snapshot from the first whatever
+  screen is drawn, the viewfinder and Settings' plate read one latch, and a confirmation seen with Settings open, or
+  with no plate mounted, is kept. Once confirmed it stays confirmed for the broadcast: a later
   frozen programme, a quiet playlist or a reconnect is the existing Degraded and Reconnecting machinery's job (TROUBLE
   and its line), not this one. A new sid, a court's next match included, proves itself again.
 - **The 60 s** is the snapshot's own report time less `sinceEpochMs` (the broadcast's first live time, which survives a
   drop), read as a boolean (`selectConfirmLate`): no JS timer, and the HUD re-renders once when it turns (AGENTS §8).
+  Both are native's wall clock (`Now.wallMs`, `System.currentTimeMillis()` in `AndroidClock`): `Projection.snapshot`
+  sets `reportedAtMs = now.wallMs`, and `SessionMachine` sets `liveSinceEpochMs = now.wallMs` at the first advancing
+  frames, so the subtraction is one clock's. A wall-clock step (NTP, or a manual clock change) mid-broadcast
+  moves the 60 s by the step; accepted, since the only effect is the warning showing early or late.
 - **No source.** Native refuses a session without an https playback URL (`SessionConfig.problems`), so a fixture's or a
   court's broadcast always has one and always goes through Going live; the no-source rule covers a broadcast with
   neither a playback URL nor a programme phase, which reads LIVE at once with no warning, as before the ruling.
 - **The backup link** (#75, `selectBackupOnly`) reads Going live before confirmation, as the main link does, with the
   Going live line; once confirmed it reads LIVE with its own line.
+- **Trade-offs, chosen deliberately (PR #78 review, 2026-11-26).** On the backup link, the Going live line, or after
+  60 s the not-confirmed line, shows in place of "Switched to backup link (RTMPS)" until the picture is confirmed: one
+  line, and whether viewers have the picture matters more than which link carries it (the backup is still on the
+  Diagnostics card and in the record). A broadcast never confirmed keeps the urgent not-confirmed line for its whole
+  life: nothing but a confirmation clears it, since nothing else says viewers have the picture.
 - **Remote and console starts, rejoins and court codes** go through the same stages: the rule reads the snapshot, never
   who started it.
 - **A process restart mid-broadcast** forgets the latch with native's own session. The rejoin connects, the plate reads
   Going live, and turns LIVE at the first confirmation: the playlist check's first advance (two polls, about 4 s, once
   Cloudflare serves the variant) or the first beat answer carrying `programmePhase: live`, whichever lands first. The
   60 s counts from the rejoin's own connect.
+- **A latch born late** (the controller's ruling, PR #78 review, 2026-11-26): if the latch's first sight of a sid is
+  already past the 60 s mark (a JS reload while native keeps the session, a cold start into a broadcast native still
+  holds, or any late JS start), it marks the broadcast `inherited` and the plate reads red LIVE with no not-confirmed
+  line, then confirms normally if a fact arrives. Why: the latch's memory is gone, and the broadcast may well have
+  been confirmed before it; warning an operator about a picture viewers have been watching for minutes is a false
+  alarm, and real trouble is still the Degraded and Reconnecting machinery's. A latch that first saw the broadcast
+  inside the 60 s is not inherited however long it later runs, and the next sid starts again.
 
 **The warning's tier is urgent.** "Viewers' picture not confirmed yet" asks the operator to do something, check the
 match page, which is the tier rule's test for urgent (`LINE_TIER`, owner 2026-10-08). As routine, a Not charging or Keep

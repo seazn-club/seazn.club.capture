@@ -32,7 +32,12 @@ describe('the viewers’ picture latch, one per engine (owner, 2026-11-26)', () 
   it('folds the snapshot in hand on its first read', () => {
     const e = fake();
     e.scene('live'); // the fake's live telemetry has the playlist moving (delivery ok)
-    expect(viewersLatchOf(e)()).toEqual({ sid: e.getSnapshot().broadcast?.sid, confirmed: true });
+    // The fake's live scene is 12:34 on: first seen past the 60 s mark, as a reload into it would be.
+    expect(viewersLatchOf(e)()).toEqual({
+      sid: e.getSnapshot().broadcast?.sid,
+      confirmed: true,
+      inherited: true,
+    });
   });
 
   it('keeps a confirmation it saw with nobody reading, after the playlist goes quiet', () => {
@@ -51,6 +56,6 @@ describe('the viewers’ picture latch, one per engine (owner, 2026-11-26)', () 
     e.scene('live');
     expect(read().confirmed).toBe(true);
     e.scene('paired-ready');
-    expect(read()).toEqual({ sid: null, confirmed: false });
+    expect(read()).toEqual({ sid: null, confirmed: false, inherited: false });
   });
 });

@@ -3,6 +3,7 @@ import { KIT_CODE_A } from '@/engine/contract/engineScenarios';
 import { FakeNativeModule } from '@/engine/testing/FakeNativeModule';
 import { vectorWire } from '@/engine/wire/vectorWire';
 import { chooseEngine, routedRecordFor, type WiredEngine } from '@/hooks/engineWiring';
+import { viewersLatchOf } from '@/hooks/viewersLatch';
 import { createLogger } from '@/services/logger';
 import { createRingRecord } from '@/services/sessionRecord';
 
@@ -164,5 +165,17 @@ describe('M16: where a JS record line goes', () => {
     logger.info('intent.stop');
     expect(native.logged).toEqual([]);
     expect(ring.lines()).toHaveLength(1);
+  });
+});
+
+describe('the viewers’ picture latch is born with the engine (PR #78 review, 2026-11-26)', () => {
+  it('sees a confirmation that comes before any screen reads it', () => {
+    const wired = wire({ dev: true, fakeFlag: '1', native: null, ...quiet });
+    const fake = wired.devEngine;
+    if (fake === null) throw new Error('the fake was not wired');
+    fake.scene('going-live');
+    fake.patch({ delivery: 'ok' }); // nothing reads here: only a latch born at the root sees it
+    fake.patch({ delivery: 'unknown' });
+    expect(viewersLatchOf(wired.engine)().confirmed).toBe(true);
   });
 });

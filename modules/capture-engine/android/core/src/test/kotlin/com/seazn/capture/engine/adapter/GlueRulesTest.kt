@@ -885,12 +885,12 @@ class GlueRulesTest {
     assertTrue("touched(CameraTouch.Pinch(detector.scaleFactor))" in body(view, "override fun onScale("), "the pinch's scale")
     assertTrue("touched(CameraTouch.PinchEnd)" in body(view, "override fun onScaleEnd("), "the gesture's end, which writes the on-air zoom line")
     val scroll = body(view, "override fun onScroll(")
-    assertTrue("if (multi || noPan || pinch.isInProgress) return true" in scroll, "a pinch's focal move and a double tap's second press are no pan: $scroll")
+    assertTrue("if (multi || pinch.isInProgress) return true" in scroll, "a pinch's focal move is no pan: $scroll")
     assertTrue("touched(CameraTouch.Drag(-distanceX / preview.width, -distanceY / preview.height))" in scroll, "the finger's move as a share of the picture")
-    assertTrue("noPan = true" in body(view, "override fun onDoubleTap("), "a double tap's second press pans nothing")
     val pans = glue("Pans.kt")
     assertTrue("settings.set(CaptureRequest.SCALER_CROP_REGION, crop)" in pans && "settings.applyRepeatingSession()" in pans, "the crop goes in the repeating request, no restart")
-    assertTrue("settings.set(CaptureRequest.CONTROL_ZOOM_RATIO," in pans, "with the ratio, in the one request")
+    assertTrue("settings.set(CaptureRequest.CONTROL_ZOOM_RATIO, frame.ratio)" in pans, "the ratio is the frame's, 1.0")
+    assertTrue("SCALER_AVAILABLE_MAX_DIGITAL_ZOOM" in pans, "the zoom range is the digital zoom's")
     // Quick scale (double-tap-and-drag) is on by default: it would zoom with one finger, and its double tap reset metering.
     assertTrue(Regex("""\)\.apply \{ isQuickScaleEnabled = false \}""").containsMatchIn(view), "one finger never zooms")
     assertTrue("Metering.point(e.x / preview.width, e.y / preview.height)?.let { touched(CameraTouch.Tap(it)) }" in body(view, "override fun onSingleTapConfirmed("), "a tap's place on the picture, never a double tap's first")
@@ -901,10 +901,10 @@ class GlueRulesTest {
     assertTrue("broadcastHeld = { core().broadcastHeld() }" in glue("EngineHost.kt"), "the zoom's lock reads the machine's own word, wired")
     val open = adapter.substringAfter("private fun openCamera(cameraId: String)").take(200)
     assertTrue("heldCamera(cameraId)?.takeIf { it.isPreviewingFlow.value || (it as? IVideoSourceInternal)?.isStreamingFlow?.value == true }" in open, "held, of that id, and open now: $open")
-    for (part in listOf("override fun zoomRange(cameraId: String)", "override suspend fun zoom(cameraId: String, ratio: Float)", "override suspend fun meter(cameraId: String, point: MeterPoint?, frameDegrees: Int)")) {
+    for (part in listOf("override fun zoomRange(cameraId: String)", "override suspend fun pan(cameraId: String, ratio: Float, centre: PanCentre, frameDegrees: Int)", "override suspend fun meter(cameraId: String, point: MeterPoint?, frameDegrees: Int, ratio: Float, centre: PanCentre)")) {
       assertTrue(Regex("""=\s*openCamera\(cameraId\)|val camera = openCamera\(cameraId\) \?: return false""").containsMatchIn(adapter.substring(adapter.indexOf(part)).take(300)), "$part reads the open camera first")
     }
-    assertTrue("camera.settings.zoom.setZoomRatio(ratio)" in adapter, "the ratio the run worked out, set as it is")
+    assertFalse("setZoomRatio" in code(adapter), "option A: no zoom ratio is ever asked of the camera, zoom is a crop")
     for (file in sources()) {
       val text = code(file.readText())
       for (call in listOf("tapToFocus", "onTap(", "onPinch(", "CONTROL_AF_MODE", "setAutoMode(", "CONTROL_AF_TRIGGER")) assertFalse(call in text, "${file.name}: $call")

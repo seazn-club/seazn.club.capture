@@ -114,7 +114,6 @@ class CapturePreviewView(context: Context, appContext: AppContext) : ExpoView(co
         }
 
         override fun onDoubleTap(e: MotionEvent): Boolean {
-          noPan = true // its second press may be dragged: that is no pan
           touched(CameraTouch.Reset)
           return true
         }
@@ -124,7 +123,7 @@ class CapturePreviewView(context: Context, appContext: AppContext) : ExpoView(co
          * it moved. Never while two fingers have been down (the detector reports a pinch's focal move as a scroll too).
          */
         override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
-          if (multi || noPan || pinch.isInProgress) return true
+          if (multi || pinch.isInProgress) return true
           touched(CameraTouch.Drag(-distanceX / preview.width, -distanceY / preview.height))
           return true
         }
@@ -173,14 +172,10 @@ class CapturePreviewView(context: Context, appContext: AppContext) : ExpoView(co
   /** Two fingers have been down since the press began: its scrolls are a pinch's, never a pan. */
   private var multi = false
 
-  /** The press began as a double tap's second, which resets metering and pans nothing. */
-  private var noPan = false
-
   private fun gestured(event: MotionEvent): Boolean {
     when (event.actionMasked) {
       MotionEvent.ACTION_DOWN -> {
         multi = false
-        noPan = false
       }
       MotionEvent.ACTION_POINTER_DOWN -> multi = true
     }

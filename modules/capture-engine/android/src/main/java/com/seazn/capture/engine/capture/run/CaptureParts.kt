@@ -128,27 +128,24 @@ interface CaptureParts {
   suspend fun antibanding(cameraId: String): Antibanding?
 
   /**
-   * Spec 2026-11-25-zoom-and-metering §3: camera [cameraId]'s zoom ratios (`CONTROL_ZOOM_RATIO_RANGE`). Null unless the
+   * Spec 2026-11-25-zoom-and-metering §3: camera [cameraId]'s zoom ratios (1x to `SCALER_AVAILABLE_MAX_DIGITAL_ZOOM`, a crop of the one camera). Null unless the
    * source held now is that camera and StreamPack reports it open now: a setter against a closed device opens it.
    */
   fun zoomRange(cameraId: String): ZoomRange?
 
-  /** Spec §3: [ratio] on the held, open camera source [cameraId]; false, with nothing set, when it is not held or open. */
-  suspend fun zoom(cameraId: String, ratio: Float): Boolean
-
   /**
-   * Spec §3.5: [ratio] with the crop centred at [centre], in one repeating request (the ratio and `SCALER_CROP_REGION`
-   * together); the whole array when centred. False, with nothing set, when the held source is not camera [cameraId] or
-   * is not open now.
+   * Spec §3 and §3.5: zoom [ratio] of the picture, centred at [centre], as a digital crop of the one camera: the
+   * `SCALER_CROP_REGION` window, with `CONTROL_ZOOM_RATIO` kept at 1.0. The whole array at 1x. False, with nothing set,
+   * when the held source is not camera [cameraId] or is not open now.
    */
   suspend fun pan(cameraId: String, ratio: Float, centre: PanCentre, frameDegrees: Int): Boolean
 
   /**
-   * Spec §4: focus and exposure metered at [point] of the picture encoded at [frameDegrees], or the camera's own
+   * Spec §4: focus and exposure metered at [point] of the picture (zoomed to [ratio], centred at [centre]) encoded at [frameDegrees], or the camera's own
    * metering with null; continuous focus stays the mode. False, with nothing set, when the held source is not camera
    * [cameraId] or is not open now.
    */
-  suspend fun meter(cameraId: String, point: MeterPoint?, frameDegrees: Int): Boolean
+  suspend fun meter(cameraId: String, point: MeterPoint?, frameDegrees: Int, ratio: Float, centre: PanCentre): Boolean
 }
 
 /** N45 I1: what a probe of our camera found ([CaptureParts.probeCamera]). */

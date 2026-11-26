@@ -31,8 +31,6 @@ class CameraFraming(private val parts: CaptureParts, private val line: (RecordEn
   /** Where the zoomed crop is centred (spec §3.5); the middle at 1x. */
   private var centre = Pan.CENTRE
 
-  /** The open camera has been given a crop region, so a centred frame must put the whole array back. */
-  private var cropped = false
   private var point: MeterPoint? = null
 
   /** The camera whose open was last accepted, until a new open is asked, a busy word or a loss is heard, or the release. */
@@ -54,23 +52,18 @@ class CameraFraming(private val parts: CaptureParts, private val line: (RecordEn
     val id = open
     val zoomed = ratio != Zoom.DEFAULT
     val pointed = point != null
-    val wasCropped = cropped
     ratio = Zoom.DEFAULT
     centre = Pan.CENTRE
-    cropped = false
     point = null
     camera = id
     if (id == null) return
-    if (wasCropped) guarded("zoom") { parts.pan(id, Zoom.DEFAULT, Pan.CENTRE, frameDegrees) }
-    else if (zoomed) guarded("zoom") { parts.zoom(id, Zoom.DEFAULT) }
-    if (pointed) guarded("metering") { parts.meter(id, null, frameDegrees) }
+    if (zoomed) guarded("zoom") { parts.pan(id, Zoom.DEFAULT, Pan.CENTRE, frameDegrees) }
+    if (pointed) guarded("metering") { parts.meter(id, null, frameDegrees, Zoom.DEFAULT, Pan.CENTRE) }
   }
 
   /** StreamPack reported camera [cameraId] open, and the run accepted it. Its own camera gets back what it had. */
   suspend fun opened(cameraId: String, frameDegrees: Int) {
     open = cameraId
-    // A new source opens at the camera's defaults: whole array, 1x.
-    cropped = false
     if (camera != cameraId) {
       camera = cameraId
       ratio = Zoom.DEFAULT
@@ -79,7 +72,7 @@ class CameraFraming(private val parts: CaptureParts, private val line: (RecordEn
       return
     }
     if (ratio != Zoom.DEFAULT) guarded("zoom") { framed(cameraId, frameDegrees) }
-    point?.let { guarded("metering") { parts.meter(cameraId, it, frameDegrees) } }
+    point?.let { guarded("metering") { parts.meter(cameraId, it, frameDegrees, ratio, centre) } }
   }
 
   /** A new open is asked ([cameraId] null), or camera [cameraId] was lost or met another app's hold: nothing is open. */
@@ -118,7 +111,7 @@ class CameraFraming(private val parts: CaptureParts, private val line: (RecordEn
 
   /**
    * Before air and on it alike (owner, 2026-11-26, superseding 2026-11-24's "before air only"): the same range, no
-   * easing, no cap. On air the ratio a gesture ends on is one record line ([pinchEnded]).
+   * easing. The range is the camera's digital zoom, a crop of the one camera (no lens switch). On air the ratio a gesture ends on is one record line ([pinchEnded]).
    */
   private suspend fun pinch(scale: Float, frameDegrees: Int) {
     val id = open ?: return ignored("zoom", "closed")
@@ -134,7 +127,7 @@ class CameraFraming(private val parts: CaptureParts, private val line: (RecordEn
       // The place tapped has moved in the picture: the camera's own metering again.
       if (point != null) {
         point = null
-        parts.meter(id, null, frameDegrees)
+        parts.meter(id, null, frameDegrees, ratio, centre)
       }
     }
   }
@@ -153,18 +146,14 @@ class CameraFraming(private val parts: CaptureParts, private val line: (RecordEn
       centre = moved
       if (point != null) {
         point = null
-        parts.meter(id, null, frameDegrees)
+        parts.meter(id, null, frameDegrees, ratio, centre)
       }
     }
   }
 
-  /** The ratio and centre set on the open camera: the plain zoom while the crop is whole, else with the crop region. */
-  private suspend fun framed(id: String, frameDegrees: Int, at: Float = ratio, around: PanCentre = centre): Boolean {
-    if (around == Pan.CENTRE && !cropped) return parts.zoom(id, at)
-    if (!parts.pan(id, at, around, frameDegrees)) return false
-    cropped = around != Pan.CENTRE
-    return true
-  }
+  /** Zoom and pan are one thing: the crop of the camera's picture ([Pan.frame]), set whole, centred or not. */
+  private suspend fun framed(id: String, frameDegrees: Int, at: Float = ratio, around: PanCentre = centre): Boolean =
+    parts.pan(id, at, around, frameDegrees)
 
   /**
    * A gesture ended: on air, and only if it moved the ratio, one `zoom` line says where the picture was reframed to, so a
@@ -180,7 +169,7 @@ class CameraFraming(private val parts: CaptureParts, private val line: (RecordEn
   private suspend fun meter(at: MeterPoint?, frameDegrees: Int) {
     val id = open ?: return ignored("meter", "closed")
     guarded("metering") {
-      if (!parts.meter(id, at, frameDegrees)) return@guarded ignored("meter", "closed")
+      if (!parts.meter(id, at, frameDegrees, ratio, centre)) return@guarded ignored("meter", "closed")
       point = at
     }
   }

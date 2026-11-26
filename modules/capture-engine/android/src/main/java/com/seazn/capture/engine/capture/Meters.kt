@@ -6,6 +6,7 @@ import android.hardware.camera2.params.MeteringRectangle
 import com.seazn.capture.engine.core.MeterArea
 import com.seazn.capture.engine.core.MeterPoint
 import com.seazn.capture.engine.core.Metering
+import com.seazn.capture.engine.core.PanCentre
 import com.seazn.capture.engine.core.SensorFacts
 import io.github.thibaultbee.streampack.core.elements.sources.video.camera.ICameraSource
 
@@ -18,11 +19,11 @@ import io.github.thibaultbee.streampack.core.elements.sources.video.camera.ICame
  * request is applied after, once. Asked only of a camera open now: against a closed device the calls open it.
  */
 internal object Meters {
-  suspend fun set(camera: ICameraSource, point: MeterPoint?, frameDegrees: Int) {
+  suspend fun set(camera: ICameraSource, point: MeterPoint?, frameDegrees: Int, ratio: Float, centre: PanCentre) {
     val settings = camera.settings
     val sensor = sensor(settings.characteristics)
-    val focus = point?.let { Metering.area(it, frameDegrees, sensor, Metering.FOCUS_SIZE) } ?: Metering.NONE
-    val exposure = point?.let { Metering.area(it, frameDegrees, sensor, Metering.EXPOSURE_SIZE) } ?: Metering.NONE
+    val focus = point?.let { Metering.area(it, frameDegrees, sensor, Metering.FOCUS_SIZE, ratio, centre) } ?: Metering.NONE
+    val exposure = point?.let { Metering.area(it, frameDegrees, sensor, Metering.EXPOSURE_SIZE, ratio, centre) } ?: Metering.NONE
     val focuses = settings.focus.maxNumOfMeteringRegions > 0
     val exposes = settings.exposure.maxNumOfMeteringRegions > 0
     if (focuses) settings.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(rectangle(focus)))

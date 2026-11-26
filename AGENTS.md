@@ -531,9 +531,11 @@ Three rules travel with these tokens:
   ends the broadcast and unpairs (A3). On a court code it ends this match only
   and the court waits again (O5), and its label says so: "Hold to stop this
   match". A pinch zooms on air exactly as it does before air, the same
-  range with no easing or cap, and each gesture on air writes one `zoom` record
-  line (owner, 2026-11-26, option B; it replaced "before air only" of
+  range with no easing or cap, and a gesture on air writes one `zoom` record
+  line when the ratio moved (owner, 2026-11-26, option B; it replaced "before air only" of
   2026-11-24, because reframing on air is worth more than the mis-pinch risk).
+  Zoom is a digital crop of the main camera, 1x to its digital zoom limit,
+  with no telephoto lens switching (owner, 2026-11-26).
   Above 1x a one-finger drag moves the crop 1:1 within the picture's field, on
   air too, and does nothing at 1x (owner, 2026-11-26); it writes no record line,
   since no contract key carries a pan.

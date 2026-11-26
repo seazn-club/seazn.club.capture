@@ -92,10 +92,14 @@ object Metering {
    * of its `getFovAdjustedPoint`: the 16:9 picture is the centre of the sensor that Camera2 crops it from. A region past
    * the sensor's edge is moved inside it, never cut.
    */
-  fun area(point: MeterPoint, frameDegrees: Int, sensor: SensorFacts, size: Float): MeterArea {
-    val at = onSensor(point, frameDegrees, sensor)
-    val width = (at.wide * size).roundToInt()
-    val height = (at.high * size).roundToInt()
+  fun area(point: MeterPoint, frameDegrees: Int, sensor: SensorFacts, size: Float, ratio: Float = Zoom.DEFAULT, centre: PanCentre = Pan.CENTRE): MeterArea {
+    val zoom = maxOf(Zoom.DEFAULT, ratio)
+    // The picture shows 1 / zoom of the field, centred at [centre]: a tap is that share of it, and the regions are the
+    // active array's own (the zoom is a crop with the ratio at 1, so there is no post-zoom frame), inside the crop.
+    val inField = MeterPoint((centre.x + (point.x - 0.5f) / zoom).coerceIn(0f, 1f), (centre.y + (point.y - 0.5f) / zoom).coerceIn(0f, 1f))
+    val at = onSensor(inField, frameDegrees, sensor)
+    val width = (at.wide * size / zoom).roundToInt()
+    val height = (at.high * size / zoom).roundToInt()
     return MeterArea(placed(at.centreX, width, sensor.width), placed(at.centreY, height, sensor.height), width, height, WEIGHT)
   }
 
@@ -143,16 +147,14 @@ data class PanCentre(val x: Float, val y: Float)
 /** A crop region in the active array (Camera2's `SCALER_CROP_REGION`). */
 data class CropRect(val left: Int, val top: Int, val width: Int, val height: Int)
 
-/** What to set on the camera for a zoom and a pan: `CONTROL_ZOOM_RATIO`, and the crop it zooms about (null: the whole array). */
+/** What to set on the camera for a zoom and a pan: `CONTROL_ZOOM_RATIO` (always 1.0) and the crop window (null: the whole array). */
 data class PanFrame(val ratio: Float, val crop: CropRect?)
 
 /**
- * Spec §3.5 (owner, 2026-11-26): a one-finger drag moves the zoomed crop, 1:1, within the picture's own field.
- *
- * Camera2 zooms `CONTROL_ZOOM_RATIO` about the centre of `SCALER_CROP_REGION`. To put the window of size field / Z off
- * centre, the crop is the largest window centred where we want it that stays inside the field (S), and the ratio is the
- * one that shrinks S to the window: S / (field / Z). Both are one repeating request, so the picture never takes a frame
- * with one and not the other, and neither restarts the session.
+ * Spec §3.5 (owner, 2026-11-26, option A): all zoom is a digital crop of the current camera, and a one-finger drag moves
+ * the crop, 1:1, within the picture's own field. `CONTROL_ZOOM_RATIO` stays 1.0: with another ratio the crop region is
+ * overridden and its coordinates are post-zoom (CaptureRequest docs), and a ratio is what hands a logical camera to
+ * another lens. So the window of field / Z centred at C is sent as `SCALER_CROP_REGION` alone, centred or not.
  */
 object Pan {
   val CENTRE = PanCentre(0.5f, 0.5f)
@@ -170,20 +172,21 @@ object Pan {
     return clamp(PanCentre(centre.x - dx / ratio, centre.y - dy / ratio), ratio)
   }
 
-  /** The ratio and crop for [centre] at [ratio]; the whole array (null) when centred, as zoom has always set it. */
+  /**
+   * What to set for zoom [ratio] centred at [centre]: ratio 1.0 always, and the crop window of the field / [ratio] in the
+   * active array, the whole of it (null) at 1x. The whole rectangle is kept inside the array, right and bottom edges
+   * included, whatever the rounding.
+   */
   fun frame(centre: PanCentre, ratio: Float, frameDegrees: Int, sensor: SensorFacts): PanFrame {
+    if (ratio <= Zoom.DEFAULT) return PanFrame(1f, null)
     val held = clamp(centre, ratio)
-    if (held == CENTRE) return PanFrame(ratio, null)
     val at = Metering.onSensor(MeterPoint(held.x, held.y), frameDegrees, sensor)
-    val fieldLeft = (sensor.width - at.wide) / 2
-    val fieldTop = (sensor.height - at.high) / 2
-    val aspect = at.wide / at.high
-    val window = at.wide / ratio
-    val reach = minOf(at.centreX - fieldLeft, fieldLeft + at.wide - at.centreX, (at.centreY - fieldTop) * aspect, (fieldTop + at.high - at.centreY) * aspect)
-    val side = (2 * reach).coerceIn(window, at.wide)
-    val high = side / aspect
-    val left = (at.centreX - side / 2).roundToInt().coerceIn(0, sensor.width)
-    val top = (at.centreY - high / 2).roundToInt().coerceIn(0, sensor.height)
-    return PanFrame(side / window * 1f, CropRect(left, top, side.roundToInt(), high.roundToInt()))
+    val wide = at.wide / ratio
+    val high = at.high / ratio
+    val width = wide.roundToInt().coerceIn(1, sensor.width)
+    val height = high.roundToInt().coerceIn(1, sensor.height)
+    val left = (at.centreX - wide / 2).roundToInt().coerceIn(0, sensor.width - width)
+    val top = (at.centreY - high / 2).roundToInt().coerceIn(0, sensor.height - height)
+    return PanFrame(1f, CropRect(left, top, width, height))
   }
 }

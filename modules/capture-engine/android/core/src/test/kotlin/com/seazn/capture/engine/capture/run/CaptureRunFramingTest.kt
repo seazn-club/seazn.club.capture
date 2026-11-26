@@ -170,7 +170,7 @@ class CaptureRunFramingTest : CaptureRunTestKit() {
       val s = ready()
       touched(s, CameraTouch.Pinch(2f))
       touched(s, CameraTouch.Drag(0.1f, 0f), CameraTouch.Drag(0.1f, 0f))
-      assertEquals(listOf(panned(2f, 0.4f, 0.5f)), s.parts.pans)
+      assertEquals(listOf(panned(2f, 0.5f, 0.5f), panned(2f, 0.4f, 0.5f)), s.parts.pans, "the pinch, then the two drags as one move")
       touched(s, CameraTouch.Drag(-0.2f, 0.2f))
       assertEquals(panned(2f, 0.5f, 0.4f), s.parts.pans.last(), "from where it was, not from the middle")
       touched(s, CameraTouch.Drag(5f, 5f))
@@ -184,7 +184,7 @@ class CaptureRunFramingTest : CaptureRunTestKit() {
       touched(s, CameraTouch.Pinch(2f))
       s.told.held = true
       touched(s, CameraTouch.Drag(0.2f, 0f), CameraTouch.PinchEnd)
-      assertEquals(listOf(panned(2f, 0.4f, 0.5f)), s.parts.pans)
+      assertEquals(listOf(panned(2f, 0.5f, 0.5f), panned(2f, 0.4f, 0.5f)), s.parts.pans)
       assertEquals(emptyList(), zoomLines(s).filter { it != Zoom.entry(2f) }, "no contract key carries a pan, so none is said")
     }
 
@@ -200,7 +200,30 @@ class CaptureRunFramingTest : CaptureRunTestKit() {
       touched(s, CameraTouch.Pinch(0.25f))
       assertEquals(panned(1f, 0.5f, 0.5f), s.parts.pans.last(), "1x is centred, and the crop region is set back to the whole array")
       touched(s, CameraTouch.Pinch(2f))
-      assertEquals("0" to 2f, s.parts.zooms.last(), "centred and whole again: the plain zoom")
+      assertEquals(panned(2f, 0.5f, 0.5f), s.parts.pans.last(), "centred again: the same path, a crop about the middle")
+    }
+
+  @Test
+  fun `the camera is only ever sent ratio 1, and a crop whose width is the field over the zoom`() =
+    runTest {
+      val s = ready()
+      touched(s, CameraTouch.Pinch(2f), CameraTouch.Drag(0.2f, 0f))
+      touched(s, CameraTouch.Pinch(2f), CameraTouch.Drag(-0.1f, 0.1f))
+      touched(s, CameraTouch.Pinch(0.1f))
+      assertEquals(s.parts.pans.size, s.parts.sent.size)
+      assertEquals(listOf(1f), s.parts.sent.map { it.second }.distinct(), "CONTROL_ZOOM_RATIO stays 1.0 whatever the zoom or the pan")
+      assertEquals(listOf(960, 576, 1056, 1152, null), s.parts.sent.map { it.third?.left })
+      assertEquals(listOf(1920, 1920, 960, 960, null), s.parts.sent.map { it.third?.width }, "3840 over the zoom: 2x, 2x, 4x, 4x, 1x")
+      assertEquals(null, s.parts.sent.last().third, "1x is the whole array")
+    }
+
+  @Test
+  fun `a tap after a pan is metered in the crop the camera shows`() =
+    runTest {
+      val s = ready()
+      touched(s, CameraTouch.Pinch(2f), CameraTouch.Drag(0.2f, 0f), CameraTouch.Tap(spot))
+      assertEquals(listOf(metered("0", spot, 90)), s.parts.meters)
+      assertEquals(listOf(2f to PanCentre(0.4f, 0.5f)), s.parts.meterWindows, "the zoom and centre the tap is placed in")
     }
 
   @Test
@@ -218,7 +241,7 @@ class CaptureRunFramingTest : CaptureRunTestKit() {
       touched(s, CameraTouch.Pinch(2f), CameraTouch.Tap(spot))
       assertEquals(listOf(metered("0", spot, 90)), s.parts.meters)
       touched(s, CameraTouch.Drag(0f, 0f))
-      assertEquals(emptyList(), s.parts.pans)
+      assertEquals(1, s.parts.pans.size, "only the pinch's")
     }
 
   @Test
@@ -228,18 +251,18 @@ class CaptureRunFramingTest : CaptureRunTestKit() {
       touched(s, CameraTouch.Pinch(2f), CameraTouch.Drag(0.2f, 0f))
       reported(s, "0") // Settings closed and reopened the capture: the same camera, a new source at the defaults
       assertEquals(panned(2f, 0.4f, 0.5f), s.parts.pans.last())
-      assertEquals(2, s.parts.pans.size, "put back with the crop, once")
+      assertEquals(3, s.parts.pans.size, "put back with the crop, once")
       s.run.open(Configs.pairRequest()) // a new pairing over the held capture
       advanceUntilIdle()
       assertEquals(panned(1f, 0.5f, 0.5f), s.parts.pans.last(), "centred at 1x, whole array")
       touched(s, CameraTouch.Drag(0.3f, 0.3f))
-      assertEquals(3, s.parts.pans.size, "and a drag at 1x does nothing")
+      assertEquals(4, s.parts.pans.size, "and a drag at 1x does nothing")
       touched(s, CameraTouch.Pinch(2f), CameraTouch.Drag(0.2f, 0f))
-      assertEquals(4, s.parts.pans.size)
+      assertEquals(6, s.parts.pans.size)
       does(s, Command.SwitchCamera)
       reported(s, "1")
       touched(s, CameraTouch.Drag(0.2f, 0f))
-      assertEquals(4, s.parts.pans.size, "the other camera is at 1x: no pan")
+      assertEquals(6, s.parts.pans.size, "the other camera is at 1x: no pan")
       does(s, Command.SwitchCamera)
       reported(s, "0")
       touched(s, CameraTouch.Pinch(2f))

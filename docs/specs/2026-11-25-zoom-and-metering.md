@@ -33,16 +33,16 @@ bridge. Nothing changes in JS: no intent, no snapshot field, no prop.
 | Rules    | `core/.../core/Framing.kt`           | `CameraTouch`, `Zoom.next`, `Zoom.entry`, `Metering.point`, `Metering.area`: pure, JVM-tested |
 | State    | `capture/run/CameraFraming.kt`       | the zoom and the place tapped, per pairing and camera; the gates; the record lines            |
 | Queue    | `CaptureRun.touch`                   | every gesture runs on the run's one consumer (`CaptureSerial`), beside opens and connects     |
-| Lock     | `BridgeCore.broadcastHeld()`         | the last published phase's `holdsBroadcast` (Arming on), volatile, any thread                 |
+| Record   | `BridgeCore.broadcastHeld()`         | the on-air record gate: a gesture's end writes a `zoom` line only while `holdsBroadcast`      |
 | Gestures | `CapturePreviewView`                 | our own `ScaleGestureDetector` and `GestureDetector` on the `PreviewView`                     |
-| Camera   | `StreamerAdapter` parts, `Meters.kt` | `RZoom.setZoomRatio`; `CONTROL_AF_REGIONS` and `CONTROL_AE_REGIONS`                           |
+| Camera   | `StreamerAdapter` parts, `Meters.kt` | `SCALER_CROP_REGION` (`Pans.kt`); `CONTROL_AF_REGIONS` and `CONTROL_AE_REGIONS`               |
 
 ## 3. Zoom
 
 ### 3.1 The rule
 
-Each pinch multiplies the ratio by the detector's scale factor, kept within the camera's
-`CONTROL_ZOOM_RATIO_RANGE`, never under 1× (`Zoom.next`). A scale that is not a positive number changes nothing. Pinch
+Each pinch multiplies the ratio by the detector's scale factor, kept between 1× and the camera's
+`SCALER_AVAILABLE_MAX_DIGITAL_ZOOM` (`Zoom.next`; owner 2026-11-26, §3.5: all zoom is a crop of the one camera). A scale that is not a positive number changes nothing. Pinch
 moves arrive faster than a camera applies a ratio, so the ones the queue has not taken yet are multiplied together and
 taken as one (`PinchBuffer`): one queue turn, one ratio set.
 
@@ -88,39 +88,54 @@ and if the ratio moved since the last gesture ended and the machine holds a broa
 end is one line. Never per frame; a gesture that moves nothing (already at the top, or at 1×) writes none. Before air the
 line at air start says the zoom in use, so a pinch's end writes none.
 
-### 3.5 Drag to move the zoomed frame (owner, 2026-11-26, "yes")
+### 3.5 Zoom is a digital crop; drag to move it (owner, 2026-11-26)
 
 Above 1× a one-finger drag on the preview moves the crop: left, right, up and down, 1:1 with the finger, no easing, before
 air and on it, clamped to the picture's own field (the 16:9 centre of the sensor that the 1× picture is). At 1× a drag
 does nothing. A camera switch and a new pairing put the crop back in the middle with the zoom at 1×, and a reopen of the
 same camera puts back the crop it had, as it does the zoom (§3.3).
 
-**Feasibility.** StreamPack 3.2.1's `RZoom.setZoomRatio` is `settings.set(CONTROL_ZOOM_RATIO, …)` then
-`applyRepeatingSession()` (javap), and `Meters` sets the metering regions the same way. A crop region is one more key in
-that repeating request (`Pans.kt`, `settings.set(CaptureRequest.SCALER_CROP_REGION, …)`): no capture session restart and
-no encoder restart. The ratio and the crop go in one request, so no frame has one and not the other.
+**Option A, chosen (owner, 2026-11-26): all zoom is a digital crop of the current camera.** `CONTROL_ZOOM_RATIO` is 1.0
+always, and the zoom and the pan are `SCALER_CROP_REGION` alone, in active-array coordinates. The pinch's range is 1× to
+`SCALER_AVAILABLE_MAX_DIGITAL_ZOOM`. There is no telephoto lens switching: no lens or mode jump on air. The cost is that
+a phone with a telephoto lens does not use it, and a deep zoom is a crop of the main camera's pixels.
 
-**The maths** (`Pan`, pure, JVM-tested). Camera2 zooms about the centre of `SCALER_CROP_REGION`. For a window of
-field / Z centred at C, the crop is the largest window centred at C that stays inside the field (S), and the ratio is
-S / (field / Z): so S is as far from the field's edge as C is, and a window at the edge is the crop itself at ratio 1. A
-centred window is today's frame (whole array, ratio Z), set back with the whole array when the crop returns to the middle.
-A drag of d (a share of the visible picture) moves C by d / Z the other way (the content follows the finger), kept at
-least 0.5 / Z from each edge. A pinch re-clamps C to the new Z. The picture's axes become the sensor's through
+**Why not a ratio (rejected option B, mixed mode).** The CaptureRequest documentation for `CONTROL_ZOOM_RATIO` and
+`SCALER_CROP_REGION`: with a zoom ratio other than 1.0 a freeform crop region is overridden (the camera zooms about the
+sensor's centre) and the coordinates of the other regions are post-zoom. A first build here sent a ratio and a larger
+crop about the target; it would have shown a centred zoom and then snapped when the drag reached the edge. A ratio is also
+what hands a logical camera to another lens, so a drag's first request would have switched lens on air. Mixing the two
+modes was rejected for that reason.
+
+**Feasibility.** StreamPack 3.2.1's `RZoom.setZoomRatio` is `settings.set(CONTROL_ZOOM_RATIO, …)` then
+`applyRepeatingSession()` (javap), and `Meters` sets the metering regions the same way. The crop is one key in that
+repeating request (`Pans.kt`, `settings.set(CaptureRequest.SCALER_CROP_REGION, …)`): no capture session restart and no
+encoder restart. The ratio (1.0) and the crop go in one request.
+
+**The maths** (`Pan`, pure, JVM-tested). The window is the field / Z, centred at C, in active-array coordinates (the whole
+array at 1×), its whole rectangle kept inside the array at the right and bottom edges as well as the left and top. A drag of
+d (a share of the visible picture) moves C by d / Z the other way (the content follows the finger), kept at least 0.5 / Z
+from each edge of the field. A pinch re-clamps C to the new Z. The picture's axes become the sensor's through
 `Metering.onSensor`, the same turn and front-camera mirror as a tap, so a drag follows the finger held either way round.
+The zoom the crop shows reads back as field width over crop width, to a tenth, which is the `zoom` line's `state`.
+
+**Metering on a crop.** A tap is a place in the visible window: the picture's point P maps to C + (P − 0.5) / Z in the
+field, and the region is 1 / Z of the usual size, so a tap on a zoomed or panned frame meters that spot and is never
+outside the crop (`Metering.area`; the regions are the array's own, as the ratio is 1).
 
 **Gestures** (`CapturePreviewView`). The `GestureDetector`'s scroll starts only past the system's touch slop, so a press
 that moves less is a tap and one that moves more is a drag, never both. Scrolls are ignored while a pinch is in progress
-and for the rest of any press that has had two fingers down (the detector reports a pinch's focal move as a scroll), and
-for a press that began as a double tap's second (`noPan`): quick scale stays off, and that press resets metering and
-pans nothing. A drag moves the place tapped to the camera's own metering, as a pinch does.
+and for the rest of any press that has had two fingers down (the detector reports a pinch's focal move as a scroll). The
+first finger's movement past slop before the second goes down can pan a little before the pinch starts: accepted. A
+double tap's second press is never a scroll (AOSP's `GestureDetector` hands that press to `onDoubleTapEvent` only; not
+read on a device), so no guard of ours. A drag moves the place tapped to the camera's own metering, as a pinch does.
 
-**Record.** None. The contract's keys are fixed and the `zoom` line's `state` is the ratio, which a drag does not change;
-no listed key carries two numbers for a centre, and a line with an unchanged ratio would misreport. A pan on air is
-therefore not in the post-match record; a key is a contract change for the web repo.
+**Record.** None for a pan. The contract's keys are fixed and the `zoom` line's `state` is the ratio, which a drag does not
+change; no listed key carries two numbers for a centre, and a line with an unchanged ratio would misreport. A pan on air
+is therefore not in the post-match record; a key is a contract change for the web repo.
 
-**Unverified.** That the camera honours `SCALER_CROP_REGION` together with `CONTROL_ZOOM_RATIO` as Camera2 documents
-(§8), and that a tap's region lands right on a panned frame (§4.2 says the regions are in the zoomed picture's own
-coordinates; a panned crop is a different zoom about a different centre).
+**Unverified.** That the camera honours `SCALER_CROP_REGION` with the ratio at 1.0 for the whole range, including how the
+sensor's own crop to 16:9 and any stabilisation margin meet it (§8).
 
 ## 4. Metering
 

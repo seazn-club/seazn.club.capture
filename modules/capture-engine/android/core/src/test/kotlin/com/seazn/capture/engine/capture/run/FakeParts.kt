@@ -8,7 +8,10 @@ import com.seazn.capture.engine.core.Command
 import com.seazn.capture.engine.core.Input
 import com.seazn.capture.engine.core.MeterPoint
 import com.seazn.capture.engine.core.PairRequest
+import com.seazn.capture.engine.core.CropRect
+import com.seazn.capture.engine.core.Pan
 import com.seazn.capture.engine.core.PanCentre
+import com.seazn.capture.engine.core.SensorFacts
 import com.seazn.capture.engine.core.RecordEntry
 import com.seazn.capture.engine.core.SpeechState
 import com.seazn.capture.engine.core.Tuning
@@ -347,8 +350,8 @@ class FakeParts : CaptureParts {
    */
   val zoomRanges = mutableMapOf("0" to ZoomRange(0.6f, 8f), "1" to ZoomRange(1f, 4f))
 
-  /** Spec §3: each ratio set, with its camera, in order. */
-  val zooms = mutableListOf<Pair<String, Float>>()
+  /** Spec §3: each zoom asked, with its camera, in order (the logical ratio, one for each [pans] entry). */
+  val zooms: List<Pair<String, Float>> get() = pans.map { it.camera to it.ratio }
 
   /** Spec §3: a zoom that throws this. */
   var zoomFailure: Exception? = null
@@ -380,15 +383,14 @@ class FakeParts : CaptureParts {
     return zoomRanges[cameraId]?.takeIf { rangeKnown && openNow(cameraId) }
   }
 
-  override suspend fun zoom(cameraId: String, ratio: Float): Boolean {
-    if (!zoomable || !openNow(cameraId)) return false
-    zoomFailure?.let { throw it }
-    zooms += cameraId to ratio
-    return true
-  }
-
-  /** Spec §3.5: each ratio and crop centre set together, in order. */
+  /** Spec §3.5: each zoom and crop centre asked, in order. */
   val pans = mutableListOf<Panned>()
+
+  /** What the adapter would send for each of [pans], by the pure rule: the ratio and the crop. Option A: ratio 1.0 always. */
+  val sent = mutableListOf<Triple<String, Float, CropRect?>>()
+
+  /** Spec §4: the zoom and centre each metering was asked in, with [meters]. */
+  val meterWindows = mutableListOf<Pair<Float, PanCentre>>()
 
   data class Panned(val camera: String, val ratio: Float, val centre: PanCentre, val degrees: Int)
 
@@ -396,13 +398,16 @@ class FakeParts : CaptureParts {
     if (!zoomable || !openNow(cameraId)) return false
     zoomFailure?.let { throw it }
     pans += Panned(cameraId, ratio, centre, frameDegrees)
+    val frame = Pan.frame(centre, ratio, frameDegrees, SensorFacts(90, false, 3840, 2880))
+    sent += Triple(cameraId, frame.ratio, frame.crop)
     return true
   }
 
-  override suspend fun meter(cameraId: String, point: MeterPoint?, frameDegrees: Int): Boolean {
+  override suspend fun meter(cameraId: String, point: MeterPoint?, frameDegrees: Int, ratio: Float, centre: PanCentre): Boolean {
     if (!meterable || !openNow(cameraId)) return false
     meterFailure?.let { throw it }
     meters += Triple(cameraId, point, frameDegrees)
+    meterWindows += ratio to centre
     return true
   }
 

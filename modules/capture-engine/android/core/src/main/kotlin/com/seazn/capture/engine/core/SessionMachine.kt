@@ -303,8 +303,10 @@ internal object Transports {
       val session = started.copy(publisherNetwork = started.attemptNetwork)
       // Seeded at the connect (carry 13): the first reading's bytes, drops and egress count from here.
       val meter = LinkMeter(CONNECT_COUNTERS, now.monoMs)
-      val onAir = Phase.OnAir(session, attemptId, phase.transport, now.monoMs, StallWatchdog(now.monoMs), meter, outage = phase.outage)
-      val connected = record("connected", "transport" to phase.transport, "attempt" to attemptId)
+      // N52: connected while the default network is not validated, it is provisional, and the record's `validated` says so.
+      val validated = session.networkValidated
+      val onAir = Phase.OnAir(session, attemptId, phase.transport, now.monoMs, StallWatchdog(now.monoMs), meter, outage = phase.outage, provisional = !validated)
+      val connected = record("connected", "transport" to phase.transport, "attempt" to attemptId, "validated" to validated)
       // N49 fix 2: asked on a network that is no longer the default (a switch while it connected): replaced now.
       val asked = session.attemptNetwork
       val default = session.defaultNetwork
@@ -386,28 +388,50 @@ internal object Transports {
     if (phase !is Phase.OnAir || phase.attemptId != input.attemptId) return Step(phase)
     val (session, fetch) = askDescriptor(phase.session, now)
     val publishedMs = now.monoMs - phase.connectedAtMs
+    // A provisional connection is on a network not validated, so the policy's own rule already counts nothing for it.
     val decision = session.fallback.dropped(input.reason, session.networkValidated, publishedMs)
     val outage = phase.outage ?: outageFor(session, phase.transport, now, ReconnectCause.UPLINK_LOST)
+    val quick = if (phase.provisional) session.provisional.next(now.monoMs) else null
     val commands =
       mutableListOf(
         record(
           "dropped",
-          "transport" to phase.transport,
-          "reason" to input.reason,
-          "validated" to session.networkValidated,
-          "counted" to decision.counted,
-          "publishedMs" to publishedMs,
-          "message" to input.message,
+          *listOfNotNull(
+              "transport" to phase.transport,
+              "reason" to input.reason,
+              "validated" to session.networkValidated,
+              "counted" to decision.counted,
+              "publishedMs" to publishedMs,
+              "message" to input.message,
+              quick?.let { "retryMs" to it.second },
+            )
+            .toTypedArray(),
         ),
         fetch,
       )
     if (decision.fellBack) commands += record("fell-back", "from" to phase.transport, "to" to decision.policy.current)
-    val retries = if (session.liveSinceEpochMs == null) session.retries.dropped(now.monoMs) else session.retries
     val regulation = BitrateRegulator.afterDrop(session.regulation, now.monoMs)
     dropMoved(session.regulation.targetBps, regulation.targetBps)?.let { commands += it }
-    val next = session.copy(fallback = decision.policy, regulation = regulation, retries = retries)
+    val counted = session.copy(fallback = decision.policy, regulation = regulation)
+    if (quick != null) return provisionalRetry(counted, quick, outage, commands, now)
+    val retries = if (session.liveSinceEpochMs == null) session.retries.dropped(now.monoMs) else session.retries
+    val next = counted.copy(retries = retries)
     val waiting = ConnectStep.Waiting(now.monoMs + retryWaitMs(next))
     return Step(Phase.Connecting(next, decision.policy.current, waiting, outage), commands)
+  }
+
+  /**
+   * N52 (owner ruling, 2026-11-26, option B, item 1): a provisional connection broke inside the flap bound. The next
+   * attempt is asked at once, in this step, or after the bound's spacing, and the never-live ladder does not move: no
+   * backoff grows. The hold is kept as every drop keeps it: it is the platform's clock (C2), not a budget of the phone's.
+   */
+  private fun provisionalRetry(session: Session, quick: Pair<ProvisionalRetries, Long>, outage: Outage?, commands: List<Command>, now: Now): Step {
+    val (bound, waitMs) = quick
+    val next = session.copy(provisional = bound)
+    val transport = session.fallback.current
+    if (waitMs > 0) return Step(Phase.Connecting(next, transport, ConnectStep.Waiting(now.monoMs + waitMs), outage), commands)
+    val step = connect(next, transport, outage, now)
+    return step.copy(commands = commands + step.commands)
   }
 
   /**
@@ -436,22 +460,38 @@ internal object Transports {
       if (previous == null) return Step(next)
       return Step(next, listOf(switchLine(if (next is Phase.Connecting) NetworkSwitch.BETWEEN_ATTEMPTS else NetworkSwitch.NOT_ON_AIR, next)))
     }
+    if (next is Phase.OnAir && next.provisional) return provisionalValidated(next, session, handle, now)
     val on = session.attemptNetwork ?: return Step(next.withSession(session.copy(attemptNetwork = handle)))
     if (on == handle) return Step(next, listOfNotNull(switchLine(NetworkSwitch.SAME, next).takeIf { previous != null }))
     if (next !is Phase.OnAir) return Step(next, listOf(switchLine(NetworkSwitch.PENDING, next)))
     return switchedOver(next, next.outage ?: outageFor(session, next.transport, now, ReconnectCause.UPLINK_LOST), now)
   }
 
-  private fun switchLine(result: NetworkSwitch, phase: Phase): Command =
-    record("network-switched", "result" to result, "attempt" to phase.attemptInHand, "phase" to phase.name)
+  /**
+   * N52 (owner ruling, 2026-11-26, option B, items 2 and 3): the default network [handle] validated while the connection
+   * in hand is provisional. Decided from the handle the attempt was asked on ([Session.attemptNetwork]), which is the one
+   * its SRT socket is bound to ([Command.Connect.network]): the same handle confirms it, with no reconnect, and from here
+   * its breaks are today's. Another handle, or none (asked while no network was known, so its route is unknown, unlike
+   * N49's adopt for a connection made on a validated network), replaces it at once on the validated network, as a switch
+   * does, its line saying `reason: provisional`.
+   */
+  private fun provisionalValidated(onAir: Phase.OnAir, session: Session, handle: Long, now: Now): Step {
+    if (session.attemptNetwork == handle) return Step(onAir.copy(provisional = false))
+    return switchedOver(onAir, onAir.outage ?: outageFor(session, onAir.transport, now, ReconnectCause.UPLINK_LOST), now, provisional = true)
+  }
+
+  private fun switchLine(result: NetworkSwitch, phase: Phase, provisional: Boolean = false): Command {
+    val fields = listOfNotNull("result" to result, "attempt" to phase.attemptInHand, "phase" to phase.name, ("reason" to "provisional").takeIf { provisional })
+    return record("network-switched", *fields.toTypedArray())
+  }
 
   /**
    * N49: the attempt replaced for a switch, a new link on another network (fix round 1, items 3 and 4). The regulator
    * forgets the rate the old link failed ([BitrateRegulator.newLink]), and the delivery watch starts its session again,
    * with no verdict for [DeliveryWatch.SWITCH_GRACE_MS] ([DeliveryWatch.switched]).
    */
-  private fun switchedOver(onAir: Phase.OnAir, outage: Outage?, now: Now): Step {
-    val line = switchLine(NetworkSwitch.REPLACED, onAir)
+  private fun switchedOver(onAir: Phase.OnAir, outage: Outage?, now: Now, provisional: Boolean = false): Step {
+    val line = switchLine(NetworkSwitch.REPLACED, onAir, provisional)
     val old = onAir.session
     val session = old.copy(regulation = BitrateRegulator.newLink(old.regulation), delivery = old.delivery.switched(now.monoMs))
     val step = replace(onAir, session, outage, now) { Command.StartNewSession(onAir.attemptId, it) }

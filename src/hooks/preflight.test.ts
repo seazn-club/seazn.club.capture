@@ -164,6 +164,12 @@ describe('the tally plate (spec §4, D14)', () => {
     expect(tallyPlateFor(kind, ready)).toBe(plate);
   });
 
+  it('reads a degraded session LIVE only when the backup link is its one reason', () => {
+    expect(tallyPlateFor('degraded', true, true)).toBe('live');
+    expect(tallyPlateFor('degraded', true, false)).toBe('trouble');
+    expect(tallyPlateFor('reconnecting', true, true)).toBe('trouble');
+  });
+
   it('never shows LIVE while connecting: LIVE only while frames advance (F-P5-6)', () => {
     expect(tallyPlateFor('connecting', true)).not.toBe('live');
   });

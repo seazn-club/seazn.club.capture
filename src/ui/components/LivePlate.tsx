@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { selectStateKind } from '@/hooks/engineSelectors';
+import { selectBackupOnly, selectStateKind } from '@/hooks/engineSelectors';
 import { tallyPlateFor } from '@/hooks/preflight';
 import { useEngineSelector } from '@/hooks/useCaptureEngine';
 import { TallyPlate } from '@/ui/components/TallyPlate';
@@ -11,7 +11,8 @@ import { TallyPlate } from '@/ui/components/TallyPlate';
  */
 export const LivePlate = memo(function LivePlate() {
   const kind = useEngineSelector(selectStateKind);
-  const plate = tallyPlateFor(kind, false);
+  const backupOnly = useEngineSelector(selectBackupOnly);
+  const plate = tallyPlateFor(kind, false, backupOnly);
   const onAir = plate === 'connecting' || plate === 'live' || plate === 'trouble';
   return onAir ? <TallyPlate plate={plate} /> : null;
 });

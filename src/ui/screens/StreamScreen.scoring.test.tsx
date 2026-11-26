@@ -422,3 +422,32 @@ describe('where the panel sits', () => {
     expect(half.contains(byId('status-strip'))).toBe(true);
   });
 });
+
+describe('the backup link (owner, 2026-11-26)', () => {
+  const plate = () => byId('tally-plate').textContent;
+
+  it('keeps a shown panel on the fell-back scene, and hides it on a reconnect', async () => {
+    const view = await renderViewfinder();
+    act(() => view.engine.scene('live'));
+    await tap();
+    act(() => view.engine.scene('fell-back'));
+    expect(plate()).toBe(en['stream.tally.live']);
+    expect(screen.queryByTestId('scoring-panel')).not.toBeNull();
+    act(() => view.engine.scene('holding'));
+    expect(plate()).toBe(en['stream.tally.trouble']);
+    expect(screen.queryByTestId('scoring-panel')).toBeNull();
+  });
+
+  it('reads Trouble when the engine goes silent on the backup link', async () => {
+    const view = await renderViewfinder();
+    act(() => view.engine.scene('fell-back'));
+    expect(plate()).toBe(en['stream.tally.live']);
+    act(() => view.engine.suspend());
+    act(() => {
+      view.setNow(new Date(TEST_NOW.getTime() + 3_001));
+      vi.advanceTimersByTime(1_000);
+    });
+    expect(plate()).toBe(en['stream.tally.trouble']);
+    expect(within(byId('status-strip')).getByText(en['stream.status.engineSilent'])).toBeTruthy();
+  });
+});

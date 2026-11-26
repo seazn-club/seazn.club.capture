@@ -57,9 +57,14 @@ export type TallyTone = 'live' | 'healthy' | 'degraded' | 'inert';
  * Spec §4's state plate (D14). The LIVE gate: LIVE only while publishing —
  * connecting is native saying frames are not yet advancing (F-P5-6). Arming
  * and Armed read as connecting: the amendment names no plate of their own, and
- * their line says who started it or what it waits for (Task 28).
+ * their line says who started it or what it waits for (Task 28). `backupOnly` is a degraded session whose one reason
+ * is the fall to RTMPS (`selectBackupOnly`): the broadcast is publishing, so it reads LIVE.
  */
-export function tallyPlateFor(kind: SessionState['kind'], ready: boolean): TallyPlate {
+export function tallyPlateFor(
+  kind: SessionState['kind'],
+  ready: boolean,
+  backupOnly = false,
+): TallyPlate {
   switch (kind) {
     case 'idle':
     case 'pairing':
@@ -73,6 +78,8 @@ export function tallyPlateFor(kind: SessionState['kind'], ready: boolean): Tally
     case 'publishing':
       return 'live';
     case 'degraded':
+      // Only the backup link in use: frames advance cleanly, the line says which link (owner, 2026-11-26).
+      return backupOnly ? 'live' : 'trouble';
     case 'reconnecting':
       return 'trouble';
     case 'ended':

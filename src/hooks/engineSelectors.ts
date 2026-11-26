@@ -60,6 +60,13 @@ export const selectBroadcastHeld = (snapshot: EngineSnapshot): boolean =>
  * which defeats the memoisation this hook exists for.
  */
 export const selectStateKind = (snapshot: EngineSnapshot) => snapshot.state.kind;
+/**
+ * Degraded for the one reason of having fallen back to RTMPS (C1). The wire names a degraded session's FIRST reason in
+ * native's `DegradeReason` order, where `FELL_BACK_TO_RTMPS` is last (SnapshotWire.kt `state.reasons.first()`), so this
+ * reason on the wire is the only one standing.
+ */
+export const selectBackupOnly = (snapshot: EngineSnapshot) =>
+  snapshot.state.kind === 'degraded' && snapshot.state.reason === 'fell-back-to-rtmps';
 export const selectBitrateKbps = (snapshot: EngineSnapshot) => snapshot.telemetry.bitrateKbps;
 export const selectAudioLevel = (snapshot: EngineSnapshot) => snapshot.telemetry.audioLevel;
 export const selectShed = (snapshot: EngineSnapshot) => snapshot.telemetry.shed;

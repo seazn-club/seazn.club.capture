@@ -143,11 +143,21 @@ describe('LivePlate (beside Back on Settings)', () => {
     ['live', 'Live'],
     ['connecting', 'Connecting'],
     ['holding', 'Trouble'],
-    ['fell-back', 'Trouble'],
+    ['fell-back', 'Live'],
+    ['not-delivered', 'Trouble'],
   ] as const)('reads the viewfinder’s own plate on air: %s → %s', (scene, word) => {
     const view = renderWithPorts(<LivePlate />);
     act(() => view.engine.scene(scene));
     expect(screen.getByTestId('tally-plate').textContent).toBe(word);
+  });
+
+  it('paints the backup link LIVE red, the same plate as a clean SRT broadcast (owner, 2026-11-26)', () => {
+    const view = renderWithPorts(<LivePlate />);
+    act(() => view.engine.scene('live'));
+    const live = backgroundOf(screen.getByTestId('tally-plate'));
+    act(() => view.engine.scene('fell-back'));
+    expect(backgroundOf(screen.getByTestId('tally-plate'))).toBe(live);
+    expect(live).toBe(paintOf(TOKEN.live));
   });
 
   it('never paints connecting red: LIVE waits for frames (F-P5-6)', () => {

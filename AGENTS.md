@@ -365,6 +365,12 @@ Three rules travel with these tokens:
 - **Red means ON AIR**, following the broadcast tally convention the product's
   own `--mk-live` already encodes. Nothing red is left for failures: a crash
   reads orange, so it can never be mistaken for a live indicator.
+  A broadcast carried by the backup link (RTMPS) and publishing cleanly reads
+  LIVE, red, with the status line "Switched to backup link (RTMPS)" in its
+  caution tone: the plate is TROUBLE only for real trouble (a reconnect, or any
+  other degraded reason; owner, 2026-11-26). Native names a degraded session's
+  first reason in its own order, fell-back last, so that reason alone on the
+  wire is the only one standing.
   The one exception is a drawing, not a status: the red card icon on a scoring
   pad's half (`cardDismissal`, used by `ScoreHalf` and `TeamColumn` alone), in a mode with no
   broadcast to be on air.

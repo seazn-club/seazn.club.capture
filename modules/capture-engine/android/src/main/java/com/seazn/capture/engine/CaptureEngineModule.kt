@@ -42,6 +42,11 @@ class CaptureEngineModule : Module() {
     AsyncFunction("scoringLink") { promise: Promise ->
       core.scoringLink { answer -> promise.resolve(answer) }
     }
+    // N53, a tap on Send or Share record: the third call that answers (AGENTS §2, recorded). The record file's text, read
+    // on its own thread after every line written before the tap; the core and its machine never hear it.
+    AsyncFunction("readRecord") { promise: Promise ->
+      EngineHost.recordFile(app()).read { text -> promise.resolve(text) }
+    }
 
     // Task 39: the native preview, the module's default view (JS `requireNativeView('CaptureEngine')`); it fills the camera box.
     View(CapturePreviewView::class) {}

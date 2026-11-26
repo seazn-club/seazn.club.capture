@@ -188,7 +188,7 @@ page in the main repo, not here. Do not grow the app to accommodate them.
   `reset`, `setAutomatic`, `setLanguage` and `switchCamera` return void and
   are reconciled against native state. A promise that must resolve
   mid-reconnect is a deadlock waiting for a bad cell.
-  Two recorded exceptions. The first (design follow-up §8; owner, 2026-10-08):
+  Three recorded exceptions. The first (design follow-up §8; owner, 2026-10-08):
   `takePhoto` is a request with an answer, one call that resolves `saved` or
   `failed` within native's 2 s bound when the call honours cancellation; the
   app gives up at 4 s. It carries no session state, runs on a scope of its
@@ -207,7 +207,16 @@ page in the main repo, not here. Do not grow the app to accommodate them.
   secret is masked in both records before the caller has it. On a court code
   the answer may carry the match's label (the court's next called match, O10),
   shown on the panel and never written to the record; `no_match` is the
-  seventh word. These are the only two such calls.
+  seventh word. The third is `readRecord` (N53; owner, 2026-11-26): one call
+  that resolves native's record file, both rotations, oldest line first, as
+  one text, or null when the disk refuses, to Send record or Share record on
+  the operator's tap. It runs on the record file's own thread, which writes
+  every line, so it sees every line written before it and never half a line
+  or a rotation midway; it reads at most 10 MB, the newest, from a line's
+  start; the app gives up at 5 s, and a late answer is dropped. Every line in
+  it was scrubbed before it was written (`SessionRecord.append`). It carries
+  no session state, the core and its machine never hear it, and it is never
+  on the failure path. These are the only three such calls.
 - **Never build a second state machine in TypeScript.** The aggregate lives in
   native. The TS layer is a _projection_ of native events. Two authorities
   disagree at 3-1 in the 40th over. The rule is about the capture session.
@@ -641,7 +650,12 @@ Three rules travel with these tokens:
   record, outside the Diagnostics card so a phone sent Home by Replaced can
   still hand its record over (N33), and Send record to Seazn when
   `FEATURES.recordSend` is on, as it is (the owner's "On now (Recommended)",
-  2026-10-12, §1). From Arming on, Send record is disabled with "Send it after
+  2026-10-12, §1). Both read native's record file (`readRecord`, §2) merged
+  with the JS ring, so a record outlives an app restart (N53): Send posts the
+  lines the web files under the code (capture-record.v1's A1 and A2), at most
+  1,000 lines and 1 MB, `pair` and `broadcast-start` lines first and
+  `vendor-log` last when over; Share sends every line, up to the share sheet's
+  250,000 characters. With no file (iOS) both use the ring. From Arming on, Send record is disabled with "Send it after
   the broadcast", so an upload of up to 1 MB never starts on the broadcast's
   uplink; one started just before Arming may finish on air, within the
   upload's 15 s bound. Share record stays enabled (the controller's ruling,
@@ -706,6 +720,12 @@ Three rules travel with these tokens:
   specifically. This is the rare app where that is load-bearing.
 - Animations on Reanimated worklets — UI thread, never JS.
 - Encode ceiling: 720p30 / 3000k.
+- The bitrate regulator is native's (`BitrateRegulator`): it starts at 1.5M,
+  never goes under the 500k floor, and a quiet picture holds its rate
+  (F-P5-7's raise gate). After a cut it caps raises at 80% of the rate that
+  failed for 5 minutes, or for 60 s, doubling to 300 s on repeats, when that
+  cap is under 1M; a new network, or validation after a link made unvalidated,
+  restarts it from 1.5M with no cap (N53).
 
 **Degradation ladder — in this order, never reordered (D2 §4.2):**
 

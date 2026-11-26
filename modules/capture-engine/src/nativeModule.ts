@@ -17,7 +17,7 @@ export type RecordTail = { pins: readonly string[]; lines: readonly RecordLine[]
 
 /**
  * The Expo module's surface, as the glue defines it (Task 33). Every call
- * returns void or a value read at once, except `takePhoto` and `scoringLink`, the two calls that answer: intents,
+ * returns void or a value read at once, except `takePhoto`, `scoringLink` and `readRecord`, the three calls that answer: intents,
  * not RPC (AGENTS §2).
  */
 export type CaptureEngineNative = {
@@ -45,6 +45,14 @@ export type CaptureEngineNative = {
    * credential: never log it. Required, not optional: an absent member would be a button that quietly never works.
    */
   scoringLink(): Promise<unknown>;
+  /**
+   * N53: native's record file, both rotations, oldest line first, as one text, or null when the disk refused it. The
+   * third call that answers (AGENTS §2, recorded): read on the record's own thread, which every line is written on, so
+   * no read sees half a line or a rotation midway; no session state, never on the machine's failure path. The port
+   * (`recordFilePort.ts`) gives up at 5 s and reads anything but text as no file. Every line was scrubbed before it was
+   * written (`SessionRecord.append`). Required, not optional, as `takePhoto` is: a stale build throws inside the port.
+   */
+  readRecord(): Promise<unknown>;
   /**
    * R5, and M5 of the Batch 5 review: the app's battery mode, read at once: `unrestricted`, `optimized` or
    * `restricted` (`PowerMode.kt`), or null when native cannot read it. Unknown to iOS. The port reads any other answer,

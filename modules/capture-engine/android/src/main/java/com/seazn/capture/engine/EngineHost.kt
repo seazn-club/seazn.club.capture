@@ -10,6 +10,7 @@ import com.seazn.capture.engine.adapter.CameraAvailability
 import com.seazn.capture.engine.adapter.FrameTally
 import com.seazn.capture.engine.adapter.MicSilenceWatch
 import com.seazn.capture.engine.adapter.OwnedSlot
+import com.seazn.capture.engine.adapter.RecordFile
 import com.seazn.capture.engine.capture.Capture
 import com.seazn.capture.engine.capture.StreamerAdapter
 import com.seazn.capture.engine.capture.run.CoreCalls
@@ -40,7 +41,7 @@ object EngineHost {
   val listener = OwnedSlot<(String, Map<String, Any?>) -> Unit>()
   val appContext = OwnedSlot<AppContext>()
 
-  private class Parts(val core: BridgeCore, val capture: Capture, val keeper: PairingKeeper)
+  private class Parts(val core: BridgeCore, val capture: Capture, val keeper: PairingKeeper, val record: RecordFile)
 
   @Volatile private var parts: Parts? = null
 
@@ -50,6 +51,9 @@ object EngineHost {
   fun core(context: Context): BridgeCore = parts(context).core
 
   fun capture(context: Context): Capture = parts(context).capture
+
+  /** N53: the record file, for the module's `readRecord`; never the core's (AGENTS §2's third call that answers). */
+  fun recordFile(context: Context): RecordFile = parts(context).record
 
   /** The pairing's keeper, for the foreground service (Task 38). */
   fun keeper(context: Context): PairingKeeper = parts(context).keeper
@@ -99,7 +103,8 @@ object EngineHost {
     val http = HttpSeam.override?.invoke(app) ?: HttpAdapter()
     // Design 2026-11-24 §2.3: the nudge socket runs on the engine's thread, the one the core's commands reach it on.
     val nudges = NudgeLink(OkHttpNudgeSockets(), scheduler, AndroidClock::wallMs, report, toCore)
-    val platform = AndroidPlatform(capture, http, RecordFile(File(app.filesDir, "record")), pose, device, keeper, ::emit, power = { PowerState.mode(app) }, nudges = nudges)
+    val record = RecordFile(File(app.filesDir, "record"))
+    val platform = AndroidPlatform(capture, http, record, pose, device, keeper, ::emit, power = { PowerState.mode(app) }, nudges = nudges)
     core = BridgeCore.shared { core(app, scheduler, platform) }
     core.start()
     // Review C7 M-9: the core runs from here, so a throw must not end this build half done; core.log, as
@@ -110,7 +115,7 @@ object EngineHost {
       core.log("warn", "watch-failed", mapOf("action" to "exit-read", "error" to e.javaClass.simpleName))
     }
     startWatchers(app, cameras, capture, device, report, toCore)
-    return Parts(core, capture, keeper)
+    return Parts(core, capture, keeper, record)
   }
 
   /** CD32, I2: the AppContext is read at request time, so a JS reload's new module is the one asked. */

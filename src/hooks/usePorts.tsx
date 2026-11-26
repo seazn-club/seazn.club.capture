@@ -33,6 +33,7 @@ import type { RealtimePort } from '@/services/realtimePort';
 import type { RecordUploadPort } from '@/services/recordUploadPort';
 import type { RecordSendFlight } from '@/services/recordSendFlight';
 import type { ScanFlight } from '@/services/scanFlight';
+import type { RecordFilePort } from '@/services/recordFilePort';
 import type { ScoringLinkPort } from '@/services/scoringLinkPort';
 import type { ScoringPort } from '@/services/scoringPort';
 import type { ServerClock } from '@/services/serverClock';
@@ -87,6 +88,11 @@ export type Ports = {
   readonly logger: Logger;
   /** The session record Diagnostics shows and shares (spec §4). */
   readonly record: SessionRecord;
+  /**
+   * N53: native's record file, read whole for Send record and Share record (the third call that answers, AGENTS §2).
+   * None on iOS and the web: they send and share the JS ring, as before.
+   */
+  readonly recordFile: RecordFilePort;
   /** The system share sheet, for Diagnostics' Share record (D21). */
   readonly share: SharePort;
   /** Spec §8: a still to the gallery (one of the two calls that answer, Q2). */

@@ -199,10 +199,21 @@ class GlueRulesTest {
     val pattern = Regex("""AsyncFunction\("scoringLink"\)\s*\{\s*promise: Promise ->\s*core\.scoringLink \{ answer -> promise\.resolve\(answer\) \}\s*\}""")
     assertEquals(1, pattern.findAll(module).count(), "one AsyncFunction, resolved with the core's answer, point to point")
     assertEquals(1, Regex("""AsyncFunction\("takePhoto"\)""").findAll(module).count(), "PR B's call is still the other one")
-    assertEquals(2, Regex("""\bAsyncFunction\(""").findAll(module).count(), "two calls answer, no more (AGENTS §2)")
+    assertEquals(3, Regex("""\bAsyncFunction\(""").findAll(module).count(), "three calls answer, no more (AGENTS §2, N53)")
     assertTrue(Regex("""Events\("onSnapshot", "onRecord", "onAck"\)""").containsMatchIn(module), "the three events, and the scoring link is none of them")
     assertFalse("onScoringLink" in module, "no event")
     assertFalse(Regex("""fun scoringLink""").containsMatchIn(glue("AndroidPlatform.kt")), "the platform does not carry the answer")
+  }
+
+  @Test
+  fun `the record read is the module's third answering call, on the record file and never the core (N53)`() {
+    val module = glue("CaptureEngineModule.kt")
+    val pattern = Regex("""AsyncFunction\("readRecord"\)\s*\{\s*promise: Promise ->\s*EngineHost\.recordFile\(app\(\)\)\.read \{ (\w+) -> promise\.resolve\(\1\) \}\s*\}""")
+    assertEquals(1, pattern.findAll(module).count(), "one AsyncFunction, resolved with the file's text, point to point")
+    assertFalse("onRecordFile" in module, "no event carries it")
+    val host = glue("EngineHost.kt")
+    assertEquals(1, Regex("""RecordFile\(File\(app\.filesDir, "record"\)\)""").findAll(host).count(), "one record file, the one the platform writes")
+    assertTrue(Regex("""AndroidPlatform\(capture, http, record,""").containsMatchIn(host), "the platform writes the file the module reads")
   }
 
   /** EngineHost's `build`, from its signature to the next function's. */

@@ -4,6 +4,7 @@ import addFormats from 'ajv-formats';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { UploadCredential } from '@/domain/credentials/uploadCredential';
 import { createLogger } from '@/services/logger';
+import { NO_RECORD_FILE } from '@/services/recordFilePort';
 import { createRecordSendFlight } from '@/services/recordSendFlight';
 import { createRecordUploadPort, type PostFetch } from '@/services/recordUploadPort';
 import { createRingRecord, createRoutedRecord, type RingRecord } from '@/services/sessionRecord';
@@ -512,7 +513,12 @@ describe('N38: the body posted is the contract’s, and files under its pairing'
       host: 'stg.seazn.club',
     });
     const credentials = createFakeUploadCredential(CREDENTIAL);
-    const flight = createRecordSendFlight({ credentials, upload, record: ring });
+    const flight = createRecordSendFlight({
+      credentials,
+      upload,
+      record: ring,
+      recordFile: NO_RECORD_FILE,
+    });
     flight.send();
     await vi.advanceTimersByTimeAsync(10);
     expect(flight.getSnapshot().state).toEqual({ kind: 'sent', ref: 'R-7K2Q' });

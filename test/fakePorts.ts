@@ -34,6 +34,7 @@ import { createMatchDayStore } from '@/services/matchDayStore';
 import { createModeStore } from '@/services/modeStore';
 import { createProbeFlight } from '@/services/probeFlight';
 import { createRecordSendFlight } from '@/services/recordSendFlight';
+import type { RecordFilePort } from '@/services/recordFilePort';
 import type { RecordSendOutcome, RecordUploadPort } from '@/services/recordUploadPort';
 import { createScanFlight } from '@/services/scanFlight';
 import type { ServerClock } from '@/services/serverClock';
@@ -86,6 +87,8 @@ export type FakePorts = {
   readonly surfaces: FakeSurfaces;
   /** The session record the ports' logger writes to; read it with `readRecord`. */
   readonly record: SessionRecord;
+  /** N53: native's record file; none until a test gives one (`give`), as on iOS. */
+  readonly recordFile: FakeRecordFile;
   /** What Share record sent, in order; `refuse()` makes every later share fail to open (M18). */
   readonly share: SharePort & { readonly shared: string[]; refuse(): void };
   /** `hold()`/`release()` pend a take; `calls` counts. */
@@ -176,6 +179,7 @@ export function createFakePorts(overrides: FakePortsOverrides = {}): FakePorts {
     splash: fakeSplash(),
     surfaces: createFakeSurfaces(),
     record,
+    recordFile: createFakeRecordFile(),
     share: fakeShare(),
     photo: createFakePhotoPort(),
     link: createFakeLinkPort(),
@@ -226,6 +230,7 @@ export function createFakePorts(overrides: FakePortsOverrides = {}): FakePorts {
       credentials: wired.uploadCredential,
       upload: wired.recordUpload,
       record: wired.record,
+      recordFile: wired.recordFile,
     }),
     ...wired,
   };
@@ -511,6 +516,45 @@ export function createFakeRecordUpload(): FakeRecordUpload {
       return sent.length;
     },
     sent,
+  };
+}
+
+export type FakeRecordFile = RecordFilePort & {
+  /** What every later `read` answers: the file's lines, or null for none. */
+  give(lines: readonly string[] | null): void;
+  /** `hold()` pends every later read until `release()`. */
+  hold(): void;
+  release(): void;
+  readonly reads: number;
+};
+
+/** N53: native's record file, settable. Starts with none, so every other test sends and shares the ring as before. */
+export function createFakeRecordFile(): FakeRecordFile {
+  let lines: readonly string[] | null = null;
+  let reads = 0;
+  let gate: Promise<void> | null = null;
+  let open = () => undefined as void;
+  return {
+    read: async () => {
+      reads += 1;
+      if (gate !== null) await gate;
+      return lines;
+    },
+    give: (next) => {
+      lines = next;
+    },
+    hold: () => {
+      gate = new Promise<void>((resolve) => {
+        open = resolve;
+      });
+    },
+    release: () => {
+      gate = null;
+      open();
+    },
+    get reads() {
+      return reads;
+    },
   };
 }
 

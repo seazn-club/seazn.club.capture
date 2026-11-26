@@ -38,6 +38,7 @@ import { createNativeSplash } from '@/services/native/nativeSplash';
 import { createNativeSurfaces } from '@/services/native/nativeSurfaces';
 import { createSecureKeyValueStore } from '@/services/native/secureKeyValueStore';
 import { seaznEnvironment, seaznHosts, seaznOrigin } from '@/services/seaznHosts';
+import { recordFilePortFor } from '@/hooks/recordFilePortWiring';
 import { createRecordSendFlight } from '@/services/recordSendFlight';
 import { createRecordUploadPort } from '@/services/recordUploadPort';
 import { createRingRecord } from '@/services/sessionRecord';
@@ -94,6 +95,8 @@ export function createNativePorts(
     logger,
     host: hosts[0] ?? '',
   });
+  // N53: native's record file, which Send record and Share record read on the operator's tap.
+  const recordFile = recordFilePortFor(native);
   const code = chooseCodePort({
     dev: __DEV__,
     fakeFlag: process.env.EXPO_PUBLIC_FAKE_CODE,
@@ -139,6 +142,7 @@ export function createNativePorts(
     surfaces: createNativeSurfaces({ logger }),
     logger,
     record,
+    recordFile,
     share: createNativeShare(),
     // A development build with the fake engine and a native module still calls the real `takePhoto`, which
     // fails with no camera open: the line says so, truthfully. There is no second gate to keep.
@@ -181,6 +185,7 @@ export function createNativePorts(
       credentials: uploadCredential,
       upload: recordUpload,
       record,
+      recordFile,
     }),
     clock,
     hosts,

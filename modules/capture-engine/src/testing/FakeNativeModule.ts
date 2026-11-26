@@ -53,6 +53,13 @@ export class FakeNativeModule implements CaptureEngineNative {
     this.scoringCalls += 1;
     return Promise.resolve(this.scoringAnswer);
   }
+  /** What `readRecord` answers (N53), and how often it was asked: an empty file by default. */
+  recordAnswer: unknown = '';
+  recordReads = 0;
+  readRecord(): Promise<unknown> {
+    this.recordReads += 1;
+    return Promise.resolve(this.recordAnswer);
+  }
   /** What `powerMode` answers (R5): Unrestricted by default. Tests set it. */
   powerAnswer: unknown = 'unrestricted';
   powerMode(): unknown {

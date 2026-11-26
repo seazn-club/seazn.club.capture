@@ -5,7 +5,11 @@ import { LANGS } from '@/i18n/language';
 import type { FakeScene } from '@/engine/FakeCaptureEngine';
 import { createTranslator } from '@/i18n/translate';
 import { RecordRow } from '@/ui/components/RecordRow';
-import { createFakeRecordUpload, createFakeUploadCredential } from '../../../test/fakePorts';
+import {
+  createFakeRecordFile,
+  createFakeRecordUpload,
+  createFakeUploadCredential,
+} from '../../../test/fakePorts';
 import { renderWithPorts } from '../../../test/renderWithPorts';
 
 beforeEach(() => vi.useFakeTimers());
@@ -49,6 +53,35 @@ describe('the record row (N33, R3)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Share record' }));
     await settle();
     expect(view.share.shared).toHaveLength(1);
+  });
+
+  // N53: Share reads native's record file, every code's lines, merged with the ring's lines native never had.
+  it('shares the record file with the ring’s own lines in time, and the ring alone with no file', async () => {
+    const recordFile = createFakeRecordFile();
+    const file = [
+      '{"at":"2026-11-26T19:00:00.000Z","kind":"pair","tokenTag":"0badc0de"}',
+      '{"at":"2026-11-26T20:00:00.000Z","kind":"pair","tokenTag":"feedf00d"}',
+    ];
+    recordFile.give(file);
+    const view = renderWithPorts(<RecordRow send={false} />, { recordFile });
+    view.ports.record.append({
+      atMs: Date.UTC(2026, 10, 26, 19, 30),
+      level: 'info',
+      event: 'app.start',
+      fields: {},
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Share record' }));
+    await settle();
+    expect(recordFile.reads).toBe(1);
+    expect(view.share.shared[0]?.split('\n')).toEqual([
+      file[0],
+      '{"at":"2026-11-26T19:30:00.000Z","kind":"app.start"}',
+      file[1],
+    ]);
+    recordFile.give(null);
+    fireEvent.click(screen.getByRole('button', { name: 'Share record' }));
+    await settle();
+    expect(view.share.shared[1]).toBe(view.ports.record.lines().slice(0, -1).join('\n'));
   });
 
   it('with the switch on and no code: Send is disabled, with one line why (an empty input)', async () => {

@@ -1235,3 +1235,31 @@ within a flap bound of 3 in any 30 s (a sliding window) spaced 1 s, with no step
 skipped it. The hold is not skipped: it is the platform's clock. Validation on the network the attempt was asked on
 confirms it with no reconnect; on another network, or with none known, it is replaced at once. The record says it with
 listed keys only: `connected {validated: false}`, `dropped {retryMs}`, `network-switched {reason: provisional}`.
+
+### N53 — The picture held the floor for 5 minutes after a cut, and Send record had lost the lines that would say why
+
+**Status:** fixed on `feat/regulator-reset-and-record-file` (owner ruling, 2026-11-26: "yes both"); spec
+`docs/specs/2026-11-26-regulator-reset-and-record-file.md`. Device check open.
+**Where:** capture app · `BitrateRegulator` (`raiseCap`, `newNetwork`) · `SessionMachine` (`network`, `switchedOver`) ·
+`RecordFile.read` · `recordSelection.ts`
+
+**Seen:** session 66753ccd (staging, 2026-11-26, about 40 minutes on air over SRT). Twice the bitrate sat at the 500k
+floor for 4.5 to 5 minutes with no raise and no `bitrate-held` line: from 20:03:14.8 to 20:08:15.1, and from 20:17:07 to
+20:22:07.3. Send record posted the JS ring's last 1,000 lines, mostly `vendor-log`, so the 20:03 lines were not in it;
+the shared record (10,662 lines) was.
+
+**So:** F-P5-7's failed-rate cap (80% of the rate that failed, for 5 minutes) held both. In the first it capped raises at
+563,040; in the second it was 486,400, under the floor, so no raise could happen. Rule 1: a new network, or validation
+after a link remade unvalidated (N52), restarts the regulator from 1.5M with no cap. Rule 2: a cap under 1M is held
+60 s, doubling to 300 s on repeats. Send and Share read native's record file (`readRecord`, AGENTS §2's third call that
+answers): Send the code's lines (the contract's A1 and A2) within 1,000 lines and 1 MB, Share every line up to 250,000
+characters.
+
+**Cross-check (the same run, from the relay and Cloudflare):**
+
+- The floor holds: 10.8 minutes of the run at or under 0.7M, as designed.
+- The 20:17 outage: the phone was off for 5.1 s. Cloudflare held the dead SRT connection until it errored at 20:17:11
+  and disconnected it at 20:17:25; the relay rebuilt 5 times and was live at 20:17:33. The recording has no gap.
+- The 20:03 relay freeze was 1 s. The phone showed 9 s because it learns of it from the beat, at the beat's interval.
+- The relay's CPU was at 80 to 96% all run, with `overlay_half_rate` on from 19:55:41 and 357 frames dropped. That is
+  independent of the phone: relay-side, seaznstream's.

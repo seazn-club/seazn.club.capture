@@ -10,6 +10,7 @@ import vectors from '@/engine/wire/snapshot-vectors.json';
 import { vectorWire } from '@/engine/wire/vectorWire';
 import {
   METER_SEGMENTS,
+  selectBackupOnly,
   selectBitrateKbps,
   selectEngineStatus,
   selectHeldCode,
@@ -516,4 +517,33 @@ describe('selectCodeEndedPending', () => {
       expect(selectCodeEndedPending({ ...snapshot(state), codeEndedPending: false })).toBe(false);
     },
   );
+});
+
+describe('selectBackupOnly: degraded for the fall to RTMPS alone (owner, 2026-11-26)', () => {
+  it.each<[string, SessionState, boolean]>([
+    [
+      'degraded, fell back',
+      { kind: 'degraded', transport: 'rtmps', reason: 'fell-back-to-rtmps', sinceEpochMs: 1 },
+      true,
+    ],
+    [
+      'degraded, poor uplink',
+      { kind: 'degraded', transport: 'rtmps', reason: 'poor-uplink', sinceEpochMs: 1 },
+      false,
+    ],
+    ['publishing', { kind: 'publishing', transport: 'rtmps', sinceEpochMs: 1 }, false],
+    [
+      'reconnecting',
+      {
+        kind: 'reconnecting',
+        cause: 'uplink-lost',
+        holdRemainingSeconds: 30,
+        holdWindowSeconds: 60,
+        sinceEpochMs: 1,
+      },
+      false,
+    ],
+  ])('%s: %s', (_name, state, expected) => {
+    expect(selectBackupOnly(snapshot(state))).toBe(expected);
+  });
 });

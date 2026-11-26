@@ -110,7 +110,7 @@
     "startFailed": "native: StartFailure wire",
     "state": "both: a state word; native: a stabilisation line's stabiliser state (on or unavailable), a speech-processing line's (on, off or unavailable), a bitrate-mode line's mode (vbr, cbr or unsupported) or an antibanding line's mode (auto, 50hz, 60hz, off, unavailable or unread), or a zoom line's ratio, a number to a tenth; an encoder-format line's stream format, profile-level-entropy (high-4.1-cabac), or an encoder-dump line's end (written, full, overflow, cut or failed)",
     "status": "both: an HTTP status (JS code.error; native code, final-beat, stopped-delivered), a thermal status (native thermal), a check word, or the nudge socket's WebSocket close code (native nudges)",
-    "tag": "plan C: a vendor log's tag, a class name (CD30); native: armed, the last six characters of the playback stream id, in place of the URL (owner, 2026-11-26)",
+    "tag": "plan C: a vendor log's tag, a class name (CD30), or StreamPack's audio encoder as AudioEncoder:<hashCode>, its AudioEncoder(<hashCode>) rewritten as a plain word (R-SAV6); native: armed, the last six characters of the playback stream id, in place of the URL (owner, 2026-11-26)",
     "to": "native: a transport (fell-back), a bitrate in bits per second (bitrate), or a state or phase name",
     "tokenTag": "both: which issue of a code, eight hex digits; never the token (carry 2)",
     "transport": "both: srt or rtmps",

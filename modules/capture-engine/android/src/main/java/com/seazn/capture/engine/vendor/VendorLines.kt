@@ -26,9 +26,18 @@ class VendorLines(
   fun w(tag: String, message: String, tr: Throwable?) = forward("warn", tag, message, tr)
 
   private fun forward(level: String, tag: String, message: String, tr: Throwable?) {
-    line(level, mapOf("tag" to tag, "message" to message, "error" to tr?.javaClass?.name))
+    line(level, mapOf("tag" to plainTag(tag), "message" to message, "error" to tr?.javaClass?.name))
     if (tag == CAMERA_UTILS) camera(message)
   }
+
+  /**
+   * R-SAV6 (stg, 2026-11-26): StreamPack's audio encoder tags its lines `AudioEncoder(<hashCode>)` (javap of 3.2.1,
+   * `MediaCodecEncoder.<init>`: "VideoEncoder" for video, the hash for audio), which is no plain word, so the record's
+   * scrub masked it whole. It is written `AudioEncoder:<hashCode>`. Only a word and an integer in parentheses are
+   * rewritten, StreamPack's own construction with nothing of ours in it; any other tag goes as it came, and the scrub,
+   * unchanged, still judges what is written.
+   */
+  private fun plainTag(tag: String): String = INSTANCE_TAG.matchEntire(tag)?.let { "${it.groupValues[1]}:${it.groupValues[2]}" } ?: tag
 
   private fun camera(message: String) {
     DISCONNECTED.matchEntire(message)?.let { return cameraLost(it.groupValues[1]) }
@@ -46,6 +55,9 @@ class VendorLines(
     const val CAMERA_UTILS = "CameraUtils"
     val DISCONNECTED = Regex("Camera (\\S+) has been disconnected")
     val IN_ERROR = Regex("Camera (\\S+) is in error (\\d+)")
+
+    /** `AudioEncoder(<hashCode>)`: a word, then an integer in parentheses. ASCII spelled out, as the scrub's plain word is. */
+    val INSTANCE_TAG = Regex("([A-Za-z][A-Za-z0-9_]*)\\((-?[0-9]{1,10})\\)")
 
     /** `CameraDevice.StateCallback`'s ERROR_CAMERA_IN_USE and ERROR_MAX_CAMERAS_IN_USE (javap, android-36's android.jar). */
     val BUSY_ERRORS = setOf(1, 2)
